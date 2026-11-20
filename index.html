@@ -2,186 +2,635 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-      <title>Deterministik Yarış & Öğrenme Motoru v5.1</title>
-        <style>
-            :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #f8fafc; --muted: #94a3b8; --accent: #3b82f6; --green: #10b981; --amber: #f59e0b; }
-                * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-                    body { margin: 0; background: var(--bg); color: var(--text); padding: 12px; padding-bottom: 60px; }
-                        .header { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--card); border-radius: 12px; border: 1px solid var(--border); margin-bottom: 12px; }
-                            .header h1 { font-size: 15px; margin: 0; color: #60a5fa; }
-                                .badge { font-size: 11px; padding: 4px 8px; border-radius: 99px; background: #1d4ed8; font-weight: bold; }
-                                    .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
-                                        .tab { background: var(--card); border: 1px solid var(--border); color: var(--muted); padding: 10px 4px; border-radius: 8px; font-size: 12px; font-weight: 600; text-align: center; cursor: pointer; }
-                                            .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-                                                .panel { display: none; }
-                                                    .panel.active { display: block; }
-                                                        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
-                                                            .card h2 { font-size: 14px; margin: 0 0 8px 0; color: #e2e8f0; }
-                                                                textarea, input { width: 100%; background: #0f172a; border: 1px solid var(--border); color: #fff; border-radius: 8px; padding: 10px; font-size: 13px; margin-bottom: 8px; }
-                                                                    textarea { min-height: 120px; resize: vertical; }
-                                                                        .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-                                                                            .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; color: #fff; background: var(--accent); margin-bottom: 6px; }
-                                                                                .btn-green { background: var(--green); }
-                                                                                    .btn-amber { background: var(--amber); color: #000; }
-                                                                                        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 12px; padding: 8px; }
-                                                                                            table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
-                                                                                                th, td { padding: 8px 6px; text-align: left; border-bottom: 1px solid var(--border); }
-                                                                                                    th { color: var(--muted); font-weight: 600; }
-                                                                                                        .tag { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-right: 4px; font-weight: 600; }
-                                                                                                            .tag-agf { background: rgba(59,130,246,0.2); color: #93c5fd; border: 1px solid #3b82f6; }
-                                                                                                                .tag-surpriz { background: rgba(245,158,11,0.2); color: #fcd34d; border: 1px solid #f59e0b; }
-                                                                                                                    .tag-tek { background: rgba(16,185,129,0.2); color: #6ee7b7; border: 1px solid #10b981; }
-                                                                                                                        .alert { padding: 10px; border-radius: 8px; font-size: 12px; margin-bottom: 8px; background: rgba(245,158,11,0.15); border: 1px solid var(--amber); color: #fde68a; }
-                                                                                                                            .log { font-size: 12px; color: #cbd5e1; background: #0f172a; padding: 8px; border-radius: 6px; margin-bottom: 4px; border-left: 3px solid var(--green); }
-                                                                                                                              </style>
-                                                                                                                              </head>
-                                                                                                                              <body>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Deterministik Yarış & Öğrenme Motoru v5.4</title>
+  <style>
+    :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #f8fafc; --muted: #94a3b8; --accent: #3b82f6; --green: #10b981; --amber: #f59e0b; --red: #ef4444; }
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); padding: 12px; padding-bottom: 60px; }
+    .header { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--card); border-radius: 12px; border: 1px solid var(--border); margin-bottom: 12px; }
+    .header h1 { font-size: 15px; margin: 0; color: #60a5fa; }
+    .badge { font-size: 11px; padding: 4px 8px; border-radius: 99px; background: #1d4ed8; font-weight: bold; }
+    .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+    .tab { background: var(--card); border: 1px solid var(--border); color: var(--muted); padding: 10px 4px; border-radius: 8px; font-size: 12px; font-weight: 600; text-align: center; cursor: pointer; }
+    .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+    .card h2 { font-size: 14px; margin: 0 0 8px 0; color: #e2e8f0; }
+    textarea, input { width: 100%; background: #0f172a; border: 1px solid var(--border); color: #fff; border-radius: 8px; padding: 10px; font-size: 13px; margin-bottom: 8px; }
+    textarea { min-height: 130px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; color: #fff; background: var(--accent); margin-bottom: 6px; }
+    .btn-green { background: var(--green); }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 12px; padding: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+    th, td { padding: 8px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+    .tag { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-right: 4px; font-weight: 600; }
+    .tag-agf { background: rgba(59,130,246,0.2); color: #93c5fd; border: 1px solid #3b82f6; }
+    .tag-surpriz { background: rgba(245,158,11,0.2); color: #fcd34d; border: 1px solid #f59e0b; }
+    .tag-tek { background: rgba(16,185,129,0.2); color: #6ee7b7; border: 1px solid #10b981; }
+    .alert { padding: 10px; border-radius: 8px; font-size: 12px; margin-bottom: 8px; background: rgba(245,158,11,0.15); border: 1px solid var(--amber); color: #fde68a; }
+    .alert-err { background: rgba(239,68,68,0.15); border-color: var(--red); color: #fca5a5; }
+    .alert-ok { background: rgba(16,185,129,0.15); border-color: var(--green); color: #6ee7b7; }
+    .log { font-size: 12px; color: #cbd5e1; background: #0f172a; padding: 8px; border-radius: 6px; margin-bottom: 4px; border-left: 3px solid var(--green); }
+    .kupon-box { background: #0f172a; border: 1px solid var(--accent); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+    .ayak-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed #334155; font-size: 12px; gap: 6px; }
+    .zorluk-pill { font-size: 10px; padding: 2px 5px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; white-space: nowrap; }
+  </style>
+</head>
+<body>
 
-                                                                                                                                <div class="header">
-                                                                                                                                    <div>
-                                                                                                                                          <h1>⚙️ DETERMINİSTİK MOTOR v5.1</h1>
-                                                                                                                                                <div id="syncStatus" style="font-size:11px; color:#94a3b8;">Yerel Hafıza Aktif</div>
-                                                                                                                                                    </div>
-                                                                                                                                                        <span id="modelBadge" class="badge">Model v1</span>
-                                                                                                                                                          </div>
+  <div class="header">
+    <div>
+      <h1>⚙️ DETERMINİSTİK MOTOR v5.4</h1>
+      <div id="syncStatus" style="font-size:11px; color:#94a3b8;">Baş Orkestratör & Doğrulama Aktif</div>
+    </div>
+    <span id="modelBadge" class="badge">Model v1</span>
+  </div>
 
-                                                                                                                                                            <div class="tabs">
-                                                                                                                                                                <div class="tab active" onclick="sekmeAc('bulten', this)">1. Bülten</div>
-                                                                                                                                                                    <div class="tab" onclick="sekmeAc('analiz', this)">2. Analiz & Altılı</div>
-                                                                                                                                                                        <div class="tab" onclick="sekmeAc('ogrenme', this)">3. Öğrenme</div>
-                                                                                                                                                                            <div class="tab" onclick="sekmeAc('hafiza', this)">4. Hafıza & Bulut</div>
-                                                                                                                                                                              </div>
+  <div class="tabs">
+    <div class="tab active" onclick="sekmeAc('bulten', this)">1. Bülten</div>
+    <div class="tab" onclick="sekmeAc('analiz', this)">2. Analiz & Altılı</div>
+    <div class="tab" onclick="sekmeAc('ogrenme', this)">3. Öğrenme</div>
+    <div class="tab" onclick="sekmeAc('hafiza', this)">4. Hafıza & DNA</div>
+  </div>
 
-                                                                                                                                                                                <!-- 1. BÜLTEN -->
-                                                                                                                                                                                  <div id="panel-bulten" class="panel active">
-                                                                                                                                                                                      <div class="card">
-                                                                                                                                                                                            <h2>📋 Ham Bülten Yapıştır (1. ve 2. Altılı Otomatik Ayrılır)</h2>
-                                                                                                                                                                                                  <textarea id="hamBultenInput" placeholder="Bülteni buraya yapıştırın..."></textarea>
-                                                                                                                                                                                                        <div class="row">
-                                                                                                                                                                                                                <input type="number" id="butceInput" placeholder="Altılı Başına Bütçe (TL)" />
-                                                                                                                                                                                                                        <input type="number" id="birimInput" placeholder="Birim Fiyat (Örn: 1.25)" step="0.01" />
-                                                                                                                                                                                                                              </div>
-                                                                                                                                                                                                                                    <button class="btn" onclick="bulteniAnalizEt()">🚀 Deterministik Analizi Başlat</button>
-                                                                                                                                                                                                                                          <button class="btn btn-outline" onclick="ornekBultenDoldur()">7 Koşuluk Örnek Bülten Yükle (1. & 2. Altılı)</button>
-                                                                                                                                                                                                                                                                                                </div>
-                                                                                                                                                                                                                                                        <div id="bultenUyariAlani"></div>
-                                                                                                                                                                                                                                                          </div>
+  <!-- 1. BÜLTEN -->
+  <div id="panel-bulten" class="panel active">
+    <div class="card">
+      <h2>📋 TJK Ham Bülten Yapıştır (1. & 2. Altılı Otomatik Ayıklanır)</h2>
+      <textarea id="hamBultenInput" placeholder="TJK bülten sayfasından 'Tümünü Seç > Kopyala' yapıp buraya yapıştırın..."></textarea>
+      <div class="row">
+        <input type="number" id="butceInput" value="80" placeholder="Altılı Başına Bütçe (TL)" />
+        <input type="number" id="birimInput" value="1.25" placeholder="Birim Fiyat (Örn: 1.25)" step="0.01" />
+      </div>
+      <button class="btn" onclick="BasOrkestrator.bultenCalistir()">🚀 Baş Orkestratörü Çalıştır (Analiz & Doğrula)</button>
+      <button class="btn btn-outline" onclick="temizleBulten()">🗑️ Kutuyu Temizle</button>
+    </div>
+    <div id="bultenUyariAlani"></div>
+  </div>
 
-                                                                                                                                                                                                                                                            <!-- 2. ANALİZ & ALTILI KUPONLARI -->
-                                                                                                                                                                                                                                                              <div id="panel-analiz" class="panel">
-                                                                                                                                                                                                                                                                  <div id="kuponAlani"></div>
-                                                                                                                                                                                                                                                                      <div id="kosuSonucAlani"></div>
-                                                                                                                                                                                                                                                                        </div>
+  <!-- 2. ANALİZ & ALTILI KUPONLARI -->
+  <div id="panel-analiz" class="panel">
+    <div id="dogrulamaRaporuAlani"></div>
+    <div id="kuponAlani"></div>
+    <div id="kosuSonucAlani"></div>
+  </div>
 
-                                                                                                                                                                                                                                                                          <!-- 3. ÖĞRENME -->
-                                                                                                                                                                                                                                                                            <div id="panel-ogrenme" class="panel">
-                                                                                                                                                                                                                                                                                <div class="card">
-                                                                                                                                                                                                                                                                                      <h2>🧠 Sonuçlu Bülten Yapıştır (Kendi Kendine Öğrenme)</h2>
-                                                                                                                                                                                                                                                                                            <textarea id="sonucluBultenInput" placeholder="Sonuçlu bülteni yapıştırın...
-                                                                                                                                                                                                                                                                                            Örnek:
-                                                                                                                                                                                                                                                                                            1. Koşu
-                                                                                                                                                                                                                                                                                            1. (2) KARTAL BEY"></textarea>
-                                                                                                                                                                                                                                                                                                  <button class="btn btn-green" onclick="sonuctanOgren()">🔄 Sonuçları İşle ve Modeli Geliştir</button>
-                                                                                                                                                                                                                                                                                                      </div>
-                                                                                                                                                                                                                                                                                                          <div id="ogrenmeLogAlani"></div>
-                                                                                                                                                                                                                                                                                                            </div>
+  <!-- 3. ÖĞRENME -->
+  <div id="panel-ogrenme" class="panel">
+    <div class="card">
+      <h2>🧠 Sonuçlu Bülten Yapıştır (Kendi Kendine Öğrenme)</h2>
+      <p style="font-size:11px; color:#94a3b8; margin-top:0;">Yarış bittikten sonra atların yanında <b>(1), (2), (3)</b> yazan TJK sonuç sayfasını buraya yapıştırın. Robot kazananları okuyup model ağırlıklarını günceller.</p>
+      <textarea id="sonucluBultenInput" placeholder="Sonuçlu TJK bültenini buraya yapıştırın..."></textarea>
+      <button class="btn btn-green" onclick="BasOrkestrator.ogrenmeCalistir()">🔄 Sonuçları Ayıkla ve Modeli Geliştir</button>
+    </div>
+    <div id="ogrenmeLogAlani"></div>
+  </div>
 
-                                                                                                                                                                                                                                                                                                              <!-- 4. HAFIZA & BULUT -->
-                                                                                                                                                                                                                                                                                                                <div id="panel-hafiza" class="panel">
-                                                                                                                                                                                                                                                                                                                    <div class="card">
-                                                                                                                                                                                                                                                                                                                          <h2>☁️ Bulut Hafıza (Firebase)</h2>
-                                                                                                                                                                                                                                                                                                                                <textarea id="firebaseConfigInput" style="min-height:70px;" placeholder='firebase-applet-config.json içeriğini yapıştırın'></textarea>
-                                                                                                                                                                                                                                                                                                                                      <button class="btn btn-amber" onclick="firebaseBaglan()">🔐 Firebase Buluta Bağlan & Google Giriş</button>
-                                                                                                                                                                                                                                                                                                                                          </div>
+  <!-- 4. HAFIZA & SOYKÜTÜK DNA -->
+  <div id="panel-hafiza" class="panel">
+    <div class="card">
+      <h2>🧬 Soykütük DNA Bankası (Chef-de-Race / Aygır Ekle)</h2>
+      <input type="text" id="aygirAdInput" placeholder="Aygır Adı (Örn: TOROK)" />
+      <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:4px;">
+        <input type="number" id="dpB" placeholder="B" />
+        <input type="number" id="dpI" placeholder="I" />
+        <input type="number" id="dpC" placeholder="C" />
+        <input type="number" id="dpS" placeholder="S" />
+        <input type="number" id="dpP" placeholder="P" />
+      </div>
+      <button class="btn" onclick="aygirKaydet()">Aygır Profilini Kaydet</button>
+      <div id="aygirListeAlani" style="font-size:11px; color:#94a3b8; margin-top:6px; line-height:1.5;"></div>
+    </div>
 
-                                                                                                                                                                                                                                                                                                                                              <div class="card">
-                                                                                                                                                                                                                                                                                                                                                    <h2>🧬 Soykütük DNA Bankası (Aygır Ekle / Güncelle)</h2>
-                                                                                                                                                                                                                                                                                                                                                          <input type="text" id="aygirAdInput" placeholder="Aygır Adı (Örn: TOROK)" />
-                                                                                                                                                                                                                                                                                                                                                                <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:4px;">
-                                                                                                                                                                                                                                                                                                                                                                        <input type="number" id="dpB" placeholder="B" />
-                                                                                                                                                                                                                                                                                                                                                                                <input type="number" id="dpI" placeholder="I" />
-                                                                                                                                                                                                                                                                                                                                                                                        <input type="number" id="dpC" placeholder="C" />
-                                                                                                                                                                                                                                                                                                                                                                                                <input type="number" id="dpS" placeholder="S" />
-                                                                                                                                                                                                                                                                                                                                                                                                        <input type="number" id="dpP" placeholder="P" />
-                                                                                                                                                                                                                                                                                                                                                                                                              </div>
-                                                                                                                                                                                                                                                                                                                                                                                                                    <button class="btn" onclick="aygirKaydet()">Aygır Profilini Kaydet</button>
-                                                                                                                                                                                                                                                                                                                                                                                                                          <div id="aygirListeAlani" style="font-size:11px; color:#94a3b8; margin-top:6px; line-height:1.5;"></div>
-                                                                                                                                                                                                                                                                                                                                                                                                                              </div>
+    <div class="card">
+      <h2>📊 Güncel Model Ağırlıkları & Öğrenme Geçmişi</h2>
+      <div id="agirlikTabloAlani" style="font-size:12px;"></div>
+      <div id="gecmisHafizaAlani" style="font-size:11px; color:#94a3b8; margin-top:8px;"></div>
+      <button class="btn btn-outline" style="margin-top:8px;" onclick="hafizaSifirla()">⚠️ Modeli Varsayılana Döndür</button>
+    </div>
+  </div>
+  <script>
+// ============================================================================
+// 0. MERKEZİ HAFIZA & SOYKÜTÜK DNA SÖZLÜĞÜ (Baba + Kısrak Babası)
+// ============================================================================
+const VARSAYILAN_AYGIRLAR = {
+  "DIESIS": { B: 2, I: 4, C: 10, S: 4, P: 0 },
+  "SINGSPIEL": { B: 0, I: 2, C: 8, S: 8, P: 2 },
+  "VICTORYGALLOP": { B: 4, I: 6, C: 12, S: 4, P: 0 },
+  "NATIVEKHAN": { B: 2, I: 4, C: 8, S: 2, P: 0 },
+  "LUXOR": { B: 6, I: 6, C: 4, S: 0, P: 0 },
+  "KANEKO": { B: 4, I: 8, C: 6, S: 0, P: 0 },
+  "MENDIP": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "TOROK": { B: 6, I: 6, C: 4, S: 0, P: 0 },
+  "LIONHEART": { B: 8, I: 4, C: 4, S: 0, P: 0 },
+  "SRIPAD": { B: 4, I: 6, C: 6, S: 2, P: 0 },
+  "KURTINIADIS": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "TURBO": { B: 6, I: 6, C: 4, S: 0, P: 0 },
+  "KAIZBERT": { B: 8, I: 6, C: 2, S: 0, P: 0 },
+  "OZGUNHAN": { B: 2, I: 4, C: 8, S: 4, P: 0 },
+  "FLIGHTLINE": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "GUNRUNNER": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "TAPIT": { B: 2, I: 4, C: 10, S: 4, P: 0 },
+  "MUNNINGS": { B: 8, I: 4, C: 2, S: 0, P: 0 },
+  "PRACTICALJOKE": { B: 6, I: 6, C: 4, S: 0, P: 0 },
+  "INVINCIBLESPIRIT": { B: 8, I: 4, C: 2, S: 0, P: 0 },
+  "CAIROPRINCE": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "GOODMAGIC": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "SMILINGTIGER": { B: 8, I: 4, C: 2, S: 0, P: 0 },
+  "MALIBUMOON": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "DISTORTEDHUMOR": { B: 6, I: 6, C: 4, S: 0, P: 0 }
+};
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                  <div class="card">
-                                                                                                                                                                                                                                                                                                                                                                                                                                        <h2>📊 Güncel Model Ağırlıkları & Geçmiş Hafıza</h2>
-                                                                                                                                                                                                                                                                                                                                                                                                                                              <div id="agirlikTabloAlani" style="font-size:12px;"></div>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                    <div id="gecmisHafizaAlani" style="font-size:11px; color:#94a3b8; margin-top:8px;"></div>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        </div>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                          </div>
+const VARSAYILAN_CONFIG = {
+  versiyon: 1,
+  agirliklar: {
+    SARTLI_KV_GRUP: { sinif: 24, formSprint: 20, pistMesafe: 14, agf: 16, tempo: 10, jokeyKilo: 10, pedigree: 6 },
+    HANDIKAP:       { sinif: 14, formSprint: 24, pistMesafe: 14, agf: 16, tempo: 10, jokeyKilo: 16, pedigree: 6 },
+    MAIDEN_SATIS:   { sinif: 6,  formSprint: 16, pistMesafe: 22, agf: 24, tempo: 10, jokeyKilo: 12, pedigree: 10 }
+  }
+};
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                            <script type="module">
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                import { initializeApp } from "https://gstatic.com";
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                    import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://gstatic.com";
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                        import { getFirestore, doc, setDoc, getDoc } from "https://gstatic.com";
+let state = JSON.parse(localStorage.getItem("DETERMINISTIK_ROBOT_V5_4") || "null") || {
+  soykutukDNA: { ...VARSAYILAN_AYGIRLAR },
+  modelConfig: JSON.parse(JSON.stringify(VARSAYILAN_CONFIG)),
+  sonAnaliz: null,
+  hafizaKayitlari: []
+};
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                            const VARSAYILAN_AYGIRLAR = {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  "DIESIS": { B: 2, I: 4, C: 10, S: 4, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        "SINGSPIEL": { B: 0, I: 2, C: 8, S: 8, P: 2 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              "VICTORYGALLOP": { B: 4, I: 6, C: 12, S: 4, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    "NATIVEKHAN": { B: 2, I: 4, C: 8, S: 2, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          "LUXOR": { B: 6, I: 6, C: 4, S: 0, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                "KANEKO": { B: 4, I: 8, C: 6, S: 0, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      "MENDIP": { B: 4, I: 6, C: 8, S: 2, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            "TOROK": { B: 6, I: 6, C: 4, S: 0, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  "LIONHEART": { B: 8, I: 4, C: 4, S: 0, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        "SRIPAD": { B: 4, I: 6, C: 6, S: 2, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              "KURTINIADIS": { B: 4, I: 6, C: 8, S: 2, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    "TURBO": { B: 6, I: 6, C: 4, S: 0, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          "KAIZBERT": { B: 8, I: 6, C: 2, S: 0, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                "OZGUNHAN": { B: 2, I: 4, C: 8, S: 4, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      "BERKSOY": { B: 4, I: 6, C: 6, S: 2, P: 0 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            "AYABAKAN": { B: 4, I: 6, C: 6, S: 2, P: 0 }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                };
+function hafizayiKaydet() {
+  localStorage.setItem("DETERMINISTIK_ROBOT_V5_4", JSON.stringify(state));
+  arayuzuGuncelle();
+}
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    const VARSAYILAN_CONFIG = {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          versiyon: 1,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                kOlcek: 1.0,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      agirliklar: {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              SARTLI_KV_GRUP: { sinif: 25, formSprint: 20, pistMesafe: 15, agf: 15, tempo: 10, jokeyKilo: 10, galop: 5 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      HANDIKAP: { sinif: 15, formSprint: 25, pistMesafe: 15, agf: 15, tempo: 10, jokeyKilo: 15, galop: 5 },
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              MAIDEN_SATIS: { sinif: 5, formSprint: 15, pistMesafe: 25, agf: 25, tempo: 10, jokeyKilo: 15, galop: 5 }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        };
+// ============================================================================
+// ROBOT 1: TJK BÜLTEN AYIKLAMA ROBOTU (Saf Metin Temizleyici & Ayrıştırıcı)
+// ============================================================================
+const BultenAyiklamaRobotu = {
+  sonucluMuKontrolEt(hamMetin) {
+    const satirlar = hamMetin.split(/\r?\n/);
+    let dereceSayaci = 0;
+    for (const s of satirlar) {
+      if (/^\d+\t/.test(s) && /\([1-9]\d?\)/.test(s.split('\t') || "")) {
+        dereceSayaci++;
+      }
+    }
+    return dereceSayaci >= 3;
+  },
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            let state = JSON.parse(localStorage.getItem("DETERMINISTIK_ROBOT_V5") || "null") || {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  soykutukDNA: VARSAYILAN_AYGIRLAR,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        modelConfig: VARSAYILAN_CONFIG,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              hafizaKayitlari: [],
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    sonBulten: null,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          sonAnalizler: []
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              };
+  ayikla(hamMetin) {
+    const satirlar = hamMetin.split(/\r?\n/);
+    const kosular = [];
+    let aktifKosu = null;
+    let sonAt = null;
+    let uyarilar = [];
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  let fbDb = null, fbUser = null;
+    for (let i = 0; i < satirlar.length; i++) {
+      const hamSatir = satirlar[i];
+      const temiz = hamSatir.trim();
+      if (!temiz) continue;
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      function yerelKaydet() {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            localStorage.setItem("DETERMINISTIK_ROBOT_V5", JSON.stringify(state));
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  document.getElementById("modelBadge").innerText = `Model v${state.modelConfig.versiyon} | Hafıza #${state.hafizaKayitlari.length}`;
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        ekranlariGuncelle();
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              if (fbDb && fbUser) bulutaYaz();
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  }
+      const kosuMatch = temiz.match(/^(\d+)\.\s*Koşu\s+(\d{2}\.\d{2})\s*(.+)$/i);
+      if (kosuMatch && (temiz.includes("Kum") || temiz.includes("Çim") || temiz.includes("Sentetik") || temiz.includes("İngiliz") || temiz.includes("Arap"))) {
+        if (aktifKosu) kosular.push(aktifKosu);
+        const baslikDetay = kosuMatch;
+        const mesafeMatch = baslikDetay.match(/(\d{3,4})\s*(Kum|Çim|Sentetik)/i);
+        aktifKosu = {
+          no: parseInt(kosuMatch, 10),
+          saat: kosuMatch,
+          baslik: baslikDetay.split(",").trim(),
+          mesafe: mesafeMatch ? parseInt(mesafeMatch, 10) : 1400,
+          pist: mesafeMatch ? mesafeMatch : "Kum",
+          tur: this.kosuTuruBelirle(baslikDetay),
+          altiliBaslangic: null,
+          atlar: []
+        };
+        sonAt = null;
+        continue;
+      }
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      async function bulutaYaz() {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            try {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    await setDoc(doc(fbDb, "kullanici_sistemleri", fbUser.uid), {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              soykutukDNA: state.soykutukDNA,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        modelConfig: state.modelConfig,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  hafizaKayitlari: state.hafizaKayitlari,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            guncelleme: new Date().toISOString()
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    }, { merge: true });
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            document.getElementById("syncStatus").innerText = `☁️ Bulut Senkronize (${fbUser.email})`;
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  } catch (e) { console.error(e); }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      }
+      if (!aktifKosu) continue;
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          window.firebaseBaglan = async function() {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                try {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        const raw = document.getElementById("firebaseConfigInput").value.trim() || localStorage.getItem("FB_CFG");
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                if (!raw) return alert("Lütfen firebase-applet-config.json içeriğini yapıştırın.");
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        const cfg = JSON.parse(raw);
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                localStorage.setItem("FB_CFG", JSON.stringify(cfg));
+      if (/1\.\s*6'LI GANYAN\s*Bu koşudan başlar/i.test(temiz)) { aktifKosu.altiliBaslangic = 1; continue; }
+      if (/2\.\s*6'LI GANYAN\s*Bu koşudan başlar/i.test(temiz)) { aktifKosu.altiliBaslangic = 2; continue; }
+      if (/^6'LI GANYAN\s*Bu koşudan başlar/i.test(temiz)) { aktifKosu.altiliBaslangic = 1; continue; }
+
+      if (sonAt && /^%\d+(\.\d+)?\(\d+\)/.test(temiz)) {
+        const agf2Match = temiz.match(/^%(\d+(?:\.\d+)?)\((\d+)\)/);
+        if (agf2Match) {
+          sonAt.agf2 = parseFloat(agf2Match);
+          sonAt.agf2Sira = parseInt(agf2Match, 10);
+        }
+        continue;
+      }
+
+      if (sonAt && /^\d+[.,]\d+\t/.test(hamSatir)) {
+        const parcalar = hamSatir.split('\t').map(x => x.trim());
+        sonAt.gny = parseFloat(parcalar.replace(',', '.')) || null;
+        if (parcalar && parcalar.startsWith('%')) {
+          const m = parcalar.match(/^%(\d+(?:\.\d+)?)\((\d+)\)/);
+          if (m) {
+            sonAt.agf1 = parseFloat(m);
+            sonAt.agf1Sira = parseInt(m, 10);
+          }
+        }
+        continue;
+      }
+
+      if (/^\d+\t/.test(hamSatir)) {
+        const cols = hamSatir.split('\t').map(c => c.trim());
+        const no = parseInt(cols, 10);
+        let hamAd = cols || "";
+        const kosmaz = /\(Koşmaz\)/i.test(hamAd) || /SCRATCHED/i.test(cols || "");
+
+        let bitisDerecesi = null;
+        const dereceMatch = hamAd.match(/\(([1-9]\d?)\)/);
+        if (dereceMatch) bitisDerecesi = parseInt(dereceMatch, 10);
+
+        const temizAd = hamAd
+          .replace(/\(Koşmaz\)/gi, "")
+          .replace(/\([A-Z]{2,3}\)/g, "")
+          .replace(/\(\d+\)/g, "")
+          .replace(/\b(KG|DB|SKG|SK|GKR|YP|ÇP|BB|K)\b/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        const orijin = cols || "";
+        const baba = orijin.split(/[-/]/).replace(/\([A-Z]+\)/g, "").trim();
+        let kisrakBabasi = "";
+        if (orijin.includes("/")) {
+          kisrakBabasi = orijin.split("/").pop().replace(/\([A-Z]+\)/g, "").trim();
+        } else {
+          const parantezler = orijin.match(/\(([^)]+)\)/g);
+          if (parantezler && parantezler.length > 0) {
+            kisrakBabasi = parantezler[parantezler.length - 1].replace(/[()]/g, "").trim();
+          }
+        }
+
+        const sikletStr = (cols || "55").replace(',', '.');
+        const siklet = sikletStr.includes('+')
+          ? sikletStr.split('+').reduce((a, b) => parseFloat(a) + parseFloat(b), 0)
+          : (parseFloat(sikletStr) || 55);
+
+        const jokey = cols || "-";
+        const start = parseInt(cols, 10) || no;
+        const hp = parseInt(cols, 10) || null;
+        const son6 = (cols || "").replace(/[^0-9]/g, "");
+        const kgs = parseInt(cols, 10) || null;
+        const s20 = parseInt(cols, 10) || null;
+
+        let enIyiDerece = null, gny = null, agf1 = null, agf1Sira = null;
+        for (let c = 13; c < cols.length; c++) {
+          const val = cols[c];
+          if (!val) continue;
+          if (/^\d+\.\d{2}\.\d{2}$/.test(val)) enIyiDerece = val;
+          else if (/^\d+[.,]\d+$/.test(val) && gny === null) gny = parseFloat(val.replace(',', '.'));
+          else if (/^%\d+/.test(val)) {
+            const am = val.match(/^%(\d+(?:\.\d+)?)\((\d+)\)/);
+            if (am) { agf1 = parseFloat(am); agf1Sira = parseInt(am, 10); }
+          }
+        }
+
+        const ilkStartMi = (!son6 || son6.length === 0) && (!hp || hp === 0);
+
+        const atObj = {
+          no, ad: temizAd, baba, kisrakBabasi, siklet, jokey, start, hp, son6, kgs, s20,
+          enIyiDerece, gny, agf1, agf1Sira, agf2: null, agf2Sira: null,
+          kosmaz, bitisDerecesi, ilkStartMi
+        };
+
+        aktifKosu.atlar.push(atObj);
+        sonAt = atObj;
+      }
+    }
+
+    if (aktifKosu) kosular.push(aktifKosu);
+
+    let altili1Bas = kosular.findIndex(k => k.altiliBaslangic === 1);
+    let altili2Bas = kosular.findIndex(k => k.altiliBaslangic === 2);
+    if (altili1Bas === -1 && kosular.length >= 6) altili1Bas = 0;
+
+    const altili1 = altili1Bas !== -1 ? kosular.slice(altili1Bas, altili1Bas + 6) : [];
+    const altili2 = altili2Bas !== -1 ? kosular.slice(altili2Bas, altili2Bas + 6) : [];
+
+    if (kosular.length === 0) {
+      uyarilar.push("Metinde hiçbir koşu bulunamadı. Lütfen TJK bülten sayfasından tüm metni kopyaladığınızdan emin olun.");
+    }
+
+    return { kosular, altili1, altili2, uyarilar };
+  },
+
+  kosuTuruBelirle(metin) {
+    const m = metin.toUpperCase();
+    if (m.includes("HANDİKAP") || m.includes("HANDIKAP")) return "HANDIKAP";
+    if (m.includes("MAIDEN") || m.includes("SATIŞ")) return "MAIDEN_SATIS";
+    return "SARTLI_KV_GRUP";
+  }
+};
+
+// ============================================================================
+// ROBOT 2: SOYKÜTÜK & KAN HATTI DNA ROBOTU (Baba %65 + Anne Babası %35)
+// ============================================================================
+const SoykutukRobotu = {
+  tekAygirPuanla(aygirAdi, mesafe) {
+    const temiz = (aygirAdi || "").toUpperCase().replace(/[^A-ZÇĞİÖŞÜ]/g, "");
+    const dna = state.soykutukDNA[temiz];
+    if (!dna) return { puan: 52, bulundu: false };
+
+    const toplam = dna.B + dna.I + dna.C + dna.S + dna.P || 1;
+    const hizOrani = (dna.B + dna.I) / toplam;
+    const dayaniklilikOrani = (dna.S + dna.P) / toplam;
+
+    let puan = 60;
+    if (mesafe <= 1300) puan += hizOrani * 40;
+    else if (mesafe >= 1800) puan += dayaniklilikOrani * 40;
+    else puan += ((dna.C / toplam) * 35 + 10);
+
+    return { puan: Math.min(100, Math.round(puan)), bulundu: true };
+  },
+
+  hesapla(babaAdi, kisrakBabasiAdi, mesafe) {
+    const baba = this.tekAygirPuanla(babaAdi, mesafe);
+    const anneBaba = this.tekAygirPuanla(kisrakBabasiAdi, mesafe);
+    const birlesikPuan = Math.round((baba.puan * 0.65) + (anneBaba.puan * 0.35));
+    return {
+      puan: birlesikPuan,
+      etiket: (baba.bulundu || anneBaba.bulundu) ? "DNA Onaylı" : "Standart Orijin"
+    };
+  }
+};
+
+// ============================================================================
+    // ============================================================================
+// ROBOT 4: KESİN VERİYE DAYALI KOLAY / KAOS AYAK & BÜTÇE KURGU ROBOTU
+// ============================================================================
+const KuponRobotu = {
+  ayakZorlukAnalizi(kosu, idx) {
+    const atlar = kosu.siraliAtlar;
+    const atSayisi = atlar.length;
+    const p1 = atlar[0]?.puan || 0;
+    const p2 = atlar[1]?.puan || 0;
+    const p5 = atlar[4]?.puan || (atlar[atSayisi - 1]?.puan || 0);
+
+    const liderFarki = p1 - p2;
+    const ilkBesSikismasi = p1 - p5;
+    const maxAGF = Math.max(...atlar.map(a => a.aktifAGF || 0), 0);
+    const ilkStartSayisi = atlar.filter(a => a.ilkStartMi).length;
+
+    let kaosSkoru = 0;
+
+    // 1. Koşu Türü Etkisi (Kesin Statü)
+    if (kosu.tur === "MAIDEN_SATIS") kaosSkoru += 26;
+    else if (kosu.tur === "HANDIKAP") kaosSkoru += 22;
+    else kaosSkoru += 8;
+
+    // 2. Safkan Sayısı Etkisi (Kalabalık trafik riski)
+    kaosSkoru += Math.min(30, Math.max(0, (atSayisi - 5) * 2.8));
+
+    // 3. İlk Kez Koşan (Debut) Tay Yoğunluğu
+    if (ilkStartSayisi >= Math.ceil(atSayisi * 0.4)) kaosSkoru += 20;
+
+    // 4. Puan Sıkışması
+    if (ilkBesSikismasi < 6) kaosSkoru += 20;
+    else if (ilkBesSikismasi < 12) kaosSkoru += 10;
+
+    // 5. AGF Dağılımı & Lider Ayrışması
+    if (maxAGF >= 35 && liderFarki >= 5) kaosSkoru -= 20;
+    else if (maxAGF > 0 && maxAGF <= 16) kaosSkoru += 16;
+
+    if (liderFarki >= 7) kaosSkoru -= 15;
+
+    kaosSkoru = Math.max(5, Math.min(100, Math.round(kaosSkoru)));
+
+    let zorlukEtiketi = "🟡 DENGELİ";
+    if (kaosSkoru >= 62) zorlukEtiketi = "🔴 ZOR / KAOS";
+    else if (kaosSkoru <= 34) zorlukEtiketi = "🟢 KOLAY / NET";
+
+    // İlk start yoğunluğu yüksekse tek önerme
+    const tekGuvenSkoru = (ilkStartSayisi >= Math.ceil(atSayisi * 0.5))
+      ? -999
+      : (100 - kaosSkoru) + (liderFarki * 3);
+
+    return {
+      idx,
+      kosuNo: kosu.no,
+      atSayisi,
+      siraliAtlar: atlar,
+      liderFarki,
+      kaosSkoru,
+      zorlukEtiketi,
+      tekGuvenSkoru,
+      secilenSayi: 1
+    };
+  },
+
+  kuponUret(analizliKosular, butce, birimFiyat) {
+    if (!analizliKosular || analizliKosular.length !== 6) return null;
+
+    const maxKolon = Math.max(1, Math.floor(butce / birimFiyat));
+    const ayakBilgileri = analizliKosular.map((k, idx) => this.ayakZorlukAnalizi(k, idx));
+
+    // 1. En Kolay ve Güvenilir 1 Ayağı TEK Olarak Kilitle (Maksimum 1 Tek Kuralı)
+    const tekAdaylari = [...ayakBilgileri].sort((a, b) => b.tekGuvenSkoru - a.tekGuvenSkoru);
+    const tekAyakIdx = (maxKolon >= 16 && tekAdaylari[0].tekGuvenSkoru > 0) ? tekAdaylari[0].idx : -1;
+
+    const mevcutKolon = () => ayakBilgileri.reduce((acc, a) => acc * a.secilenSayi, 1);
+
+    // 2. Tek bırakılan ayak dışındaki ayaklara önce en az 2 at ver (en yüksek kaos ayağından başlayarak)
+    const kaosSirali = [...ayakBilgileri]
+      .filter(a => a.idx !== tekAyakIdx && a.atSayisi > 1)
+      .sort((a, b) => b.kaosSkoru - a.kaosSkoru);
+
+    for (const ayak of kaosSirali) {
+      if (mevcutKolon() * 2 <= maxKolon) {
+        ayak.secilenSayi = 2;
+      }
+    }
+
+    // 3. Kalan Bütçeyi Kaos Skoruna (Zor Ayaklara) ve Safkan Sayısına Göre Orantılı Dağıt
+    let dongu = 0;
+    while (dongu < 50) {
+      dongu++;
+      let secilenAyak = null;
+      let enYuksekIhtiyac = -999;
+
+      for (const ayak of ayakBilgileri) {
+        if (ayak.idx === tekAyakIdx && maxKolon < 120 && ayak.secilenSayi === 1) continue;
+
+        const maxAtSiniri = ayak.kaosSkoru <= 34
+          ? Math.min(2, ayak.atSayisi)
+          : Math.max(3, Math.ceil(ayak.atSayisi * 0.6));
+
+        if (ayak.secilenSayi >= ayak.atSayisi || ayak.secilenSayi >= maxAtSiniri) continue;
+
+        const yeniKolon = (mevcutKolon() / ayak.secilenSayi) * (ayak.secilenSayi + 1);
+        if (yeniKolon > maxKolon) continue;
+
+        const ihtiyacSkoru = (ayak.kaosSkoru * (ayak.atSayisi / 8)) / ayak.secilenSayi;
+
+        if (ihtiyacSkoru > enYuksekIhtiyac) {
+          enYuksekIhtiyac = ihtiyacSkoru;
+          secilenAyak = ayak;
+        }
+      }
+
+      if (!secilenAyak) break;
+      secilenAyak.secilenSayi += 1;
+    }
+
+    const toplamKolon = mevcutKolon();
+    const tutar = parseFloat((toplamKolon * birimFiyat).toFixed(2));
+
+    return {
+      ayaklar: ayakBilgileri.map((ay, i) => ({
+        ayakNo: i + 1,
+        kosuNo: ay.kosuNo,
+        toplamSafkan: ay.atSayisi,
+        zorlukEtiketi: ay.zorlukEtiketi,
+        kaosSkoru: ay.kaosSkoru,
+        tekMi: ay.secilenSayi === 1,
+        atlar: ay.siraliAtlar.slice(0, ay.secilenSayi).sort((a, b) => a.no - b.no)
+      })),
+      toplamKolon,
+      tutar
+    };
+  }
+};
+
+// ============================================================================
+// ROBOT 5: SONUÇ OKUMA & KENDİ KENDİNE ÖĞRENME ROBOTU
+// ============================================================================
+const OgrenmeRobotu = {
+  sonuctanOgren(sonucluMetin) {
+    const ayiklanan = BultenAyiklamaRobotu.ayikla(sonucluMetin);
+    const loglar = [];
+    let kazananBulundu = 0;
+    let isabetSayisi = 0;
+
+    const kazananKriterToplam = { sinif: 0, formSprint: 0, pistMesafe: 0, agf: 0, tempo: 0, jokeyKilo: 0, pedigree: 0 };
+
+    ayiklanan.kosular.forEach(kosu => {
+      const birinci = kosu.atlar.find(a => a.bitisDerecesi === 1);
+      if (!birinci) return;
+
+      kazananBulundu++;
+      const tahminler = PuanlamaRobotu.kosuyuAnalizEt(kosu, 1);
+      const ilkUc = tahminler.slice(0, 3).map(a => a.ad);
+      if (ilkUc.includes(birinci.ad)) isabetSayisi++;
+
+      const kazananTahmin = tahminler.find(a => a.ad === birinci.ad);
+      if (kazananTahmin) {
+        kazananKriterToplam.sinif += kazananTahmin.kriterler.sinifSkor;
+        kazananKriterToplam.formSprint += kazananTahmin.kriterler.formSprint;
+        kazananKriterToplam.pistMesafe += kazananTahmin.kriterler.pistMesafeSkor;
+        kazananKriterToplam.agf += kazananTahmin.kriterler.agfSkor;
+        kazananKriterToplam.tempo += kazananTahmin.kriterler.tempoSkor;
+        kazananKriterToplam.jokeyKilo += kazananTahmin.kriterler.jokeyKiloSkor;
+        kazananKriterToplam.pedigree += kazananTahmin.kriterler.pedigree;
+      }
+
+      loglar.push(`${kosu.no}. Koşu Kazananı: #${birinci.no} ${birinci.ad} (Model Sırası: ${tahminler.findIndex(a => a.ad === birinci.ad) + 1}.)`);
+    });
+
+    if (kazananBulundu === 0) {
+      return { basarili: false, mesaj: "Sonuçlu bültende parantez içi (1) bitiş derecesi bulunamadı. Lütfen yarışları tamamlanmış TJK sayfasını yapıştırın." };
+    }
+
+    const turler = ["SARTLI_KV_GRUP", "HANDIKAP", "MAIDEN_SATIS"];
+    turler.forEach(tur => {
+      const w = state.modelConfig.agirliklar[tur];
+      const ort = {};
+      let sum = 0;
+      for (const k in w) {
+        ort[k] = (kazananKriterToplam[k] / kazananBulundu);
+        sum += ort[k];
+      }
+      if (sum > 0) {
+        let yeniToplam = 0;
+        for (const k in w) {
+          const hedef = (ort[k] / sum) * 100;
+          w[k] = Math.round(w[k] * 0.85 + hedef * 0.15);
+          yeniToplam += w[k];
+        }
+        w.agf += (100 - yeniToplam);
+      }
+    });
+
+    state.modelConfig.versiyon += 1;
+    state.hafizaKayitlari.unshift({
+      tarih: new Date().toLocaleString("tr-TR"),
+      kosuSayisi: kazananBulundu,
+      ilkUcIsabet: isabetSayisi,
+      versiyon: state.modelConfig.versiyon
+    });
+
+    hafizayiKaydet();
+    return { basarili: true, kazananBulundu, isabetSayisi, loglar, yeniVersiyon: state.modelConfig.versiyon };
+  }
+};
+
+// ============================================================================
+// BAŞ ORKESTRATÖR & DOĞRULAMA ROBOTU (Tüm Robotların Komuta & Denetim Merkezi)
+// ============================================================================
+const BasOrkestrator = {
+  dogrula(tumAnalizler, kupon1, kupon2, butce) {
+    const kontroller = [];
+    let hataVar = false;
+
+    // 1. Koşmaz at sızıntı kontrolü
+    const kosmazSizinti = tumAnalizler.some(k => k.siraliAtlar.some(a => a.kosmaz));
+    if (kosmazSizinti) {
+      hataVar = true;
+      kontroller.push("❌ Koşmaz at filtresi ihlali tespit edildi!");
+    } else {
+      kontroller.push("✓ Koşmaz atlar temizlendi");
+    }
+
+    // 2. Bütçe ve Tek sayısı denetimi
+    [kupon1, kupon2].forEach((kp, idx) => {
+      if (!kp) return;
+      if (kp.tutar > butce + 0.01) {
+        hataVar = true;
+        kontroller.push(`❌ ${idx + 1}. Altılı bütçeyi aştı (${kp.tutar} TL > ${butce} TL)`);
+      } else {
+        const tekSayisi = kp.ayaklar.filter(a => a.tekMi).length;
+        kontroller.push(`✓ ${idx + 1}. Altılı: 6 Ayak Tam | ${tekSayisi} Tek | ${kp.tutar} TL (Bütçe İçi)`);
+      }
+    });
+
+    return { hataVar, kontroller };
+  },
+
+  bultenCalistir() {
+    const hamMetin = document.getElementById("hamBultenInput").value;
+    const butce = parseFloat(document.getElementById("butceInput").value) || 80;
+    const birim = parseFloat(document.getElementById("birimInput").value) || 1.25;
+    const uyariAlani = document.getElementById("bultenUyariAlani");
+    uyariAlani.innerHTML = "";
+
+    if (!hamMetin.trim()) {
+      uyariAlani.innerHTML = `<div class="alert alert-err">⚠️ Lütfen önce TJK bülten metnini yapıştırın.</div>`;
+      return;
+    }
+
+    if (BultenAyiklamaRobotu.sonucluMuKontrolEt(hamMetin)) {
+      uyariAlani.innerHTML = `<div class="alert">💡 Bu bültende yarış sonuçları <b>(1), (2)</b> görünüyor. Öğrenme için lütfen <b>3. Öğrenme</b> sekmesine yapıştırın!</div>`;
+      return;
+    }
+
+    const ayiklanan = BultenAyiklamaRobotu.ayikla(hamMetin);
+    if (ayiklanan.kosular.length === 0) {
+      uyariAlani.innerHTML = `<div class="alert alert-err">❌ ${ayiklanan.uyarilar.join("<br>")}</div>`;
+      return;
+    }
+
+    const tumAnalizler = ayiklanan.kosular.map(k => ({
+      ...k,
+      siraliAtlar: PuanlamaRobotu.kosuyuAnalizEt(k, 1)
+    }));
+
+    const altili1Analiz = ayiklanan.altili1.map(k => ({ ...k, siraliAtlar: PuanlamaRobotu.kosuyuAnalizEt(k, 1) }));
+    
