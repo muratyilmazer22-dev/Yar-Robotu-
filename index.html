@@ -275,12 +275,175 @@ const BultenAyiklamaRobotu = {
           ? sikletStr.split('+').reduce((a, b) => parseFloat(a) + parseFloat(b), 0)
           : (parseFloat(sikletStr) || 55);
 
-        const jokey = cols || "-";
-        const start = parseInt(cols, 10) || no;
-        const hp = parseInt(cols, 10) || null;
-        const son6 = (cols || "").replace(/[^0-9]/g, "");
-        const kgs = parseInt(cols, 10) || null;
-        const s20 = parseInt(cols, 10) || null;
+<script>
+// ============================================================================
+// 0. MERKEZİ HAFIZA & SOYKÜTÜK DNA SÖZLÜĞÜ (Baba + Kısrak Babası)
+// ============================================================================
+const VARSAYILAN_AYGIRLAR = {
+  "DIESIS": { B: 2, I: 4, C: 10, S: 4, P: 0 },
+  "SINGSPIEL": { B: 0, I: 2, C: 8, S: 8, P: 2 },
+  "VICTORYGALLOP": { B: 4, I: 6, C: 12, S: 4, P: 0 },
+  "NATIVEKHAN": { B: 2, I: 4, C: 8, S: 2, P: 0 },
+  "LUXOR": { B: 6, I: 6, C: 4, S: 0, P: 0 },
+  "KANEKO": { B: 4, I: 8, C: 6, S: 0, P: 0 },
+  "MENDIP": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "TOROK": { B: 6, I: 6, C: 4, S: 0, P: 0 },
+  "LIONHEART": { B: 8, I: 4, C: 4, S: 0, P: 0 },
+  "SRIPAD": { B: 4, I: 6, C: 6, S: 2, P: 0 },
+  "KURTINIADIS": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "TURBO": { B: 6, I: 6, C: 4, S: 0, P: 0 },
+  "KAIZBERT": { B: 8, I: 6, C: 2, S: 0, P: 0 },
+  "OZGUNHAN": { B: 2, I: 4, C: 8, S: 4, P: 0 },
+  "FLIGHTLINE": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "GUNRUNNER": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "TAPIT": { B: 2, I: 4, C: 10, S: 4, P: 0 },
+  "MUNNINGS": { B: 8, I: 4, C: 2, S: 0, P: 0 },
+  "PRACTICALJOKE": { B: 6, I: 6, C: 4, S: 0, P: 0 },
+  "INVINCIBLESPIRIT": { B: 8, I: 4, C: 2, S: 0, P: 0 },
+  "CAIROPRINCE": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "GOODMAGIC": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "SMILINGTIGER": { B: 8, I: 4, C: 2, S: 0, P: 0 },
+  "MALIBUMOON": { B: 4, I: 6, C: 8, S: 2, P: 0 },
+  "DISTORTEDHUMOR": { B: 6, I: 6, C: 4, S: 0, P: 0 }
+};
+
+const VARSAYILAN_CONFIG = {
+  versiyon: 1,
+  agirliklar: {
+    SARTLI_KV_GRUP: { sinif: 24, formSprint: 20, pistMesafe: 14, agf: 16, tempo: 10, jokeyKilo: 10, pedigree: 6 },
+    HANDIKAP:       { sinif: 14, formSprint: 24, pistMesafe: 14, agf: 16, tempo: 10, jokeyKilo: 16, pedigree: 6 },
+    MAIDEN_SATIS:   { sinif: 6,  formSprint: 16, pistMesafe: 22, agf: 24, tempo: 10, jokeyKilo: 12, pedigree: 10 }
+  }
+};
+
+let state = JSON.parse(localStorage.getItem("DETERMINISTIK_ROBOT_V5_5") || "null") || {
+  soykutukDNA: { ...VARSAYILAN_AYGIRLAR },
+  modelConfig: JSON.parse(JSON.stringify(VARSAYILAN_CONFIG)),
+  sonAnaliz: null,
+  hafizaKayitlari: []
+};
+
+function hafizayiKaydet() {
+  localStorage.setItem("DETERMINISTIK_ROBOT_V5_5", JSON.stringify(state));
+  arayuzuGuncelle();
+}
+
+// ============================================================================
+// ROBOT 1: TJK BÜLTEN AYIKLAMA ROBOTU (Saf Metin Temizleyici & Ayrıştırıcı)
+// ============================================================================
+const BultenAyiklamaRobotu = {
+  sonucluMuKontrolEt(hamMetin) {
+    const satirlar = hamMetin.split(/\r?\n/);
+    let dereceSayaci = 0;
+    for (const s of satirlar) {
+      const cols = s.split('\t');
+      if (cols.length > 1 && /^\d+$/.test(cols[0].trim()) && /\([1-9]\d?\)/.test(cols[1])) {
+        dereceSayaci++;
+      }
+    }
+    return dereceSayaci >= 3;
+  },
+
+  ayikla(hamMetin) {
+    const satirlar = hamMetin.split(/\r?\n/);
+    const kosular = [];
+    let aktifKosu = null;
+    let sonAt = null;
+    let uyarilar = [];
+
+    for (let i = 0; i < satirlar.length; i++) {
+      const hamSatir = satirlar[i];
+      const temiz = hamSatir.trim();
+      if (!temiz) continue;
+
+      const kosuMatch = temiz.match(/^(\d+)\.\s*Koşu\s+(\d{2}\.\d{2})\s*(.+)$/i);
+      if (kosuMatch && (temiz.includes("Kum") || temiz.includes("Çim") || temiz.includes("Sentetik") || temiz.includes("İngiliz") || temiz.includes("Arap"))) {
+        if (aktifKosu) kosular.push(aktifKosu);
+        const baslikDetay = kosuMatch[3];
+        const mesafeMatch = baslikDetay.match(/(\d{3,4})\s*(Kum|Çim|Sentetik)/i);
+        aktifKosu = {
+          no: parseInt(kosuMatch[1], 10),
+          saat: kosuMatch[2],
+          baslik: baslikDetay.split(",")[0].trim(),
+          mesafe: mesafeMatch ? parseInt(mesafeMatch[1], 10) : 1400,
+          pist: mesafeMatch ? mesafeMatch[2] : "Kum",
+          tur: this.kosuTuruBelirle(baslikDetay),
+          altiliBaslangic: null,
+          atlar: []
+        };
+        sonAt = null;
+        continue;
+      }
+
+      if (!aktifKosu) continue;
+
+      if (/1\.\s*6'LI GANYAN\s*Bu koşudan başlar/i.test(temiz)) { aktifKosu.altiliBaslangic = 1; continue; }
+      if (/2\.\s*6'LI GANYAN\s*Bu koşudan başlar/i.test(temiz)) { aktifKosu.altiliBaslangic = 2; continue; }
+      if (/^6'LI GANYAN\s*Bu koşudan başlar/i.test(temiz)) { aktifKosu.altiliBaslangic = 1; continue; }
+
+      if (sonAt && /^%\d+(\.\d+)?\(\d+\)/.test(temiz)) {
+        const agf2Match = temiz.match(/^%(\d+(?:\.\d+)?)\((\d+)\)/);
+        if (agf2Match) {
+          sonAt.agf2 = parseFloat(agf2Match[1]);
+          sonAt.agf2Sira = parseInt(agf2Match[2], 10);
+        }
+        continue;
+      }
+
+      if (sonAt && /^\d+[.,]\d+\t/.test(hamSatir)) {
+        const parcalar = hamSatir.split('\t').map(x => x.trim());
+        sonAt.gny = parseFloat(parcalar[0].replace(',', '.')) || null;
+        if (parcalar[1] && parcalar[1].startsWith('%')) {
+          const m = parcalar[1].match(/^%(\d+(?:\.\d+)?)\((\d+)\)/);
+          if (m) {
+            sonAt.agf1 = parseFloat(m[1]);
+            sonAt.agf1Sira = parseInt(m[2], 10);
+          }
+        }
+        continue;
+      }
+
+      if (/^\d+\t/.test(hamSatir)) {
+        const cols = hamSatir.split('\t').map(c => c.trim());
+        const no = parseInt(cols[0], 10);
+        let hamAd = cols[1] || "";
+        const kosmaz = /\(Koşmaz\)/i.test(hamAd) || /SCRATCHED/i.test(cols[5] || "");
+
+        let bitisDerecesi = null;
+        const dereceMatch = hamAd.match(/\(([1-9]\d?)\)/);
+        if (dereceMatch) bitisDerecesi = parseInt(dereceMatch[1], 10);
+
+        const temizAd = hamAd
+          .replace(/\(Koşmaz\)/gi, "")
+          .replace(/\([A-Z]{2,3}\)/g, "")
+          .replace(/\(\d+\)/g, "")
+          .replace(/\b(KG|DB|SKG|SK|GKR|YP|ÇP|BB|K)\b/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        const orijin = cols[3] || "";
+        const baba = orijin.split(/[-/]/)[0].replace(/\([A-Z]+\)/g, "").trim();
+        let kisrakBabasi = "";
+        if (orijin.includes("/")) {
+          kisrakBabasi = orijin.split("/").pop().replace(/\([A-Z]+\)/g, "").trim();
+        } else {
+          const parantezler = orijin.match(/\(([^)]+)\)/g);
+          if (parantezler && parantezler.length > 0) {
+            kisrakBabasi = parantezler[parantezler.length - 1].replace(/[()]/g, "").trim();
+          }
+        }
+
+        const sikletStr = (cols[4] || "55").replace(',', '.');
+        const siklet = sikletStr.includes('+')
+          ? sikletStr.split('+').reduce((a, b) => (parseFloat(a) || 0) + (parseFloat(b) || 0), 0)
+          : (parseFloat(sikletStr) || 55);
+
+        const jokey = cols[5] || "-";
+        const start = parseInt(cols[8], 10) || no;
+        const hp = parseInt(cols[9], 10) || null;
+        const son6 = (cols[10] || "").replace(/[^0-9]/g, "");
+        const kgs = parseInt(cols[11], 10) || null;
+        const s20 = parseInt(cols[12], 10) || null;
 
         let enIyiDerece = null, gny = null, agf1 = null, agf1Sira = null;
         for (let c = 13; c < cols.length; c++) {
@@ -290,7 +453,7 @@ const BultenAyiklamaRobotu = {
           else if (/^\d+[.,]\d+$/.test(val) && gny === null) gny = parseFloat(val.replace(',', '.'));
           else if (/^%\d+/.test(val)) {
             const am = val.match(/^%(\d+(?:\.\d+)?)\((\d+)\)/);
-            if (am) { agf1 = parseFloat(am); agf1Sira = parseInt(am, 10); }
+            if (am) { agf1 = parseFloat(am[1]); agf1Sira = parseInt(am[2], 10); }
           }
         }
 
