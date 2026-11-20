@@ -1,8 +1,11 @@
 {
   "scripts": {
-    "start": "servor --reload"
+    "start": "bash -lc 'if [ -f .env.development.local ]; then set -a; . .env.development.local; set +a; fi; exec vercel dev --local --listen 8080'"
   },
   "dependencies": {
+    "cheerio": "^1.2.0",
+    "drizzle-orm": "^0.45.4",
+    "pg": "^8.23.1",
     "servor": "^4.0.2"
   }
 }

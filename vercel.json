@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/history.js": {
+      "maxDuration": 120
+    },
+    "api/backtest.js": {
+      "maxDuration": 30
+    }
+  }
+}
