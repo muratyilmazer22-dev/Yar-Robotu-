@@ -229,51 +229,92 @@ const BultenAyiklamaRobotu = {
 
       if (sonAt && /^\d+[.,]\d+\t/.test(hamSatir)) {
         const parcalar = hamSatir.split('\t').map(x => x.trim());
-        sonAt.gny = parseFloat(parcalar.replace(',', '.')) || null;
-        if (parcalar && parcalar.startsWith('%')) {
-          const m = parcalar.match(/^%(\d+(?:\.\d+)?)\((\d+)\)/);
-          if (m) {
-            sonAt.agf1 = parseFloat(m);
-            sonAt.agf1Sira = parseInt(m, 10);
-          }
-        }
-        continue;
-      }
+const kosuNoMatch = temiz.match(/(\d+)\.\s*Koşu/i);
+const saatMatch = temiz.match(/(\d{1,2}:\d{2})/);
+const mesafeMatch = temiz.match(/(\d{3,4})\s*(Kum|Çim|Sentetik)/i);
 
-      if (/^\d+\t/.test(hamSatir)) {
-        const cols = hamSatir.split('\t').map(c => c.trim());
-        const no = parseInt(cols, 10);
-        let hamAd = cols || "";
-        const kosmaz = /\(Koşmaz\)/i.test(hamAd) || /SCRATCHED/i.test(cols || "");
+if (kosuNoMatch) {
+  if (aktifKosu) {
+    kosular.push(aktifKosu);
+  }
 
-        let bitisDerecesi = null;
-        const dereceMatch = hamAd.match(/\(([1-9]\d?)\)/);
-        if (dereceMatch) bitisDerecesi = parseInt(dereceMatch, 10);
+  aktifKosu = {
+    no: parseInt(kosuNoMatch[1], 10),
+    saat: saatMatch ? saatMatch[1] : "",
+    baslik: baslikDetay.split(",")[0].trim(),
+    mesafe: mesafeMatch ? parseInt(mesafeMatch[1], 10) : 1400,
+    pist: mesafeMatch ? mesafeMatch[2] : "Kum",
+    tur: this.kosuTuruBelirle(baslikDetay),
+    altiliBaslangic: null,
+    atlar: []
+  };
+  sonAt = null;
+  continue;
+}
 
-        const temizAd = hamAd
-          .replace(/\(Koşmaz\)/gi, "")
-          .replace(/\([A-Z]{2,3}\)/g, "")
-          .replace(/\(\d+\)/g, "")
-          .replace(/\b(KG|DB|SKG|SK|GKR|YP|ÇP|BB|K)\b/g, "")
-          .replace(/\s+/g, " ")
-          .trim();
+if (!aktifKosu) continue;
 
-        const orijin = cols || "";
-        const baba = orijin.split(/[-/]/).replace(/\([A-Z]+\)/g, "").trim();
-        let kisrakBabasi = "";
-        if (orijin.includes("/")) {
-          kisrakBabasi = orijin.split("/").pop().replace(/\([A-Z]+\)/g, "").trim();
-        } else {
-          const parantezler = orijin.match(/\(([^)]+)\)/g);
-          if (parantezler && parantezler.length > 0) {
-            kisrakBabasi = parantezler[parantezler.length - 1].replace(/[()]/g, "").trim();
-          }
-        }
+if (/1\.\s*6'LI GANYAN\s*Bu koşudan başlar/i.test(temiz)) { aktifKosu.altiliBaslangic = 1; continue; }
+if (/2\.\s*6'LI GANYAN\s*Bu koşudan başlar/i.test(temiz)) { aktifKosu.altiliBaslangic = 2; continue; }
+if (/^6'LI GANYAN\s*Bu koşudan başlar/i.test(temiz)) { aktifKosu.altiliBaslangic = 1; continue; }
 
-        const sikletStr = (cols || "55").replace(',', '.');
-        const siklet = sikletStr.includes('+')
-          ? sikletStr.split('+').reduce((a, b) => parseFloat(a) + parseFloat(b), 0)
-          : (parseFloat(sikletStr) || 55);
+if (sonAt && /^%\d+(\.\d+)?\(\d+\)/.test(temiz)) {
+  const agf2Match = temiz.match(/^%(\d+(?:\.\d+)?)\((\d+)\)/);
+  if (agf2Match) {
+    sonAt.agf2 = parseFloat(agf2Match[1]);
+    sonAt.agf2Sira = parseInt(agf2Match[2], 10);
+  }
+  continue;
+}
+
+if (sonAt && /^\d+[.,]\d+\t/.test(hamSatir)) {
+  const parcalar = hamSatir.split('\t').map(x => x.trim());
+  sonAt.gny = parseFloat(String(parcalar[0] || "").replace(',', '.')) || null;
+  if (parcalar[1] && parcalar[1].startsWith('%')) {
+    const m = parcalar[1].match(/^%(\d+(?:\.\d+)?)\((\d+)\)/);
+    if (m) {
+      sonAt.agf1 = parseFloat(m[1]);
+      sonAt.agf1Sira = parseInt(m[2], 10);
+    }
+  }
+  continue;
+}
+
+if (/^\d+\t/.test(hamSatir)) {
+  const cols = hamSatir.split('\t').map(c => c.trim());
+  const no = parseInt(cols[0], 10);
+  let hamAd = cols[1] || "";
+  const kosmaz = /\(Koşmaz\)/i.test(hamAd) || /SCRATCHED/i.test(hamSatir);
+
+  let bitisDerecesi = null;
+  const dereceMatch = hamAd.match(/\(([1-9]\d?)\)/);
+  if (dereceMatch) bitisDerecesi = parseInt(dereceMatch[1], 10);
+
+  const temizAd = hamAd
+    .replace(/\(Koşmaz\)/gi, "")
+    .replace(/\([A-Z]{2,3}\)/g, "")
+    .replace(/\(\d+\)/g, "")
+    .replace(/\b(KG|DB|SKG|SK|GKR|YP|ÇP|BB|K)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const orijin = cols[2] || "";
+  const baba = (orijin.split(/[-/]/)[0] || "").replace(/\([A-Z]+\)/g, "").trim();
+  let kisrakBabasi = "";
+  if (orijin.includes("/")) {
+    kisrakBabasi = (orijin.split("/").pop() || "").replace(/\([A-Z]+\)/g, "").trim();
+  } else {
+    const parantezler = orijin.match(/\(([^)]+)\)/g);
+    if (parantezler && parantezler.length > 0) {
+      kisrakBabasi = parantezler[parantezler.length - 1].replace(/[()]/g, "").trim();
+    }
+  }
+
+  const sikletStr = String(cols[4] || "55").replace(',', '.');
+  const siklet = sikletStr.includes('+')
+    ? sikletStr.split('+').reduce((a, b) => (parseFloat(a) || 0) + (parseFloat(b) || 0), 0)
+    : (parseFloat(sikletStr) || 55);
+
 
 <script>
 // ============================================================================
