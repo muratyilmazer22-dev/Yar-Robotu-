@@ -47,7 +47,7 @@ module.exports = async function handler(req, res) {
     const existingDay = await db.select().from(raceHistory).where(eq(raceHistory.raceDate, date));
     const alreadyComplete = existingDay.length > 0 && existingDay.every((row) => row.program?.runners?.length > 0 && row.results?.runners?.length > 0 && row.program?.schemaVersion === 2 && row.program.runners.every((horse) => Object.hasOwn(horse, 'age') && Object.hasOwn(horse, 'handicapPoints') && Object.hasOwn(horse, 'programStartNumber')));
     if (alreadyComplete) {
-      return res.status(200).json({ date, savedRaces: existingDay.length, programRaces: existingDay.length, resultRaces: existingDay.length, cities: [...new Set(existingDay.map((row) => row.city))], alreadyComplete: true, warnings: [] });
+      return res.status(200).json({ date, savedRaces: 0, existingRaces: existingDay.length, programRaces: existingDay.length, resultRaces: existingDay.length, cities: [...new Set(existingDay.map((row) => row.city))], alreadyComplete: true, warnings: [] });
     }
 
     const imported = await importTjkDay(date);

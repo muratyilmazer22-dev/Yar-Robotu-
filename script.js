@@ -55,8 +55,10 @@
         renderMetric('Son kayıt', data.lastDate || '—')
       );
       setStatus(Number(data.raceCount || 0) ? 'TJK arşivi Neon veritabanında hazır.' : 'Neon arşivi boş; TJK’den tarih aralığı seçerek içe aktarın.');
+      return true;
     } catch (error) {
       setStatus(error.message || 'Neon arşivi yüklenemedi.', true);
+      return false;
     }
   }
 
@@ -86,6 +88,7 @@
     progress.max = dates.length;
     progress.value = 0;
     let savedRaces = 0;
+    let alreadyCompleteDays = 0;
     let completed = 0;
     let failures = 0;
 
@@ -100,13 +103,14 @@
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Gün içe aktarılamadı.');
         savedRaces += Number(data.savedRaces || 0);
+        if (data.alreadyComplete) alreadyCompleteDays += 1;
         if (data.warnings?.length) failures += 1;
       } catch {
         failures += 1;
       }
       completed += 1;
       progress.value = completed;
-      setStatus(`${completed}/${dates.length} gün işlendi · ${savedRaces} koşu kaydedildi · ${failures} gün uyarılı/başarısız.`);
+      setStatus(`${completed}/${dates.length} gün işlendi · ${savedRaces} yeni/güncellenmiş koşu · ${alreadyCompleteDays} gün zaten eksiksiz · ${failures} gün uyarılı/başarısız.`);
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
@@ -114,8 +118,9 @@
     importButton.disabled = false;
     stopButton.disabled = true;
     const stopped = stopRequested && completed < dates.length;
-    setStatus(`${stopped ? 'İçe aktarma durduruldu' : 'İçe aktarma tamamlandı'}: ${completed}/${dates.length} gün, ${savedRaces} koşu kaydı, ${failures} uyarılı/başarısız gün.`);
-    await loadSummary();
+    const finalStatus = `${stopped ? 'İçe aktarma durduruldu' : 'İçe aktarma tamamlandı'}: ${completed}/${dates.length} gün, ${savedRaces} yeni/güncellenmiş koşu, ${alreadyCompleteDays} gün zaten eksiksiz, ${failures} uyarılı/başarısız gün.`;
+    const summaryLoaded = await loadSummary();
+    setStatus(`${finalStatus}${summaryLoaded ? '' : ' Neon arşiv özeti yenilenemedi.'}`, !summaryLoaded);
   });
 
   stopButton.addEventListener('click', () => {
