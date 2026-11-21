@@ -56,5 +56,44 @@
     renderMemory();
   </script>
   <script src="/script.js" defer></script>
+=======
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="TJK yarış bültenlerini düzenleyip analiz eden, sonuçları kaydederek isabet oranını hesaplayan yardımcı araç.">
+  <title>Yarış Analiz ve Öğrenme Motoru</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1220;--panel:#131f33;--panel2:#0f192b;--line:#263650;--text:#edf3fc;--muted:#a7b6cc;--blue:#4e8cff;--green:#21bd89;--amber:#f4bd4f;--red:#fa7474}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:20px}
+    main{max-width:980px;margin:auto}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px}.top h1{font-size:clamp(20px,4vw,28px);margin:0}.subtitle{color:var(--muted);font-size:13px;margin-top:4px}.badge{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:#b9d1ff;font-size:12px;white-space:nowrap}
+    nav{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}.tab,button{font:inherit;cursor:pointer}.tab{border:1px solid var(--line);background:var(--panel);color:var(--muted);padding:11px 8px;border-radius:10px;font-weight:650}.tab[aria-selected=true]{background:#23477f;color:white;border-color:#4381e7}.panel{display:none}.panel.active{display:block}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px}.card h2{font-size:17px;margin:0 0 8px}.hint{color:var(--muted);font-size:13px;margin:0 0 12px}label{display:block;font-size:13px;color:#d7e1f0;margin-bottom:5px}textarea,input{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:11px;font:inherit}textarea{min-height:180px;resize:vertical}.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0}.btn{border:0;border-radius:9px;background:var(--blue);color:white;padding:11px 14px;font-weight:700}.btn.secondary{background:#1c2b42;border:1px solid var(--line);color:var(--text)}.btn.good{background:#11835f}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.alert{border:1px solid var(--line);background:#18263a;border-radius:10px;padding:12px;margin:12px 0}.alert.error{border-color:#9b4247;color:#ffd2d2;background:#351c27}.alert.success{border-color:#26765e;color:#baf3dd;background:#122d2a}.race{border:1px solid var(--line);border-radius:11px;padding:14px;margin:12px 0;background:#101b2d}.race h3{font-size:15px;margin:0 0 10px}.horse{display:grid;grid-template-columns:36px minmax(110px,1fr) 72px 100px;gap:10px;align-items:center;padding:8px 4px;border-bottom:1px solid #24334a;font-size:13px}.horse:last-child{border:0}.horse small{color:var(--muted)}.score{color:#b9d1ff;font-weight:700}.table{width:100%;border-collapse:collapse;font-size:13px}.table th,.table td{text-align:left;padding:9px 6px;border-bottom:1px solid var(--line)}.table th{color:var(--muted)}.meter{height:8px;background:#263650;border-radius:99px;overflow:hidden;margin:8px 0}.meter span{display:block;height:100%;background:var(--green)}.muted{color:var(--muted)}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.stat{padding:12px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}.stat b{display:block;font-size:20px}.stat span{color:var(--muted);font-size:12px}@media(max-width:600px){body{padding:12px}.tab{font-size:12px;padding:9px 4px}.card{padding:14px}.horse{grid-template-columns:30px minmax(80px,1fr) 60px}.horse small:last-child{display:none}.fields{grid-template-columns:1fr}.stats{grid-template-columns:1fr}}
+  </style>
+  <script src="./script.js" defer></script>
+</head>
+<body>
+<main>
+  <header class="top"><div><h1>Yarış Analiz Motoru</h1><div class="subtitle">Bülten verisini puanlar; gerçek sonuçlarla ölçülen isabeti gösterir.</div></div><span class="badge" id="modelBadge">Model v1</span></header>
+  <nav aria-label="Uygulama bölümleri" role="tablist">
+    <button class="tab" id="tab-bulten" role="tab" aria-selected="true" aria-controls="panel-bulten" data-tab="bulten">Bülten</button>
+    <button class="tab" id="tab-analiz" role="tab" aria-selected="false" aria-controls="panel-analiz" data-tab="analiz">Analiz</button>
+    <button class="tab" id="tab-ogrenme" role="tab" aria-selected="false" aria-controls="panel-ogrenme" data-tab="ogrenme">Sonuçlar</button>
+    <button class="tab" id="tab-hafiza" role="tab" aria-selected="false" aria-controls="panel-hafiza" data-tab="hafiza">Model hafızası</button>
+  </nav>
+  <section class="panel active" id="panel-bulten" role="tabpanel" aria-labelledby="tab-bulten">
+    <div class="card"><h2>TJK bültenini analiz et</h2><p class="hint">Bülten metnini yapıştır. Araç tanımadığı veya eksik alanları sessizce kesin veri gibi kabul etmek yerine uyarı verir.</p>
+      <label for="hamBultenInput">Bülten metni</label><textarea id="hamBultenInput" placeholder="TJK bülteninden kopyaladığınız metni buraya yapıştırın…"></textarea>
+      <div class="fields"><div><label for="butceInput">Altılı başına bütçe (TL)</label><input type="number" id="butceInput" value="80" min="1" step="1"></div><div><label for="birimInput">Kolon birim fiyatı (TL)</label><input type="number" id="birimInput" value="1.25" min="0.01" step="0.01"></div></div>
+      <div class="actions"><button class="btn" id="analyzeBtn">Bülteni analiz et</button><button class="btn secondary" id="clearBtn">Metni temizle</button></div>
+    </div><div id="bultenUyariAlani" aria-live="polite"></div>
+  </section>
+  <section class="panel" id="panel-analiz" role="tabpanel" aria-labelledby="tab-analiz"><div id="dogrulamaRaporuAlani"></div><div id="kuponAlani"></div><div id="kosuSonucAlani"></div></section>
+  <section class="panel" id="panel-ogrenme" role="tabpanel" aria-labelledby="tab-ogrenme">
+    <div class="card"><h2>Yarış sonuçlarını karşılaştır</h2><p class="hint">Tahmin listesini analiz ettikten sonra sonuç metnini ekleyin. Bu araç gerçek performansı yalnızca eşleşen koşu ve at numaraları üzerinden hesaplar.</p><label for="sonucluBultenInput">Sonuçlu TJK bülteni</label><textarea id="sonucluBultenInput" placeholder="Yarış sonuçlarını içeren TJK metnini buraya yapıştırın…"></textarea><div class="actions"><button class="btn good" id="learnBtn">Sonuçları karşılaştır</button></div></div><div id="ogrenmeLogAlani" aria-live="polite"></div>
+  </section>
+  <section class="panel" id="panel-hafiza" role="tabpanel" aria-labelledby="tab-hafiza">
+    <div class="card"><h2>Performans özeti</h2><p class="hint">İsabet yüzdesi, bu tarayıcıda analiz edilip sonradan sonuçla karşılaştırılan yarışlardan hesaplanır; geçmiş veri yoksa yüzde gösterilmez.</p><div id="statsArea"></div></div>
+    <div class="card"><h2>Pedigri profili ekle</h2><div class="fields"><div><label for="aygirAdInput">Aygır adı</label><input id="aygirAdInput" placeholder="Örn. TOROK"></div><div><label for="dpValues">B / I / C / S / P puanları</label><input id="dpValues" placeholder="6, 6, 4, 0, 0" inputmode="decimal"></div></div><button class="btn" id="saveHorseBtn">Profili kaydet</button><div id="aygirListeAlani" class="hint" style="margin-top:12px"></div></div>
+    <div class="card"><h2>Model ve geçmiş</h2><div id="historyArea"></div><div class="actions"><button class="btn secondary" id="resetBtn">Öğrenme geçmişini temizle</button></div></div>
+  </section>
+</main>
+> main
 </body>
 </html>
