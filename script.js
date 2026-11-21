@@ -110,8 +110,18 @@ function buildCoupon(races, budget, unit) {
   if (!Number.isFinite(budget) || budget <= 0 || !Number.isFinite(unit) || unit <= 0) return { error: "Bütçe ve kolon fiyatı sıfırdan büyük olmalıdır." };
   const maxColumns = Math.floor(budget / unit);
   if (maxColumns < 1) return { error: "Bütçe, en az bir kolonun birim fiyatını karşılamıyor." };
-  const picks = six.map(({ race, ranked }) => ({ no: race.no, ranked, count: 1 }));
+  const strongestSingle = six
+    .map(({ race, ranked }) => ({ race, ranked, gap: ranked.length > 1 ? ranked[0].score - ranked[1].score : 0 }))
+    .filter((item) => item.gap >= 12.5)
+    .sort((a, b) => b.gap - a.gap)[0];
+  const picks = six.map(({ race, ranked }) => ({
+    no: race.no,
+    ranked,
+    gap: ranked.length > 1 ? ranked[0].score - ranked[1].score : 0,
+    count: strongestSingle?.race.no === race.no ? 1 : Math.min(2, ranked.length)
+  }));
   const combinations = () => picks.reduce((product, pick) => product * pick.count, 1);
+  if (combinations() > maxColumns) return { error: "Bu bütçe için tek at kuralına göre kupon oluşturulamıyor. Bütçeyi artırın veya daha düşük kolon birim fiyatı seçin." };
   while (true) {
     let best = null;
     for (const pick of picks) {
