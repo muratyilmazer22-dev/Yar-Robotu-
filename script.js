@@ -643,6 +643,30 @@ function formatCoupon(coupon, title, poolKey) {
     return `<div class="alert"><b>${pick.no}. Koşu · ${horses.length} at${singleLabel} · seçilen sıralama payı %${Math.round(pick.modelCoverage * 100)}:</b> ${horseLabels}</div>`;
   }).join("")}${completed}<b>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL / ${coupon.budget.toFixed(2)} TL bütçe</b><div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">Bu kuponu sonuç takibine kaydet</button></div></div>`;
 }
+const POOL_KEYS = ["first", "second", "third", "fourth", "fifth", "sixth"];
+const POOL_ORDINALS = ["Birinci", "İkinci", "Üçüncü", "Dördüncü", "Beşinci", "Altıncı"];
+function getPoolKey(index) {
+  return POOL_KEYS[index] || `pool${index + 1}`;
+}
+function getPoolLabel(poolKey) {
+  const knownIndex = POOL_KEYS.indexOf(poolKey);
+  if (knownIndex >= 0) return `${POOL_ORDINALS[knownIndex]} altılı`;
+  const numberedPool = /^pool(\d+)$/.exec(poolKey);
+  return numberedPool ? `Altılı ${numberedPool[1]}` : "Altılı";
+}
+function formatIncompletePool(races, start, title) {
+  const availableNos = new Set(races.map((race) => race.no));
+  const missingNos = Array.from({ length: 6 }, (_, index) => start + index).filter((no) => !availableNos.has(no));
+  const predictions = races.map((race) => {
+    if (race.finished) return `<div class="alert">${race.no}. Koşu · sonuçlanmış, tahmin dışında.</div>`;
+    const ranked = scoreRace(race).slice(0, 3);
+    if (!ranked.length) return `<div class="alert">${race.no}. Koşu · okunabilir aday bulunamadı.</div>`;
+    const horses = ranked.map((horse) => `#${horse.number} ${escapeHtml(horse.name)} · sıralama payı %${Math.round(horse.modelShare * 100)}`).join(", ");
+    return `<div class="alert"><b>${race.no}. Koşu · ilk 3 model sıralaması:</b> ${horses}</div>`;
+  }).join("");
+  const missing = missingNos.length ? ` Eksik koşular: ${missingNos.join(", ")}.` : "";
+  return `<div class="card"><h2>${title} · tamamlanmamış</h2><p class="hint">Bu altılıda ${availableNos.size}/6 koşu okundu.${missing} Aşağıdaki içerik yalnızca mevcut ayakların analizidir; tam altılı kuponu, kolon hesabı veya sonuç takibine kayıt oluşturulmadı.</p>${predictions}</div>`;
+}
 async function analyze() {
   const input = $("hamBultenInput").value.trim();
   const warning = $("bultenUyariAlani");
@@ -680,16 +704,28 @@ async function analyze() {
   else showMessage(warning, `${statusMessage} Açık ayaklarda AGF/oran piyasa sinyaliyle HP/form/pedigri bağımsız performans sinyalleri ayrıştırılır.`, "success");
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
-  const firstLegs = parsed.races.filter((race) => race.no >= 1 && race.no <= 6);
-  const first = firstLegs.length === 6
-    ? buildCoupon(firstLegs, budget, unit)
-    : { error: `Birinci altılı için 1–6. koşuların tamamı gerekli. Şu an ${firstLegs.length}/6 koşu okundu.` };
-  const secondLegs = parsed.races.filter((race) => race.no >= 6 && race.no <= 11);
-  const second = secondLegs.length === 6 ? buildCoupon(secondLegs, budget, unit) : null;
-  lastCoupons = { first, second };
-  $("kuponAlani").innerHTML = formatCoupon(first, "Birinci altılı · 1–6. koşular", "first") + (second
-    ? formatCoupon(second, "İkinci altılı · 6–11. koşular", "second")
-    : `<div class="card"><h2>İkinci altılı</h2><p class="hint">İkinci altılı için bültende 6–11. koşuların tamamı bulunmalı. Şu an ${secondLegs.length}/6 koşu okundu.</p></div>`);
+  const maxRaceNo = Math.max(...parsed.races.map((race) => race.no));
+  const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
+  const poolCards = [];
+  lastCoupons = {};
+  for (let poolIndex = 0; poolIndex === 0 || poolIndex * 5 + 1 < maxRaceNo; poolIndex += 1) {
+    const start = poolIndex * 5 + 1;
+    const end = start + 5;
+    const poolKey = getPoolKey(poolIndex);
+    const poolLabel = POOL_ORDINALS[poolIndex] || `Altılı ${poolIndex + 1}`;
+    const poolTitle = `${poolLabel} altılı · ${start}–${end}. koşular`;
+    const poolLegs = sortedRaces.filter((race) => race.no >= start && race.no <= end);
+    const availableNos = new Set(poolLegs.map((race) => race.no));
+    const complete = Array.from({ length: 6 }, (_, index) => start + index).every((no) => availableNos.has(no));
+    if (complete) {
+      const coupon = buildCoupon(poolLegs, budget, unit);
+      lastCoupons[poolKey] = coupon;
+      poolCards.push(formatCoupon(coupon, poolTitle, poolKey));
+    } else {
+      poolCards.push(formatIncompletePool(poolLegs, start, poolTitle));
+    }
+  }
+  $("kuponAlani").innerHTML = poolCards.join("");
   setTab("analiz");
 }
 function softmaxScores(horses, weights) {
@@ -950,7 +986,7 @@ function saveGeneratedCoupon(poolKey) {
   state.coupons.unshift(record);
   state.coupons = state.coupons.slice(0, 500);
   saveState();
-  showMessage($("ogrenmeLogAlani"), `${poolKey === "first" ? "Birinci" : "İkinci"} altılı kuponu sonuç takibine eklendi. Sonucu ve ödeme tutarını daha sonra ayrıca kaydedebilirsiniz.`, "success");
+  showMessage($("ogrenmeLogAlani"), `${getPoolLabel(poolKey)} kuponu sonuç takibine eklendi. Sonucu ve ödeme tutarını daha sonra ayrıca kaydedebilirsiniz.`, "success");
 }
 function addManualCoupon(event) {
   event.preventDefault();
@@ -1025,7 +1061,7 @@ function renderCouponHistory() {
     return;
   }
   target.innerHTML = records.map((record) => {
-    const pool = record.poolType === "second" ? "İkinci altılı" : "Birinci altılı";
+    const pool = getPoolLabel(record.poolType);
     const date = escapeHtml(record.date || "Tarih yok");
     const venue = record.city ? ` · ${escapeHtml(record.city)}` : "";
     const ticket = record.columns ? `${record.columns} kolon · ${money(record.cost)}` : `Maliyet ${money(record.cost)} · seçim dökümü yok`;
