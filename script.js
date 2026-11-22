@@ -560,7 +560,7 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
   }).join("");
 }
 function optimizeCouponCounts(picks, maxColumns, allowUnvalidatedSingles) {
-  let states = new Map([[1, { score: 0, counts: [] }]]);
+  let states = new Map([['1:0', { columns: 1, singles: 0, score: 0, counts: [] }]]);
   for (const pick of picks) {
     const nextStates = new Map();
     const cumulativeShares = [];
@@ -568,21 +568,26 @@ function optimizeCouponCounts(picks, maxColumns, allowUnvalidatedSingles) {
       cumulativeShares[index] = (cumulativeShares[index - 1] || 0) + horse.modelShare;
     });
     const firstCount = pick.singleEligible || allowUnvalidatedSingles || pick.ranked.length === 1 ? 1 : 2;
-    for (const [usedColumns, state] of states) {
+    for (const state of states.values()) {
       for (let count = firstCount; count <= pick.ranked.length; count++) {
-        if (usedColumns > maxColumns / count) continue;
-        const nextColumns = usedColumns * count;
+        const isDecisionSingle = count === 1 && pick.ranked.length > 1;
+        const singles = state.singles + Number(isDecisionSingle);
+        if (singles > 1 || state.columns > maxColumns / count) continue;
+        const columns = state.columns * count;
         const score = state.score + Math.log(Math.max(Number.EPSILON, cumulativeShares[count - 1]));
-        const previous = nextStates.get(nextColumns);
-        if (!previous || score > previous.score) nextStates.set(nextColumns, { score, counts: [...state.counts, count] });
+        const key = `${columns}:${singles}`;
+        const previous = nextStates.get(key);
+        if (!previous || score > previous.score) {
+          nextStates.set(key, { columns, singles, score, counts: [...state.counts, count] });
+        }
       }
     }
     states = nextStates;
     if (!states.size) return null;
   }
   let best = null;
-  for (const [usedColumns, state] of states) {
-    if (!best || state.score > best.score) best = { ...state, columns: usedColumns };
+  for (const state of states.values()) {
+    if (!best || state.score > best.score) best = { ...state, columns: state.columns };
   }
   return best;
 }
