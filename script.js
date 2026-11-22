@@ -161,8 +161,11 @@
         renderMetric('İlk 3 içinden en az 1 isabet', data.topThreeHitRaceRate == null ? '—' : `${data.topThreeHitRaceRate}%`),
         renderMetric('İlk 3 ortalama isabet', data.averageTopThreeHits == null ? '—' : String(data.averageTopThreeHits)),
         renderMetric('Model lideri birinci', data.winnerHitRate == null ? '—' : `${data.winnerHitRate}%`),
+        renderMetric('Rastgele seçim referansı', data.randomPickHitRate == null ? '—' : `${data.randomPickHitRate}%`),
+        renderMetric('Kazanan ilk 3 sıramızda', data.winnerTopThreeRankRate == null ? '—' : `${data.winnerTopThreeRankRate}%`),
+        renderMetric('Kazananın ortalama sırası', data.averageWinnerRank == null ? '—' : String(data.averageWinnerRank)),
         renderMetric('Piyasa favorisi birinci', data.marketFavoriteHitRate == null ? '—' : `${data.marketFavoriteHitRate}%`),
-        renderMetric('Sürpriz sinyali kazananı buldu', data.surpriseSignalWinnerRate == null ? '—' : `${data.surpriseSignalWinnerRate}%`)
+        renderMetric('Sürpriz adayları kazananı yakaladı', data.surpriseCandidateHitRate == null ? '—' : `${data.surpriseCandidateHitRate}%`)
       );
       const validation = data.validation || {};
       const validationTitle = document.createElement('h3');
@@ -170,7 +173,7 @@
       const validationNote = document.createElement('p');
       validationNote.className = 'sub';
       validationNote.textContent = validation.from
-        ? `Son tarih dilimi (${validation.from} – ${validation.to || '—'}) ağırlık güncellemesinde kullanılmadı; yalnızca eşik karşılaştırmasıdır. ${validation.races || 0} koşu. Referans lider isabeti: ${validation.baselineTop1HitRate ?? '—'}%. 30’dan az tek seçim adayı yetersiz örnektir. Test varsayılan ortak modeli kullanır; kullanıcıya özel öğrenilmiş ağırlıkları veya kupon getirisini temsil etmez.`
+        ? `Son tarih dilimi (${validation.from} – ${validation.to || '—'}) ağırlık güncellemesinde kullanılmadı; yalnızca eşik karşılaştırmasıdır. ${validation.races || 0} koşu. Model lideri: ${validation.baselineTop1HitRate ?? '—'}%, piyasa favorisi: ${validation.marketFavoriteHitRate ?? '—'}%. Model piyasa kıyasını geçmediyse yüksek puan tek başına güvenilir seçim sayılmamalı. 30’dan az tek seçim adayı yetersiz örnektir. Test varsayılan ortak modeli kullanır; kullanıcıya özel öğrenilmiş ağırlıkları veya kupon getirisini temsil etmez.`
         : 'En az 5 ayrı yarış tarihi olmadığından zamana göre ayrılmış doğrulama dilimi oluşturulmadı; eşik sonucu gösterilemiyor.';
       const thresholdList = document.createElement('ul');
       for (const item of validation.thresholds || []) {
@@ -189,6 +192,22 @@
       const note = document.createElement('p');
       note.className = 'sub';
       note.textContent = `Tek günlük veya küçük örnek sonuçları genellemez. Kaydedilmiş ${Number(data.storedRaces || 0).toLocaleString('tr-TR')} koşudan ${Number(data.omittedRaces || 0).toLocaleString('tr-TR')} tanesi gerekli program/sonuç eşleşmesi olmadığı için test dışı kaldı. ${data.method}`;
+      const rankBreakdown = document.createElement('section');
+      const rankTitle = document.createElement('h3');
+      rankTitle.textContent = 'Kazananın model sıralamasındaki yeri';
+      const rankNote = document.createElement('p');
+      rankNote.className = 'sub';
+      rankNote.textContent = 'Bu ölçüm, en yüksek puanlı seçimimizin dışında kazananların ne sıklıkta kaldığını gösterir. Sıralama puanı kazanma olasılığı değildir.';
+      const rankList = document.createElement('ul');
+      const rankLabels = [['1', 'Model lideri'], ['2–3', '2.–3. sıra'], ['4–6', '4.–6. sıra'], ['7+', '7. sıra ve altı']];
+      for (const [key, label] of rankLabels) {
+        const row = document.createElement('li');
+        const count = Number(data.winnerRankCounts?.[key] || 0);
+        const rate = data.evaluatedRaces ? (count / data.evaluatedRaces * 100).toFixed(1) : '0.0';
+        row.textContent = `${label}: ${count} koşu (%${rate})`;
+        rankList.append(row);
+      }
+      rankBreakdown.append(rankTitle, rankNote, rankList);
       const breakdown = document.createElement('section');
       const breakdownTitle = document.createElement('h3');
       breakdownTitle.textContent = 'Yarış türüne göre';
@@ -204,7 +223,7 @@
         breakdownList.append(item);
       }
       breakdown.append(breakdownTitle, breakdownList);
-      backtestSummary.replaceChildren(metrics, validationBlock, note, breakdown);
+      backtestSummary.replaceChildren(metrics, validationBlock, note, rankBreakdown, breakdown);
     } catch (error) {
       backtestSummary.textContent = error.message || 'Geriye dönük test çalıştırılamadı.';
     } finally {
@@ -566,7 +585,8 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     const singleNote = ranked.length > 1
       ? `Lider farkı ${leaderGap} puan · bağımsız veri kapsamı %${ranked[0].independentCoverage} · ${singleEligible ? "tek seçim eşiği geçmiş doğrulamada desteklendi" : `tek seçim önerilmiyor: ${SINGLE_GAP_THRESHOLD} puan fark, %${MIN_SINGLE_COVERAGE} kapsam ve doğrulamada genel liderden iyi sonuç gerekir (${evidenceDetail})`}. Puan farkı olasılık değildir.`
       : "Tek koşabilir at var; bu bir tahmin üstünlüğü anlamına gelmez.";
-    return `<article class="race">${heading}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· modelin ilk tercihi</small>" : ""}<br><small>Sıralama payı %${Math.round(horse.modelShare * 100)} · ${horse.robotTopThreeCount}/${ROBOT_STRATEGIES.length} robotun ilk 3’ünde · ${horse.robotFirstChoiceCount} robotun ilk tercihi · ${horse.signal} · veri kapsamı %${horse.coverage} · bağımsız kapsam %${horse.independentCoverage}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}</article>`;
+    const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Genel puan; robot sıralamalarının %80 konsensüsü ve normalize puan ortalamasının %20 birleşimidir. Ortalama sıra, robot sıralamalarının ağırlıklı ortalamasıdır. Dijital pay yalnızca model içi sıralama payıdır; kazanma olasılığı değildir. Kaynakta bulunmayan metrikler gösterilmez.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Ort. sıra</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th><th scope="col">Dijital pay</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${horse.number}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.averageRank.toFixed(2)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td><td>%${Math.round(horse.modelShare * 100)}</td></tr>`).join("")}</tbody></table></div></details>` : "";
+    return `<article class="race">${heading}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· modelin ilk tercihi</small>" : ""}<br><small>Sıralama payı %${Math.round(horse.modelShare * 100)} · ${horse.robotTopThreeCount}/${ROBOT_STRATEGIES.length} robotun ilk 3’ünde · ${horse.robotFirstChoiceCount} robotun ilk tercihi · ${horse.signal} · veri kapsamı %${horse.coverage} · bağımsız kapsam %${horse.independentCoverage}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
 function optimizeCouponCounts(picks, maxColumns, allowUnvalidatedSingles) {
@@ -667,7 +687,7 @@ function formatCoupon(coupon, title, poolKey) {
     : !state.trainingReport?.validatedAt
       ? `Başlangıç ağırlıkları kullanılıyor. Eğitim için en az ${MODEL_MIN_RACES} uygun koşu, en az 5 ayrı tarih ve en az 5 doğrulama koşusu gerekir; mevcut uygun koşu ${state.trainingReport?.sampleSize || 0}.`
       : `Ayrılmış tarih doğrulamasında en az %2 iyileşme görülmedi; başlangıç ağırlıkları korunuyor (${state.trainingReport.trainingRaces} eğitim / ${state.trainingReport.validationRaces} doğrulama koşusu).`;
-  return `<div class="card"><h2>${title} · öğrenen model önerisi</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p>${warning}${coupon.picks.map((pick) => {
+  return `<div class="card"><h2>${title} · öğrenen model önerisi</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p><details class="analysis-details coupon-method"><summary>Kupon nasıl oluşturuluyor?</summary><p class="hint">Her açık ayak sekiz stratejinin ortak sıralamasıyla puanlanır. Tüm atlar bütçeye sığıyorsa tamamı alınır; sığmıyorsa seçilen atların birikimli model payı, bütçenin izin verdiği kolonlar içinde optimize edilir. Doğrulanmış tek at koşulunu geçen bir ayak tek at kalabilir; diğer ayaklarda en az iki at korunur. Bu kısıtla kupon çıkmazsa bütçe en fazla bir doğrulanmamış tek at seçimini zorlayabilir ve uyarı gösterilir. Kolon adedi seçilen at adetlerinin çarpımıdır; toplam tutar kolon adedi × birim fiyat olarak hesaplanır.</p></details>${warning}${coupon.picks.map((pick) => {
     const horses = pick.ranked.slice(0, pick.count);
     const horseLabels = horses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)} · sıralama payı %${Math.round(horse.modelShare * 100)}`).join(", ");
     const singleLabel = horses.length === 1

@@ -193,7 +193,7 @@
     return [...stats.values()].map(({ horse, rankTotal, scoreTotal, shareTotal, topThreeCount, firstChoiceCount, firstChoiceRobots }) => {
       const averageRank = rankTotal / totalRankWeight;
       const consensusScore = (fieldSize === 1 ? 100 : (fieldSize - averageRank) / (fieldSize - 1) * 100) * 0.8 + scoreTotal / totalRankWeight * 0.2;
-      return { ...horse, score: Math.round(consensusScore * 10) / 10, modelShare: shareTotal / totalRankWeight, robotTopThreeCount: topThreeCount, robotFirstChoiceCount: firstChoiceCount, robotFirstChoices: firstChoiceRobots };
+      return { ...horse, score: Math.round(consensusScore * 10) / 10, averageRank: Math.round(averageRank * 100) / 100, modelShare: shareTotal / totalRankWeight, robotTopThreeCount: topThreeCount, robotFirstChoiceCount: firstChoiceCount, robotFirstChoices: firstChoiceRobots };
     }).sort((a, b) => b.score - a.score || b.modelShare - a.modelShare || Number(a.number) - Number(b.number));
   }
 
