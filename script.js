@@ -408,8 +408,8 @@ function buildCoupon(races, budget, unit) {
     count: strongestSingle?.race.no === race.no ? 1 : Math.min(2, ranked.length),
     budgetNarrowed: false
   }));
-  const combinations = () => picks.reduce((product, pick) => product * pick.count, 1);
-  while (combinations() > maxColumns) {
+  const combinations = () => picks.reduce((product, pick) => product * (pick.count + (pick.surpriseHorse ? 1 : 0)), 1);
+  while (picks.reduce((product, pick) => product * pick.count, 1) > maxColumns) {
     const reducible = picks.filter((pick) => pick.count > 1 && !pick.confidentSingle);
     if (!reducible.length) break;
     const leastCovered = reducible.sort((a, b) => {
@@ -420,11 +420,21 @@ function buildCoupon(races, budget, unit) {
     leastCovered.count--;
     leastCovered.budgetNarrowed = true;
   }
+  const surpriseCandidates = picks.flatMap((pick) => {
+    const horse = pick.ranked.find((runner, index) => index >= pick.count && runner.signal === "Sürpriz adayı" && runner.independentCoverage >= 50);
+    return horse ? [{ pick, horse, edge: horse.performanceScore - horse.marketScore }] : [];
+  }).sort((a, b) => b.edge - a.edge);
+  for (const candidate of surpriseCandidates) {
+    const { pick, horse } = candidate;
+    const next = combinations() * (pick.count + 1) / (pick.count + (pick.surpriseHorse ? 1 : 0));
+    if (next <= maxColumns) pick.surpriseHorse = horse;
+  }
   while (true) {
     let best = null;
     for (const pick of picks) {
       if (pick.count >= pick.ranked.length) continue;
-      const next = combinations() * (pick.count + 1) / pick.count;
+      const currentCount = pick.count + (pick.surpriseHorse ? 1 : 0);
+      const next = combinations() * (currentCount + 1) / currentCount;
       const gap = pick.ranked[pick.count - 1].score - pick.ranked[pick.count].score;
       if (next <= maxColumns && (!best || gap < best.gap)) best = { pick, gap };
     }
@@ -437,7 +447,11 @@ function buildCoupon(races, budget, unit) {
 function formatCoupon(coupon, title) {
   if (coupon.error) return `<div class="card"><h2>${title}</h2><div class="alert error">${escapeHtml(coupon.error)}</div></div>`;
   const warning = coupon.budgetNarrowed ? `<div class="alert">Bütçe nedeniyle bazı koşular tek ata düşürüldü. Bunlar güçlü “banko” olarak değil, bütçe kısıtı olarak değerlendirilmelidir.</div>` : "";
-  return `<div class="card"><h2>${title}</h2><p class="hint">Puanlar sıralama göstergesidir; kazanma olasılığı veya garanti değildir. Tek at eşiği ${SINGLE_GAP_THRESHOLD} puan ve en az %50 bağımsız veri kapsamıdır.</p>${warning}${coupon.picks.map((pick) => `<div class="alert"><b>${pick.no}. Koşu · ${pick.count} at${pick.confidentSingle ? " · Tek at adayı" : pick.budgetNarrowed && pick.count === 1 ? " · Bütçe kısıtı" : ""}:</b> ${pick.ranked.slice(0, pick.count).map((horse) => `#${horse.number} ${escapeHtml(horse.name)}`).join(", ")}</div>`).join("")}<b>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL / ${coupon.budget.toFixed(2)} TL bütçe</b></div>`;
+  return `<div class="card"><h2>${title}</h2><p class="hint">Puanlar göreli sıralamadır; kazanma garantisi değildir. Favoriyle performans sinyali ayrışan ve bağımsız veri kapsamı yeterli sürpriz adayı, bütçe elverirse ayrıca eklenir.</p>${warning}${coupon.picks.map((pick) => {
+    const horses = [...pick.ranked.slice(0, pick.count), ...(pick.surpriseHorse ? [pick.surpriseHorse] : [])];
+    const horseLabels = horses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)}${horse === pick.surpriseHorse ? " · sürpriz sinyali" : ""}`).join(", ");
+    return `<div class="alert"><b>${pick.no}. Koşu · ${horses.length} at${pick.confidentSingle && horses.length === 1 && !pick.surpriseHorse ? " · Tek at adayı" : pick.budgetNarrowed && horses.length === 1 ? " · Bütçe kısıtı" : ""}:</b> ${horseLabels}</div>`;
+  }).join("")}<b>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL / ${coupon.budget.toFixed(2)} TL bütçe</b></div>`;
 }
 async function analyze() {
   const input = $("hamBultenInput").value.trim();
