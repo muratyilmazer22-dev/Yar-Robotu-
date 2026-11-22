@@ -567,38 +567,6 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     return `<article class="race">${heading}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· model lideri</small>" : ""}<br><small>${horse.robotTopThreeCount}/${ROBOT_STRATEGIES.length} stratejinin ilk 3’ünde · ${horse.signal}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
-function optimizeCouponCounts(picks, maxColumns, allowUnvalidatedSingles, maxSingles = 1) {
-  let states = new Map([['1:0', { columns: 1, singles: 0, score: 0, counts: [] }]]);
-  for (const pick of picks) {
-    const nextStates = new Map();
-    const cumulativeShares = [];
-    pick.ranked.forEach((horse, index) => {
-      cumulativeShares[index] = (cumulativeShares[index - 1] || 0) + horse.modelShare;
-    });
-    const firstCount = pick.singleEligible || allowUnvalidatedSingles || pick.ranked.length === 1 ? 1 : 2;
-    for (const state of states.values()) {
-      for (let count = firstCount; count <= pick.ranked.length; count++) {
-        const isDecisionSingle = count === 1 && pick.ranked.length > 1;
-        const singles = state.singles + Number(isDecisionSingle);
-        if (singles > maxSingles || state.columns > maxColumns / count) continue;
-        const columns = state.columns * count;
-        const score = state.score + Math.log(Math.max(Number.EPSILON, cumulativeShares[count - 1]));
-        const key = `${columns}:${singles}`;
-        const previous = nextStates.get(key);
-        if (!previous || score > previous.score) {
-          nextStates.set(key, { columns, singles, score, counts: [...state.counts, count] });
-        }
-      }
-    }
-    states = nextStates;
-    if (!states.size) return null;
-  }
-  let best = null;
-  for (const state of states.values()) {
-    if (!best || state.score > best.score) best = { ...state, columns: state.columns };
-  }
-  return best;
-}
 function buildCoupon(races, budget, unit) {
   if (races.length !== 6) return { error: "Altılı kupon için 6 okunabilir koşu gerekir." };
   const finishedNos = races.filter((race) => race.finished).map((race) => race.no);
@@ -635,13 +603,13 @@ function buildCoupon(races, budget, unit) {
     picks.forEach((pick) => { pick.count = pick.ranked.length; });
     columns = fullColumns;
   } else {
-    let best = optimizeCouponCounts(picks, maxColumns, false);
+    let best = window.CouponOptimizer.optimizeCouponCounts(picks, maxColumns, false);
     if (!best) {
-      best = optimizeCouponCounts(picks, maxColumns, true);
+      best = window.CouponOptimizer.optimizeCouponCounts(picks, maxColumns, true);
       budgetForcedSingle = true;
     }
     if (!best) {
-      best = optimizeCouponCounts(picks, maxColumns, true, picks.length);
+      best = window.CouponOptimizer.optimizeCouponCounts(picks, maxColumns, true, picks.length);
       budgetForcedSingle = true;
       budgetForcedMultipleSingles = Boolean(best);
     }
@@ -683,7 +651,7 @@ function formatCoupon(coupon, title, poolKey) {
     : !state.trainingReport?.validatedAt
       ? `Başlangıç ağırlıkları kullanılıyor. Eğitim için en az ${MODEL_MIN_RACES} uygun koşu, en az 5 ayrı tarih ve en az 5 doğrulama koşusu gerekir; mevcut uygun koşu ${state.trainingReport?.sampleSize || 0}.`
       : `Ayrılmış tarih doğrulamasında en az %2 iyileşme görülmedi; başlangıç ağırlıkları korunuyor (${state.trainingReport.trainingRaces} eğitim / ${state.trainingReport.validationRaces} doğrulama koşusu).`;
-  return `<div class="card"><h2>${title} · öğrenen model önerisi</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p><details class="analysis-details coupon-method"><summary>Kupon nasıl oluşturuluyor?</summary><p class="hint">Her açık ayak sekiz stratejinin ortak sıralamasıyla puanlanır. Tüm atlar bütçeye sığıyorsa tamamı alınır; sığmıyorsa seçilen atların birikimli model payı, bütçenin izin verdiği kolonlar içinde optimize edilir. Doğrulanmış tek at koşulunu geçen bir ayak tek at kalabilir; mümkün olduğunda diğer ayaklarda en az iki at korunur. Bütçe buna yetmezse önce tek bir doğrulanmamış tek seçim denenir; hâlâ kupon çıkmazsa bütçeye uyan kurgu oluşturulur ve doğrulanmamış tek atların her biri açıkça işaretlenerek risk uyarısı gösterilir. Kolon adedi seçilen at adetlerinin çarpımıdır; toplam tutar kolon adedi × birim fiyat olarak hesaplanır.</p></details>${warning}${coupon.picks.map((pick) => {
+  return `<div class="card"><h2>${title} · öğrenen model önerisi</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p><details class="analysis-details coupon-method"><summary>Kupon nasıl oluşturuluyor?</summary><p class="hint">Her açık ayak sekiz stratejinin ortak sıralamasıyla puanlanır. Tüm atlar bütçeye sığıyorsa tamamı alınır; sığmıyorsa seçilen atların birikimli model payı, bütçenin izin verdiği kolonlar içinde optimize edilir. Bağımsız veri kapsamı düşük ve analiz robotlarının lider atta daha az uzlaştığı ayaklara, ek at kapsamı için daha yüksek öncelik verilir; bu yalnızca bütçe dağıtım sezgisidir ve kazanma olasılığı değildir. Doğrulanmış tek at koşulunu geçen bir ayak tek at kalabilir; mümkün olduğunda diğer ayaklarda en az iki at korunur. Bütçe buna yetmezse önce tek bir doğrulanmamış tek seçim denenir; hâlâ kupon çıkmazsa bütçeye uyan kurgu oluşturulur ve doğrulanmamış tek atların her biri açıkça işaretlenerek risk uyarısı gösterilir. Kolon adedi seçilen at adetlerinin çarpımıdır; toplam tutar kolon adedi × birim fiyat olarak hesaplanır.</p></details>${warning}${coupon.picks.map((pick) => {
     const horses = pick.ranked.slice(0, pick.count);
     const horseLabels = horses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)} · sıralama payı %${Math.round(horse.modelShare * 100)}`).join(", ");
     const singleLabel = horses.length === 1
