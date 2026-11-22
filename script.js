@@ -739,12 +739,13 @@ async function analyze() {
   else showMessage(warning, `${statusMessage} Açık ayaklarda AGF/oran piyasa sinyaliyle HP/form/pedigri bağımsız performans sinyalleri ayrıştırılır.`, "success");
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
-  const maxRaceNo = Math.max(...parsed.races.map((race) => race.no));
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
+  const firstRaceNo = sortedRaces[0].no;
+  const lastRaceNo = sortedRaces[sortedRaces.length - 1].no;
   const poolCards = [];
-  const poolStarts = [1];
-  const secondPoolStart = maxRaceNo - 5;
-  if (secondPoolStart > 1) poolStarts.push(secondPoolStart);
+  const poolStarts = [firstRaceNo];
+  const secondPoolStart = lastRaceNo - 5;
+  if (secondPoolStart > firstRaceNo) poolStarts.push(secondPoolStart);
   lastCoupons = {};
   for (const [poolIndex, start] of poolStarts.entries()) {
     const end = start + 5;
