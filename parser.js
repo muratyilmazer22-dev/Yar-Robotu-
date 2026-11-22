@@ -34,7 +34,7 @@
     for (const raw of String(text || '').split(/\r?\n/)) {
       const line = raw.trim();
       if (!line) continue;
-      const raceHeader = line.match(/^(\d+)\.\s*Koşu\s+(?:(\d{1,2}[.:]\d{2})\s*)?(.*)$/i);
+      const raceHeader = line.match(/^(\d+)\.\s*(?:Koşu|Race)\s+(?:(\d{1,2}[.:]\d{2})\s*)?(.*)$/i);
       if (raceHeader) {
         if (current) races.push(current);
         const detail = raceHeader[3] || '';
@@ -56,7 +56,7 @@
       const cells = splitCells(raw);
       if (!cells) continue;
       const normalizedHeaders = cells.map(fold);
-      const nameIndex = normalizedHeaders.findIndex((cell) => cell.includes('at ismi') || cell === 'at adi');
+      const nameIndex = normalizedHeaders.findIndex((cell) => cell.includes('at ismi') || cell === 'at adi' || cell.includes('horse name') || cell === 'horse');
       if (nameIndex >= 0) {
         headers = normalizedHeaders;
         continue;
@@ -69,18 +69,17 @@
       let legacyNo = null;
       if (headers) {
         const indexOf = (fragment) => headers.findIndex((header) => header === fragment || header.includes(fragment));
-        const horseCellIndex = headers.findIndex((header) => header.includes('at ismi') || header === 'at adi');
+        const horseCellIndex = headers.findIndex((header) => header.includes('at ismi') || header === 'at adi' || header.includes('horse name') || header === 'horse');
         rowName = cells[horseCellIndex] || '';
         const horseMatch = rowName.match(/\((\d{1,2})\)/);
-        horseNumber = horseMatch ? Number(horseMatch[1]) : null;
-        const resultTable = headers.some((header) => header.includes('derece') || header.includes('sonuc') || header.includes('finish'));
-        const rankIndex = headers.findIndex((header) => header === 's' || header.includes('sira') || header.includes('sonuc') || header.includes('rank'));
-        assumedRank = resultTable && rankIndex >= 0 ? parseNumber(cells[rankIndex]) : null;
-
         const column = (fragment) => {
           const index = indexOf(fragment);
           return index >= 0 ? cells[index] || '' : '';
         };
+        const numberIndex = headers.findIndex((header) => header === 'no' || header.includes('at no') || header.includes('horse no') || header.includes('horse number') || header.includes('program no'));
+        horseNumber = horseMatch ? Number(horseMatch[1]) : numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null;
+        const rankIndex = headers.findIndex((header) => header === 's' || header.includes('sira') || header.includes('sonuc') || header.includes('result') || header.includes('rank') || header.includes('placing') || header.includes('position'));
+        assumedRank = rankIndex >= 0 ? parseNumber(cells[rankIndex]) : null;
         const origin = column('orijin');
         const pedigree = parseOrigin(origin);
         const weightText = column('siklet');

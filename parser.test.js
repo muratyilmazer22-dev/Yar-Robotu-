@@ -37,3 +37,30 @@ test('reads finishing positions from result-table headers', () => {
 
   assert.deepEqual(race.horses.map((horse) => horse.rank), [1, 2]);
 });
+
+test('reads winner rank from result tables without a time column', () => {
+  const results = [
+    '3. Koşu 15:30 Maiden',
+    'At No\tAt İsmi\tSıra',
+    '9\tPEER KING\t1',
+    '3\tDJUMBO\t2'
+  ].join('\n');
+
+  const [race] = parseRaces(results);
+
+  assert.deepEqual(race.horses.map((horse) => [horse.horseNumber, horse.rank]), [[9, 1], [3, 2]]);
+});
+
+test('supports English race headings and result column names', () => {
+  const results = [
+    '1. Race 10:15 Selangor',
+    'Horse No\tHorse Name\tPosition',
+    '2\tPACIFIC SILVER\t1',
+    '3\tANIKI\t2'
+  ].join('\n');
+
+  const [race] = parseRaces(results);
+
+  assert.equal(race.no, 1);
+  assert.deepEqual(race.horses.map((horse) => [horse.horseNumber, horse.rank]), [[2, 1], [3, 2]]);
+});
