@@ -247,9 +247,14 @@ let stateDb = null;
 let lastAnalysis = [];
 let lastCoupons = {};
 let deferredInstallPrompt = null;
+let firebaseSdk = null;
+let firebaseAccount = null;
+let firebaseSyncReady = false;
+let firebaseSaveTimer = null;
+let firebaseSyncChain = Promise.resolve();
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
-function saveState() {
+function persistStateLocally() {
   if (stateDb) {
     try {
       const transaction = stateDb.transaction("app", "readwrite");
@@ -260,7 +265,125 @@ function saveState() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch { showMessage($("ogrenmeLogAlani"), "Tarayıcı depolaması dolu veya kullanılamıyor. Yedeği indirip saklayın.", "error"); }
   }
+}
+function setFirebaseStatus(message, isError = false) {
+  const status = $("firebaseMemoryStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle("error", isError);
+}
+function mergeMemoryRecords(remoteRecords, localRecords, keyOf) {
+  const merged = new Map();
+  for (const item of remoteRecords || []) merged.set(keyOf(item), item);
+  for (const item of localRecords || []) merged.set(keyOf(item), item);
+  return [...merged.values()];
+}
+function mergeFirebaseMemory(localState, remoteState) {
+  const localTime = Date.parse(localState.localUpdatedAt || "") || 0;
+  const remoteTime = Date.parse(remoteState.localUpdatedAt || "") || 0;
+  const latest = remoteTime > localTime ? remoteState : localState;
+  const profiles = remoteTime > localTime
+    ? { ...(localState.profiles || {}), ...(remoteState.profiles || {}) }
+    : { ...(remoteState.profiles || {}), ...(localState.profiles || {}) };
+  return normalizeState({
+    ...latest,
+    profiles,
+    predictions: mergeMemoryRecords(remoteState.predictions, localState.predictions, (item) => `${item.date || ""}:${item.city || ""}:${item.no ?? ""}`),
+    outcomes: mergeMemoryRecords(remoteState.outcomes, localState.outcomes, (item) => item.sourceKey || `${String(item.at || "").slice(0, 10)}:${item.city || ""}:${item.raceNo}:${item.winner}`),
+    coupons: mergeMemoryRecords(remoteState.coupons, localState.coupons, (item) => item.id || JSON.stringify(item))
+  });
+}
+function queueFirebaseMemorySync() {
+  if (!firebaseAccount || !firebaseSyncReady || !firebaseSdk) return;
+  clearTimeout(firebaseSaveTimer);
+  const account = firebaseAccount;
+  const snapshot = JSON.parse(JSON.stringify(state));
+  firebaseSaveTimer = window.setTimeout(() => {
+    firebaseSyncChain = firebaseSyncChain.then(async () => {
+      if (!firebaseSyncReady || firebaseAccount?.uid !== account.uid || snapshot.localUpdatedAt !== state.localUpdatedAt) return;
+      await firebaseSdk.saveMemory(account, snapshot);
+      setFirebaseStatus(`Hafıza Firebase hesabınızla eşitlendi: ${account.email || account.uid}`);
+    }).catch(() => {
+      setFirebaseStatus("Firebase eşitlemesi başarısız. Yerel kayıtlar korunuyor; Firestore kurallarını ve bağlantıyı kontrol edin.", true);
+    });
+  }, 900);
+}
+async function initializeFirebaseMemory() {
+  const api = await window.RaceRobotFirebaseReady;
+  if (!api?.ok) {
+    setFirebaseStatus("Firebase yapılandırmasına şu an ulaşılamıyor. Yerel hafıza çalışmaya devam ediyor.", true);
+    return;
+  }
+  firebaseSdk = api;
+  $("firebaseAuthForm")?.querySelectorAll("input, button").forEach((element) => { element.disabled = false; });
+  $("firebaseAuthForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api.signIn($("firebaseEmail").value.trim(), $("firebasePassword").value);
+      setFirebaseStatus("Giriş başarılı; Firebase hafızası yükleniyor…");
+    } catch {
+      setFirebaseStatus("Giriş başarısız. E-posta ve parolayı, ayrıca Firebase Authentication e-posta/parola sağlayıcısını kontrol edin.", true);
+    }
+  });
+  $("firebaseCreateAccountButton")?.addEventListener("click", async () => {
+    if (!$("firebaseAuthForm").reportValidity()) return;
+    try {
+      await api.createAccount($("firebaseEmail").value.trim(), $("firebasePassword").value);
+      setFirebaseStatus("Hesap oluşturuldu; hafıza hesabınıza aktarılıyor…");
+    } catch {
+      setFirebaseStatus("Hesap oluşturulamadı. Parolanın en az 6 karakter olduğunu ve e-posta/parola sağlayıcısının açık olduğunu kontrol edin.", true);
+    }
+  });
+  $("firebaseSignOutButton")?.addEventListener("click", async () => {
+    if (!firebaseAccount || !firebaseSyncReady) return;
+    try {
+      await firebaseSdk.saveMemory(firebaseAccount, JSON.parse(JSON.stringify(state)));
+      await api.signOut();
+      firebaseAccount = null;
+      firebaseSyncReady = false;
+      state = normalizeState(null);
+      lastAnalysis = [];
+      persistStateLocally();
+      window.location.reload();
+    } catch {
+      setFirebaseStatus("Son eşitleme tamamlanmadı; veri kaybını önlemek için oturum açık bırakıldı.", true);
+    }
+  });
+  api.onAuthStateChanged(async (user) => {
+    firebaseAccount = user || null;
+    firebaseSyncReady = false;
+    $("firebaseSignOutButton").hidden = !user;
+    $("firebaseAuthForm").hidden = Boolean(user);
+    $("firebaseCreateAccountButton").hidden = Boolean(user);
+    if (!user) {
+      setFirebaseStatus("Oturum açmadan bu tarayıcıda kullanabilirsiniz; giriş yaptığınızda kişisel hafıza hesabınızla eşitlenir.");
+      return;
+    }
+    setFirebaseStatus("Firebase hafızası okunuyor…");
+    try {
+      const remoteMemory = await api.loadMemory(user);
+      if (firebaseAccount?.uid !== user.uid) return;
+      const localMemory = state.firebaseOwnerUid && state.firebaseOwnerUid !== user.uid ? normalizeState(null) : state;
+      state = remoteMemory ? mergeFirebaseMemory(localMemory, remoteMemory) : normalizeState(localMemory);
+      state.firebaseOwnerUid = user.uid;
+      state.localUpdatedAt = new Date().toISOString();
+      if (state.predictions?.length) lastAnalysis = state.predictions;
+      persistStateLocally();
+      updateMemory();
+      firebaseSyncReady = true;
+      await api.saveMemory(user, JSON.parse(JSON.stringify(state)));
+      setFirebaseStatus(`Hafıza Firebase hesabınızla eşitlendi: ${user.email || user.uid}`);
+    } catch {
+      firebaseSyncReady = false;
+      setFirebaseStatus("Firebase verisi okunamadı. Yerel kayıtlar korundu; Firestore kurallarına users/{uid} için yalnızca aynı kullanıcı erişimini ekleyin.", true);
+    }
+  });
+}
+function saveState() {
+  state.localUpdatedAt = new Date().toISOString();
+  persistStateLocally();
   updateMemory();
+  queueFirebaseMemorySync();
 }
 function showMessage(target, text, type = "") { target.innerHTML = `<div class="alert ${type}">${escapeHtml(text)}</div>`; }
 function setTab(name) {
@@ -944,7 +1067,7 @@ function updateMemory() {
   const report = state.trainingReport;
   $("modelBadge").textContent = `${ROBOT_STRATEGIES.length} deterministik robot · v${state.version}`;
   $("statsArea").innerHTML = n
-    ? `<div class="stats"><div class="stat"><b>${n}</b><span>ölçülen koşu</span></div><div class="stat"><b>%${Math.round(top3 / n * 100)}</b><span>ilk 3 isabet oranı</span></div><div class="stat"><b>%${Math.round(top1 / n * 100)}</b><span>model lideri</span></div></div><div class="meter" aria-label="İlk üç isabet oranı"><span style="width:${Math.round(top3 / n * 100)}%"></span></div><p class="hint">Bu cihazdaki karşılaştırmalar ve Neon resmi yarış arşivi birlikte değerlendirilir. ${trainable < MODEL_MIN_RACES ? `Ağırlık kalibrasyonu için ${MODEL_MIN_RACES} uygun yarış gerekir; şu an ${trainable} var.` : report?.updated ? `Ağırlıklar geçmiş veride eğitildi ve ayrılmış doğrulama grubunda iyileşme gösterdi (Brier ${report.validationBrier.toFixed(3)}).` : "Yeterli örnek var; fakat doğrulama grubu mevcut ağırlıkları geçemedi, bu yüzden model ağırlıkları değiştirilmedi."} Güçlü tek aday geçmişi: ${singleHits}/${singleResults.length}; doğrulanmış pist/koşu türü ağırlığı: ${contextCount}. Oranlar gelecekte kazanma garantisi değildir.</p>`
+    ? `<div class="stats"><div class="stat"><b>${n}</b><span>ölçülen koşu</span></div><div class="stat"><b>%${Math.round(top3 / n * 100)}</b><span>ilk 3 isabet oranı</span></div><div class="stat"><b>%${Math.round(top1 / n * 100)}</b><span>model lideri</span></div></div><div class="meter" aria-label="İlk üç isabet oranı"><span style="width:${Math.round(top3 / n * 100)}%"></span></div><p class="hint">Kişisel karşılaştırmalar (girişte Firebase hesabıyla eşitlenir) ve Neon resmi yarış arşivi birlikte değerlendirilir. ${trainable < MODEL_MIN_RACES ? `Ağırlık kalibrasyonu için ${MODEL_MIN_RACES} uygun yarış gerekir; şu an ${trainable} var.` : report?.updated ? `Ağırlıklar geçmiş veride eğitildi ve ayrılmış doğrulama grubunda iyileşme gösterdi (Brier ${report.validationBrier.toFixed(3)}).` : "Yeterli örnek var; fakat doğrulama grubu mevcut ağırlıkları geçemedi, bu yüzden model ağırlıkları değiştirilmedi."} Güçlü tek aday geçmişi: ${singleHits}/${singleResults.length}; doğrulanmış pist/koşu türü ağırlığı: ${contextCount}. Oranlar gelecekte kazanma garantisi değildir.</p>`
     : `<p class="muted">Henüz ölçülmüş sonuç yok. Yüzde hesaplamak için tahminleri gerçek sonuçlarla karşılaştırın.</p>`;
   const profileNames = Object.keys(state.profiles).sort();
   $("aygirListeAlani").textContent = `${profileNames.length} pedigri profili: ${profileNames.slice(0, 12).join(", ")}${profileNames.length > 12 ? "…" : ""}`;
@@ -965,7 +1088,8 @@ function addProfile() {
   showMessage($("aygirListeAlani"), `${name} profili kaydedildi.`, "success");
 }
 function resetHistory() {
-  if (!window.confirm("Bu tarayıcıdaki yarış sonuçları, kupon sonuç kayıtları ve eklenen profiller silinsin mi?")) return;
+  const scope = firebaseAccount ? "Bu cihazdaki ve Firebase hesabınızdaki" : "Bu tarayıcıdaki";
+  if (!window.confirm(`${scope} yarış sonuçları, kupon sonuç kayıtları ve eklenen profiller silinsin mi?`)) return;
   state = { ...DEFAULT_STATE, profiles: { ...DEFAULT_PROFILES }, coupons: [] };
   lastAnalysis = [];
   lastCoupons = {};
@@ -975,6 +1099,7 @@ function resetHistory() {
 }
 document.addEventListener("DOMContentLoaded", async () => {
   state = await restoreState();
+  initializeFirebaseMemory().catch(() => setFirebaseStatus("Firebase bağlantısı başlatılamadı; yerel hafıza korunuyor.", true));
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;
