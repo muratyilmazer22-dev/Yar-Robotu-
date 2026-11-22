@@ -435,7 +435,8 @@ function parseRaces(text) {
     if (columns.length < 2 || !/^\d+$/.test(columns[0])) continue;
     const number = Number(columns[0]);
     const nameColumn = columns[1] || "";
-    const placeMatch = nameColumn.match(/\((\d{1,2})\)/);
+    const resultEvidence = /\b\d{1,2}\.\d{2}\.\d{2}\b/.test(raw);
+    const placeMatch = resultEvidence ? nameColumn.match(/\((\d{1,2})\)/) : null;
     const scratched = /koşmaz|scratched/i.test(raw);
     const name = nameColumn.replace(/\(\d{1,2}\)|\(Koşmaz\)/gi, "").replace(/\b(KG|DB|SKG|SK|GKR|YP|ÇP|BB)\b/g, "").trim();
     const origin = columns.find((column, index) => index >= 2 && /[-/]/.test(column) && !/^\d/.test(column)) || "";
@@ -682,12 +683,12 @@ async function analyze() {
   const first = firstLegs.length === 6
     ? buildCoupon(firstLegs, budget, unit)
     : { error: `Birinci altılı için 1–6. koşuların tamamı gerekli. Şu an ${firstLegs.length}/6 koşu okundu.` };
-  const secondLegs = parsed.races.filter((race) => race.no >= 7 && race.no <= 12);
+  const secondLegs = parsed.races.filter((race) => race.no >= 6 && race.no <= 11);
   const second = secondLegs.length === 6 ? buildCoupon(secondLegs, budget, unit) : null;
   lastCoupons = { first, second };
   $("kuponAlani").innerHTML = formatCoupon(first, "Birinci altılı · 1–6. koşular", "first") + (second
-    ? formatCoupon(second, "İkinci altılı · 7–12. koşular", "second")
-    : `<div class="card"><h2>İkinci altılı</h2><p class="hint">İkinci altılı için bültende 7–12. koşuların tamamı bulunmalı. Şu an ${secondLegs.length}/6 koşu okundu.</p></div>`);
+    ? formatCoupon(second, "İkinci altılı · 6–11. koşular", "second")
+    : `<div class="card"><h2>İkinci altılı</h2><p class="hint">İkinci altılı için bültende 6–11. koşuların tamamı bulunmalı. Şu an ${secondLegs.length}/6 koşu okundu.</p></div>`);
   setTab("analiz");
 }
 function softmaxScores(horses, weights) {
