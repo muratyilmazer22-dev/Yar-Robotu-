@@ -459,54 +459,27 @@ function setTab(name) {
 function normalize(text) { return text.toLocaleUpperCase("en-US").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "I"); }
 function parseNumber(value) { const result = Number(String(value || "").replace(",", ".")); return Number.isFinite(result) ? result : null; }
 function parseRaces(text) {
-  const lines = text.split(/\r?\n/);
-  const races = [];
-  let race = null;
-  let warnings = [];
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    const header = line.match(/^(\d+)\.\s*Koşu\s+(?:(\d{1,2}[.:]\d{2})\s*)?(.*)$/i);
-    if (header) {
-      if (race) races.push(race);
-      const detail = header[3] || "";
-      const distance = detail.match(/(\d{3,4})\s*m?\s*(Kum|Çim|Sentetik)/i);
-      const surface = detail.match(/(?:^|\s)(Kum|Çim|Sentetik)(?=\s|$|[,.;])/i);
-      const className = normalize(detail);
-      race = { no: Number(header[1]), time: header[2] || "", title: detail.trim(), distance: distance ? Number(distance[1]) : 1400, surface: surface?.[1] || "Belirtilmemiş", horses: [] };
-      race.type = className.includes("HANDIKAP") ? "HANDIKAP" : className.includes("MAIDEN") || className.includes("SATIS") ? "MAIDEN / SATIŞ" : "DİĞER";
-      continue;
-    }
-    if (!race) continue;
-    const columns = raw.split("\t").map((column) => column.trim());
-    if (columns.length < 2 || !/^\d+$/.test(columns[0])) continue;
-    const number = Number(columns[0]);
-    const nameColumn = columns[1] || "";
-    const resultEvidence = /\b\d{1,2}\.\d{2}\.\d{2}\b/.test(raw);
-    const placeMatch = resultEvidence ? nameColumn.match(/\((\d{1,2})\)/) : null;
-    const scratched = /koşmaz|scratched/i.test(raw);
-    const name = nameColumn.replace(/\(\d{1,2}\)|\(Koşmaz\)/gi, "").replace(/\b(KG|DB|SKG|SK|GKR|YP|ÇP|BB)\b/g, "").trim();
-    const origin = columns.find((column, index) => index >= 2 && /[-/]/.test(column) && !/^\d/.test(column)) || "";
-    const [sire = "", damSire = ""] = origin.split(/[/-]/).map((part) => part.replace(/\([^)]*\)/g, "").trim());
-    const all = columns.slice(2).join(" ");
-    const odds = all.match(/(?:^|\s)(\d+[.,]\d{1,2})(?=\s|$)/);
-    const agf = all.match(/%(\d+(?:[.,]\d+)?)(?:\((\d+)\))?/);
-    const hpValue = parseNumber(columns[9]);
-    const hp = hpValue !== null && hpValue >= 1 && hpValue <= 200 ? hpValue : null;
-    const last6 = /^\d{2,6}$/.test(columns[10] || "") ? columns[10] : "";
-    if (!name) continue;
-    race.horses.push({ number, name, sire, damSire, odds: odds ? parseNumber(odds[1]) : null, agf: agf ? parseNumber(agf[1]) : null, hp, last6, place: placeMatch ? Number(placeMatch[1]) : null, scratched });
-  }
-  if (race) races.push(race);
-  for (const item of races) {
-    const placed = item.horses.filter((horse) => Number.isInteger(horse.place) && horse.place > 0);
-    const places = placed.map((horse) => horse.place);
-    item.finished = placed.length >= 2 && places.includes(1);
-  }
-  const filtered = races.filter((item) => item.horses.length > 0);
-  if (!filtered.length) warnings.push("Koşu ve at satırı bulunamadı. TJK metnini sekme ayrımları korunacak şekilde yeniden kopyalayın.");
-  for (const item of races) if (!item.horses.length) warnings.push(`${item.no}. koşuda okunabilir at satırı bulunamadı.`);
-  return { races: filtered, warnings };
+  const parsedRaces = window.RaceParser.parseRaces(text);
+  const races = parsedRaces.map((race) => {
+    const raceType = normalize(race.raceType || "");
+    const type = raceType.includes("HANDIKAP") ? "HANDİKAP" : raceType.includes("MAIDEN") || raceType.includes("SATIS") ? "MAIDEN / SATIŞ" : "DİĞER";
+    const horses = race.horses.map((horse) => ({
+      ...horse,
+      number: horse.horseNumber ?? horse.no,
+      hp: horse.handicapPoints,
+      last6: horse.form || "",
+      place: Number(horse.rank) > 0 ? Number(horse.rank) : null
+    }));
+    const placed = horses.filter((horse) => Number.isInteger(horse.place) && horse.place > 0);
+    return {
+      ...race,
+      type,
+      horses,
+      finished: placed.length >= 2 && placed.some((horse) => horse.place === 1)
+    };
+  });
+  const warnings = races.length ? [] : ["Koşu ve at satırı bulunamadı. TJK metnini sekme ayrımları korunacak şekilde yeniden kopyalayın."];
+  return { races, warnings };
 }
 function profileScore(name, distance) {
   const profile = state.profiles[normalize(name).replace(/[^A-Z0-9]/g, "")];
@@ -570,18 +543,6 @@ async function analyzeWithDeterministicRobots(races) {
   }
   return { results, robotCount: ROBOT_STRATEGIES.length };
 }
-function renderAdditionalAnalysisPanels(race, ranked, evidence) {
-  if (!ranked.length) return "";
-  const value = (number, digits = 1) => Number.isFinite(number) ? number.toFixed(digits) : "Veri yok";
-  const table = (label, headers, rows) => `<section class="analysis-panel"><h4>${label}</h4><div class="analysis-table-wrap" role="region" aria-label="${label} tablosu" tabindex="0"><table class="analysis-table"><thead><tr>${headers.map((header) => `<th scope="col">${header}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div></section>`;
-  const generalRows = ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>#${horse.number} ${escapeHtml(horse.name)}</td><td>${horse.hp === null ? "Veri yok" : horse.hp}</td><td>${value(horse.features.rating)}</td><td>${value(horse.features.form)}</td><td>${value(horse.features.pedigree)}</td><td>Veri yok</td><td>Veri yok</td></tr>`);
-  const finalRows = ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>#${horse.number} ${escapeHtml(horse.name)}</td><td>Veri yok</td><td>${horse.averageRank.toFixed(2)}</td><td>${horse.robotTopThreeCount}/${ROBOT_STRATEGIES.length}</td><td>Veri yok</td><td>Veri yok</td><td>Veri yok</td></tr>`);
-  const digitalRows = ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>#${horse.number} ${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>%${Math.round(horse.modelShare * 100)}</td><td>${horse.robotTopThreeCount}/${ROBOT_STRATEGIES.length}</td><td>${horse.robotFirstChoiceCount}/${ROBOT_STRATEGIES.length}</td><td>%${horse.coverage}</td></tr>`);
-  const calibration = evidence.candidates >= 30 && evidence.hitRate !== null
-    ? `Tek seçim doğrulaması: ${evidence.wins}/${evidence.candidates} isabet (%${(evidence.hitRate * 100).toFixed(1)}); genel lider %${(evidence.baselineHitRate * 100).toFixed(1)}.`
-    : `Tek seçim kalibrasyonu için yeterli doğrulama yok (${evidence.candidates}/30 aday).`;
-  return `<div class="analysis-panels"><p class="hint">Genel analiz HP, model rating’i, form ve pedigri sinyallerini gösterir. Mesafe performansı, derece, pist şartı, galop ve sprint bilgileri kaynakta bulunmadığından “Veri yok” olarak kalır ve puana katılmaz. ${calibration} Dijital pay model sıralamasıdır; kazanma olasılığı değildir.</p>${table("Genel Analiz", ["Sıra", "At", "HP", "Rating", "Form", "Pedigri", "Derece", "Şart"], generalRows)}${table("Final Analiz", ["Sıra", "At", "Mesafe performansı", "Dijital sıra", "Robot ilk 3", "Galop", "Sprint", "Derece"], finalRows)}${table("Dijital Panel", ["Sıra", "At", "Genel puan", "Model payı", "Robot ilk 3", "Robot ilk tercih", "Veri kapsamı"], digitalRows)}</div>`;
-}
 function renderAnalysis(races, targetId = "kosuSonucAlani") {
   const target = $(targetId);
   target.innerHTML = races.map((race) => {
@@ -590,7 +551,6 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     const ranked = scoreRace(race);
     const leaderGap = ranked.length > 1 ? Number((ranked[0].score - ranked[1].score).toFixed(1)) : 0;
     const evidence = singleSelectionEvidence();
-    const additionalPanels = renderAdditionalAnalysisPanels(race, ranked, evidence);
     const singleEligible = isValidatedSingle(ranked);
     const evidenceDetail = evidence.candidates < 30
       ? `doğrulamada ${evidence.candidates}/30 aday`
@@ -599,7 +559,7 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
       ? `Lider farkı ${leaderGap} puan · bağımsız veri kapsamı %${ranked[0].independentCoverage} · ${singleEligible ? "tek seçim eşiği geçmiş doğrulamada desteklendi" : `tek seçim önerilmiyor: ${SINGLE_GAP_THRESHOLD} puan fark, %${MIN_SINGLE_COVERAGE} kapsam ve doğrulamada genel liderden iyi sonuç gerekir (${evidenceDetail})`}. Puan farkı olasılık değildir.`
       : "Tek koşabilir at var; bu bir tahmin üstünlüğü anlamına gelmez.";
     const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Genel puan; robot sıralamalarının %80 konsensüsü ve normalize puan ortalamasının %20 birleşimidir. Ortalama sıra, robot sıralamalarının ağırlıklı ortalamasıdır. Dijital pay yalnızca model içi sıralama payıdır; kazanma olasılığı değildir. Kaynakta bulunmayan metrikler gösterilmez.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Ort. sıra</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th><th scope="col">Dijital pay</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${horse.number}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.averageRank.toFixed(2)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td><td>%${Math.round(horse.modelShare * 100)}</td></tr>`).join("")}</tbody></table></div></details>` : "";
-    return `<article class="race">${heading}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· modelin ilk tercihi</small>" : ""}<br><small>Sıralama payı %${Math.round(horse.modelShare * 100)} · ${horse.robotTopThreeCount}/${ROBOT_STRATEGIES.length} robotun ilk 3’ünde · ${horse.robotFirstChoiceCount} robotun ilk tercihi · ${horse.signal} · veri kapsamı %${horse.coverage} · bağımsız kapsam %${horse.independentCoverage}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}${additionalPanels}</article>`;
+    return `<article class="race">${heading}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· model lideri</small>" : ""}<br><small>${horse.robotTopThreeCount}/${ROBOT_STRATEGIES.length} stratejinin ilk 3’ünde · ${horse.signal}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
 function optimizeCouponCounts(picks, maxColumns, allowUnvalidatedSingles) {
@@ -723,15 +683,8 @@ function getPoolLabel(poolKey) {
 function formatIncompletePool(races, start, title) {
   const availableNos = new Set(races.map((race) => race.no));
   const missingNos = Array.from({ length: 6 }, (_, index) => start + index).filter((no) => !availableNos.has(no));
-  const predictions = races.map((race) => {
-    if (race.finished) return `<div class="alert">${race.no}. Koşu · sonuçlanmış, tahmin dışında.</div>`;
-    const ranked = scoreRace(race).slice(0, 3);
-    if (!ranked.length) return `<div class="alert">${race.no}. Koşu · okunabilir aday bulunamadı.</div>`;
-    const horses = ranked.map((horse) => `#${horse.number} ${escapeHtml(horse.name)} · sıralama payı %${Math.round(horse.modelShare * 100)}`).join(", ");
-    return `<div class="alert"><b>${race.no}. Koşu · ilk 3 model sıralaması:</b> ${horses}</div>`;
-  }).join("");
   const missing = missingNos.length ? ` Eksik koşular: ${missingNos.join(", ")}.` : "";
-  return `<div class="card"><h2>${title} · tamamlanmamış</h2><p class="hint">Bu altılıda ${availableNos.size}/6 koşu okundu.${missing} Aşağıdaki içerik yalnızca mevcut ayakların analizidir; tam altılı kuponu, kolon hesabı veya sonuç takibine kayıt oluşturulmadı.</p>${predictions}</div>`;
+  return `<div class="card"><h2>${title} · tamamlanmamış</h2><p class="hint">${availableNos.size}/6 koşu okundu.${missing} Mevcut koşuların ayrıntılı analizi aşağıda; eksikler tamamlanmadan kupon hesaplanmaz.</p></div>`;
 }
 async function analyze() {
   const input = $("hamBultenInput").value.trim();
