@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "Yarış Analiz Motoru",
-  "short_name": "Yarış Analiz",
-  "description": "TJK yarış bülteni analiz ve sonuç takip aracı",
+  "name": "Yarış Robotu",
+  "short_name": "Yarış Robotu",
+  "description": "TJK yarış analizleri, altılı planları ve kalıcı Neon sonuç hafızası",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
