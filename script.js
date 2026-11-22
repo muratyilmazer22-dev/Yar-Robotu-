@@ -82,6 +82,17 @@
     }
 
     importing = true;
+    let firebaseApi = null;
+    let signedIn = false;
+    try {
+      firebaseApi = await window.RaceRobotFirebaseReady;
+      signedIn = Boolean(firebaseApi?.ok && await firebaseApi.getIdToken());
+    } catch { /* The user can still use the local analysis tools while signed out. */ }
+    if (!signedIn) {
+      importing = false;
+      setStatus('TJK arşivini içe aktarmak için önce Firebase hesabınızla giriş yapın.', true);
+      return;
+    }
     stopRequested = false;
     importButton.disabled = true;
     stopButton.disabled = false;
@@ -94,10 +105,17 @@
 
     for (const date of dates) {
       if (stopRequested) break;
+      let accessToken = null;
+      try { accessToken = await firebaseApi.getIdToken(); } catch { /* Expired sessions are handled below. */ }
+      if (!accessToken) {
+        stopRequested = true;
+        setStatus('Oturum sona erdi. Yeniden giriş yapıp içe aktarmayı tekrar başlatın.', true);
+        break;
+      }
       try {
         const response = await fetch('/api/history/', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
           body: JSON.stringify({ date })
         });
         const data = await response.json();
