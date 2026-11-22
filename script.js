@@ -435,7 +435,8 @@ function parseRaces(text) {
     if (columns.length < 2 || !/^\d+$/.test(columns[0])) continue;
     const number = Number(columns[0]);
     const nameColumn = columns[1] || "";
-    const placeMatch = nameColumn.match(/\((\d{1,2})\)/);
+    const resultEvidence = /\b\d{1,2}\.\d{2}\.\d{2}\b/.test(raw);
+    const placeMatch = resultEvidence ? nameColumn.match(/\((\d{1,2})\)/) : null;
     const scratched = /koşmaz|scratched/i.test(raw);
     const name = nameColumn.replace(/\(\d{1,2}\)|\(Koşmaz\)/gi, "").replace(/\b(KG|DB|SKG|SK|GKR|YP|ÇP|BB)\b/g, "").trim();
     const origin = columns.find((column, index) => index >= 2 && /[-/]/.test(column) && !/^\d/.test(column)) || "";
