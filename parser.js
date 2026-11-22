@@ -128,6 +128,8 @@ rank: Number.isFinite(assumedRank) ? assumedRank : 0
 
       const resultEvidence = cells.some((cell) => /\b\d{1,2}\.\d{2}\.\d{2}\b/.test(cell));
       if (!resultEvidence) assumedRank = null;
+      const resultPlaceMatch = resultEvidence ? rowName.match(/\((\d{1,2})\)/) : null;
+      if (resultPlaceMatch && !Number.isFinite(assumedRank)) assumedRank = Number(resultPlaceMatch[1]);
       const horseMatch = rowName.match(/\((\d{1,2})\)/);
       horseNumber = horseMatch ? Number(horseMatch[1]) : legacyNo;
       const name = rowName.replace(/\s*\(\d{1,2}\).*$/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
