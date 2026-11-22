@@ -567,7 +567,7 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     return `<article class="race">${heading}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· model lideri</small>" : ""}<br><small>${horse.robotTopThreeCount}/${ROBOT_STRATEGIES.length} stratejinin ilk 3’ünde · ${horse.signal}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
-function optimizeCouponCounts(picks, maxColumns, allowUnvalidatedSingles) {
+function optimizeCouponCounts(picks, maxColumns, allowUnvalidatedSingles, maxSingles = 1) {
   let states = new Map([['1:0', { columns: 1, singles: 0, score: 0, counts: [] }]]);
   for (const pick of picks) {
     const nextStates = new Map();
@@ -580,7 +580,7 @@ function optimizeCouponCounts(picks, maxColumns, allowUnvalidatedSingles) {
       for (let count = firstCount; count <= pick.ranked.length; count++) {
         const isDecisionSingle = count === 1 && pick.ranked.length > 1;
         const singles = state.singles + Number(isDecisionSingle);
-        if (singles > 1 || state.columns > maxColumns / count) continue;
+        if (singles > maxSingles || state.columns > maxColumns / count) continue;
         const columns = state.columns * count;
         const score = state.score + Math.log(Math.max(Number.EPSILON, cumulativeShares[count - 1]));
         const key = `${columns}:${singles}`;
@@ -630,6 +630,7 @@ function buildCoupon(races, budget, unit) {
 
   let columns;
   let budgetForcedSingle = false;
+  let budgetForcedMultipleSingles = false;
   if (allHorsesFit) {
     picks.forEach((pick) => { pick.count = pick.ranked.length; });
     columns = fullColumns;
@@ -639,7 +640,21 @@ function buildCoupon(races, budget, unit) {
       best = optimizeCouponCounts(picks, maxColumns, true);
       budgetForcedSingle = true;
     }
-    if (!best) return { error: "Girilen bütçeyle geçerli kupon oluşturulamadı." };
+    if (!best) {
+      best = optimizeCouponCounts(picks, maxColumns, true, picks.length);
+      budgetForcedSingle = true;
+      budgetForcedMultipleSingles = Boolean(best);
+    }
+    if (!best) {
+      const multiHorseLegs = picks.filter((pick) => pick.ranked.length > 1).length;
+      const minimumColumns = multiHorseLegs ? 2 ** Math.max(0, multiHorseLegs - picks.length) : 1;
+      const minimumBudget = Math.round(minimumColumns * unit * 100) / 100;
+      return {
+        error: `Bu altılı için ${budget.toFixed(2)} TL bütçe ${maxColumns} kolon ediyor; en az ${minimumColumns} kolon (${minimumBudget.toFixed(2)} TL) gerekiyor. Bütçeyi artırın veya kupon birim fiyatını düşürün.`,
+        minimumColumns,
+        minimumBudget
+      };
+    }
     picks.forEach((pick, index) => { pick.count = best.counts[index]; });
     columns = best.columns;
   }
@@ -649,14 +664,17 @@ function buildCoupon(races, budget, unit) {
     pick.budgetForcedSingle = budgetForcedSingle && pick.count === 1 && !pick.singleEligible && pick.ranked.length > 1;
     pick.budgetNarrowed = pick.count < pick.ranked.length && columns / pick.count * (pick.count + 1) > maxColumns;
   }
-  return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed), budgetForcedSingle: picks.some((pick) => pick.budgetForcedSingle), finishedNos };
+  const forcedSingleCount = picks.filter((pick) => pick.budgetForcedSingle).length;
+  return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed), budgetForcedSingle: forcedSingleCount > 0, budgetForcedMultipleSingles: budgetForcedMultipleSingles && forcedSingleCount > 1, forcedSingleCount, finishedNos };
 }
 function formatCoupon(coupon, title, poolKey) {
   if (coupon.error) return `<div class="card"><h2>${title}</h2><div class="alert error">${escapeHtml(coupon.error)}</div></div>`;
   if (coupon.completedOnly) return `<div class="card"><h2>${title}</h2><p class="hint">Bu altılıdaki tüm ayaklar koşuldu; analiz/tahmin ve kupon hesabı gösterilmiyor.</p></div>`;
   const completed = coupon.finishedNos?.length ? `<p class="hint">Koşuldu, hesap dışında: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}.</p>` : "";
-  const warning = coupon.budgetForcedSingle
-    ? `<div class="alert">Bütçe nedeniyle en az bir ayakta doğrulanmış tek seçim eşiği karşılanmadan tek at bırakıldı. Bütçeyi artırmak veya bu riski kabul etmemek için kuponu yeniden düzenlemek gerekir; seçim garanti değildir.</div>`
+  const warning = coupon.budgetForcedMultipleSingles
+    ? `<div class="alert">Bütçe sınırı nedeniyle ${coupon.forcedSingleCount} ayakta doğrulanmış tek seçim eşiği karşılanmadan tek at bırakıldı. Bu, birden fazla ayakta riski artırır; daha geniş kupon için bütçeyi yükseltin. Hiçbir seçim garanti değildir.</div>`
+    : coupon.budgetForcedSingle
+      ? `<div class="alert">Bütçe nedeniyle bir ayakta doğrulanmış tek seçim eşiği karşılanmadan tek at bırakıldı. Daha geniş kupon için bütçeyi yükseltin; seçim garanti değildir.</div>`
     : coupon.budgetNarrowed
       ? `<div class="alert">Bütçe sınırı bazı ayaklarda daha geniş seçimi engelledi. Tek seçimler yalnızca ${SINGLE_GAP_THRESHOLD} puan farkı ve en az %${MIN_SINGLE_COVERAGE} bağımsız veri kapsamı eşiği karşılanınca önerilir; bu da garanti değildir.</div>`
       : "";
@@ -665,7 +683,7 @@ function formatCoupon(coupon, title, poolKey) {
     : !state.trainingReport?.validatedAt
       ? `Başlangıç ağırlıkları kullanılıyor. Eğitim için en az ${MODEL_MIN_RACES} uygun koşu, en az 5 ayrı tarih ve en az 5 doğrulama koşusu gerekir; mevcut uygun koşu ${state.trainingReport?.sampleSize || 0}.`
       : `Ayrılmış tarih doğrulamasında en az %2 iyileşme görülmedi; başlangıç ağırlıkları korunuyor (${state.trainingReport.trainingRaces} eğitim / ${state.trainingReport.validationRaces} doğrulama koşusu).`;
-  return `<div class="card"><h2>${title} · öğrenen model önerisi</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p><details class="analysis-details coupon-method"><summary>Kupon nasıl oluşturuluyor?</summary><p class="hint">Her açık ayak sekiz stratejinin ortak sıralamasıyla puanlanır. Tüm atlar bütçeye sığıyorsa tamamı alınır; sığmıyorsa seçilen atların birikimli model payı, bütçenin izin verdiği kolonlar içinde optimize edilir. Doğrulanmış tek at koşulunu geçen bir ayak tek at kalabilir; diğer ayaklarda en az iki at korunur. Bu kısıtla kupon çıkmazsa bütçe en fazla bir doğrulanmamış tek at seçimini zorlayabilir ve uyarı gösterilir. Kolon adedi seçilen at adetlerinin çarpımıdır; toplam tutar kolon adedi × birim fiyat olarak hesaplanır.</p></details>${warning}${coupon.picks.map((pick) => {
+  return `<div class="card"><h2>${title} · öğrenen model önerisi</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p><details class="analysis-details coupon-method"><summary>Kupon nasıl oluşturuluyor?</summary><p class="hint">Her açık ayak sekiz stratejinin ortak sıralamasıyla puanlanır. Tüm atlar bütçeye sığıyorsa tamamı alınır; sığmıyorsa seçilen atların birikimli model payı, bütçenin izin verdiği kolonlar içinde optimize edilir. Doğrulanmış tek at koşulunu geçen bir ayak tek at kalabilir; mümkün olduğunda diğer ayaklarda en az iki at korunur. Bütçe buna yetmezse önce tek bir doğrulanmamış tek seçim denenir; hâlâ kupon çıkmazsa bütçeye uyan kurgu oluşturulur ve doğrulanmamış tek atların her biri açıkça işaretlenerek risk uyarısı gösterilir. Kolon adedi seçilen at adetlerinin çarpımıdır; toplam tutar kolon adedi × birim fiyat olarak hesaplanır.</p></details>${warning}${coupon.picks.map((pick) => {
     const horses = pick.ranked.slice(0, pick.count);
     const horseLabels = horses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)} · sıralama payı %${Math.round(horse.modelShare * 100)}`).join(", ");
     const singleLabel = horses.length === 1
