@@ -451,7 +451,11 @@ function saveState() {
   updateMemory();
   queueFirebaseMemorySync();
 }
-function showMessage(target, text, type = "") { target.innerHTML = `<div class="alert ${type}">${escapeHtml(text)}</div>`; }
+function showMessage(target, text, type = "") {
+  target.setAttribute("role", type === "error" ? "alert" : "status");
+  target.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+  target.innerHTML = `<div class="alert ${type}">${escapeHtml(text)}</div>`;
+}
 function setTab(name) {
   document.querySelectorAll(".tab").forEach((button) => { const active = (button.dataset.tab || button.dataset.panel) === name; button.setAttribute("aria-selected", String(active)); button.tabIndex = active ? 0 : -1; });
   document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === `panel-${name}`));
@@ -958,10 +962,13 @@ function compareResults() {
   if (!matchingPredictions.length) { showMessage(target, "Bu tarih ve hipodrom için kayıtlı tahmin bulunamadı. Bültenle aynı bilgileri seçin.", "error"); return; }
   const timestamp = new Date().toISOString();
   const outcomes = [];
+  let racesWithoutWinner = 0;
+  let racesWithoutPrediction = 0;
   for (const race of parsed.races) {
     const winner = race.horses.find((horse) => horse.place === 1);
     const prediction = matchingPredictions.find((item) => item.no === race.no);
-    if (!winner || !prediction) continue;
+    if (!winner) { racesWithoutWinner += 1; continue; }
+    if (!prediction) { racesWithoutPrediction += 1; continue; }
     const top3 = prediction.horses.slice(0, 3);
     const marketFavorite = prediction.horses.filter((horse) => horse.marketScore !== null).sort((a, b) => b.marketScore - a.marketScore)[0];
     const winnerPrediction = prediction.horses.find((horse) => horse.number === winner.number);
@@ -986,7 +993,13 @@ function compareResults() {
       at: `${prediction.date || timestamp.slice(0, 10)}T12:00:00.000Z`
     });
   }
-  if (!outcomes.length) { showMessage(target, "Eşleşen koşularda (1) birinci bilgisi bulunamadı. Tahmin ve sonuç metinlerinin aynı koşulara ait olduğunu doğrulayın.", "error"); return; }
+  if (!outcomes.length) {
+    const reason = racesWithoutWinner === parsed.races.length
+      ? "Sonuç bülteninde birinci sırası okunamadı. Sıra/Rank/Position sütununu ve at numaralarını içeren tabloyu kopyalayın."
+      : "Sonuçlarda birinci bilgisi bulundu ancak bu tarih ve hipodromda aynı numaralı kayıtlı tahmin bulunamadı.";
+    showMessage(target, reason, "error");
+    return;
+  }
   const known = new Set(state.outcomes.map(outcomeKey));
   const fresh = outcomes.filter((item) => !known.has(outcomeKey(item)));
   state.outcomes.push(...fresh);
@@ -1003,8 +1016,20 @@ function compareResults() {
     : state.trainingReport?.updated
       ? "Yeni sonuçlar kaydedildi; tarih bazlı doğrulamada iyileşme görüldüğü için öğrenilmiş ağırlıklar etkinleştirildi."
       : "Yeni sonuçlar eğitim hafızasına kaydedildi; ağırlıklar yalnızca yeterli veri ve doğrulama iyileşmesi oluşursa değişir.";
-  target.innerHTML = `<div class="alert success"><b>${outcomes.length} koşu karşılaştırıldı.</b> ${escapeHtml(learningStatus)} İlk 3 içinde birinci: ${top3Hits}/${outcomes.length} (%${Math.round(top3Hits / outcomes.length * 100)}); model lideri: ${top1Hits}/${outcomes.length} (%${Math.round(top1Hits / outcomes.length * 100)}); tek seçim eşiği (${SINGLE_GAP_THRESHOLD} puan, bağımsız kapsam ≥%${MIN_SINGLE_COVERAGE}): ${singleHits}/${singleCandidates.length} isabet${singleCandidates.length < 30 ? " · örnek yetersiz (<30)" : ""}; piyasa favorisi yanılgısı: ${favoriteErrors}/${outcomes.length}; sürpriz sinyalinin kazananı yakalaması: ${surpriseHits}/${outcomes.length}.</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · İlk üç ${item.top3Hit ? "isabet" : "isabet değil"} · Model lideri ${item.top1Hit ? "isabet" : "isabet değil"} · Tek seçim eşiği ${item.singleCandidate ? item.singleHit ? "isabet" : "isabet değil" : "karşılanmadı"} · Favori yanılgısı ${item.favoriteMiss === null ? "ölçülemedi" : item.favoriteMiss ? "var" : "yok"}</div>`).join("")}`;
+  const skippedSummary = racesWithoutWinner || racesWithoutPrediction
+    ? ` Eşleşmeyenler: birincisi okunamayan ${racesWithoutWinner}, tahmini bulunamayan ${racesWithoutPrediction} koşu.`
+    : "";
+  target.setAttribute("role", "status");
+  target.setAttribute("aria-live", "polite");
+  target.innerHTML = `<div class="alert success"><b>${outcomes.length} koşu karşılaştırıldı.</b> ${escapeHtml(learningStatus + skippedSummary)} İlk 3 içinde birinci: ${top3Hits}/${outcomes.length} (%${Math.round(top3Hits / outcomes.length * 100)}); model lideri: ${top1Hits}/${outcomes.length} (%${Math.round(top1Hits / outcomes.length * 100)}); tek seçim eşiği (${SINGLE_GAP_THRESHOLD} puan, bağımsız kapsam ≥%${MIN_SINGLE_COVERAGE}): ${singleHits}/${singleCandidates.length} isabet${singleCandidates.length < 30 ? " · örnek yetersiz (<30)" : ""}; piyasa favorisi yanılgısı: ${favoriteErrors}/${outcomes.length}; sürpriz sinyalinin kazananı yakalaması: ${surpriseHits}/${outcomes.length}.</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · İlk üç ${item.top3Hit ? "isabet" : "isabet değil"} · Model lideri ${item.top1Hit ? "isabet" : "isabet değil"} · Tek seçim eşiği ${item.singleCandidate ? item.singleHit ? "isabet" : "isabet değil" : "karşılanmadı"} · Favori yanılgısı ${item.favoriteMiss === null ? "ölçülemedi" : item.favoriteMiss ? "var" : "yok"}</div>`).join("")}`;
   updateMemory();
+}
+function handleCompareResults() {
+  try {
+    compareResults();
+  } catch {
+    showMessage($("ogrenmeLogAlani"), "Sonuçlar işlenirken beklenmeyen bir hata oluştu. Girdi alanlarını kontrol edip yeniden deneyin; kayıtlı hafıza korunuyor.", "error");
+  }
 }
 const COUPON_STATUS_LABELS = { pending: "Sonuç bekleniyor", won: "Ödeme aldı", lost: "İsabetsiz", carryover: "Devretti" };
 function createCouponId() {
@@ -1212,8 +1237,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("analyzeButton")?.addEventListener("click", analyze);
   $("clearBtn")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
   $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
-  $("learnBtn")?.addEventListener("click", compareResults);
-  $("learnButton")?.addEventListener("click", compareResults);
+  $("learnBtn")?.addEventListener("click", handleCompareResults);
+  $("learnButton")?.addEventListener("click", handleCompareResults);
   $("saveHorseBtn")?.addEventListener("click", addProfile);
   $("saveSireButton")?.addEventListener("click", addProfile);
   $("exportBackupBtn").addEventListener("click", exportBackup);
