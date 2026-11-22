@@ -730,9 +730,11 @@ async function analyze() {
   const maxRaceNo = Math.max(...parsed.races.map((race) => race.no));
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
   const poolCards = [];
+  const poolStarts = [1];
+  const secondPoolStart = maxRaceNo - 5;
+  if (secondPoolStart > 1) poolStarts.push(secondPoolStart);
   lastCoupons = {};
-  for (let poolIndex = 0; poolIndex === 0 || poolIndex * 5 + 1 < maxRaceNo; poolIndex += 1) {
-    const start = poolIndex * 5 + 1;
+  for (const [poolIndex, start] of poolStarts.entries()) {
     const end = start + 5;
     const poolKey = getPoolKey(poolIndex);
     const poolLabel = POOL_ORDINALS[poolIndex] || `Altılı ${poolIndex + 1}`;
