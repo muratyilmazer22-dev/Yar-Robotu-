@@ -306,6 +306,8 @@ let firebaseAccount = null;
 let firebaseSyncReady = false;
 let firebaseSaveTimer = null;
 let firebaseSyncChain = Promise.resolve();
+let driveConnected = false;
+let driveBusy = false;
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 function persistStateLocally() {
@@ -325,6 +327,124 @@ function setFirebaseStatus(message, isError = false) {
   if (!status) return;
   status.textContent = message;
   status.classList.toggle("error", isError);
+}
+function setDriveStatus(message, isError = false) {
+  const status = $("driveBackupStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle("error", isError);
+}
+function updateDriveButtons() {
+  const signedIn = Boolean(firebaseAccount && firebaseSyncReady);
+  $("driveConnectButton").disabled = !signedIn || driveBusy;
+  $("driveBackupButton").disabled = !signedIn || !driveConnected || driveBusy;
+  $("driveRestoreButton").disabled = !signedIn || !driveConnected || driveBusy;
+}
+async function requestDriveAction(action, backup) {
+  const idToken = await firebaseSdk?.getIdToken();
+  if (!idToken) throw new Error("Google Drive yedeği için Firebase hesabınızla giriş yapın.");
+  const response = await fetch("/api/google-drive-backup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ action, ...(backup ? { backup } : {}) })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "Google Drive isteği başarısız oldu.");
+  return result;
+}
+async function refreshDriveStatus() {
+  if (!firebaseAccount || !firebaseSyncReady) return;
+  try {
+    const result = await requestDriveAction("status");
+    driveConnected = Boolean(result.connected);
+    if (driveConnected) setDriveStatus("Google Drive bağlı. Yedeği istediğiniz zaman oluşturabilir veya geri yükleyebilirsiniz.");
+    else if (new URLSearchParams(location.search).get("drive") === "connected") setDriveStatus("Google Drive izni alındı. Bağlantıyı denetleyin veya yeniden bağlayın.", true);
+    else setDriveStatus("Kişisel yedekleme için Google Drive’ı bağlayın.");
+  } catch {
+    driveConnected = false;
+    setDriveStatus("Google Drive bağlantı durumu denetlenemedi. Yeniden deneyin.", true);
+  }
+  updateDriveButtons();
+}
+async function connectGoogleDrive() {
+  if (!firebaseAccount || !firebaseSyncReady) return;
+  const framed = window.self !== window.top;
+  const authorizationWindow = framed ? window.open("about:blank", "_blank") : null;
+  if (authorizationWindow) authorizationWindow.opener = null;
+  driveBusy = true;
+  updateDriveButtons();
+  setDriveStatus("Google Drive bağlantısı hazırlanıyor…");
+  try {
+    const result = await requestDriveAction("connect");
+    if (result.authorizationUrl) {
+      setDriveStatus("Google izin sayfası açılıyor. İzin verdikten sonra bu uygulamaya geri dönün.");
+      if (framed) {
+        if (authorizationWindow) authorizationWindow.location.replace(result.authorizationUrl);
+        else setDriveStatus("Yeni sekme açılamadı. Tarayıcıda açılır pencerelere izin verip yeniden deneyin.", true);
+      } else {
+        location.href = result.authorizationUrl;
+        return;
+      }
+    } else {
+      authorizationWindow?.close();
+      driveConnected = true;
+      setDriveStatus("Google Drive başarıyla bağlandı.");
+    }
+  } catch (error) {
+    authorizationWindow?.close();
+    setDriveStatus(error.message || "Google Drive bağlanamadı.", true);
+  } finally {
+    driveBusy = false;
+    updateDriveButtons();
+  }
+}
+function createDriveBackup() {
+  const backupState = JSON.parse(JSON.stringify(state));
+  delete backupState.firebaseOwnerUid;
+  backupState.outcomes = (backupState.outcomes || []).filter((item) => !String(item.sourceKey || "").startsWith("tjk:"));
+  return { app: "yar-robotu", version: 1, createdAt: new Date().toISOString(), state: backupState };
+}
+async function backupToGoogleDrive() {
+  if (!firebaseAccount || !firebaseSyncReady || !driveConnected) return;
+  driveBusy = true;
+  updateDriveButtons();
+  setDriveStatus("Hafıza eşitleniyor ve Drive yedeği hazırlanıyor…");
+  try {
+    await firebaseSyncChain;
+    const snapshot = JSON.parse(JSON.stringify(state));
+    await firebaseSdk.saveMemory(firebaseAccount, snapshot);
+    const result = await requestDriveAction("backup", createDriveBackup());
+    if (result.authorizationUrl) throw new Error("Drive bağlantısı yenilenmeli. Google Drive’ı yeniden bağlayın.");
+    setDriveStatus(`Yedek Google Drive’a kaydedildi: ${new Date(result.modifiedTime).toLocaleString("tr-TR")}.`);
+  } catch (error) {
+    setDriveStatus(error.message || "Google Drive yedeği oluşturulamadı.", true);
+  } finally {
+    driveBusy = false;
+    updateDriveButtons();
+  }
+}
+async function restoreFromGoogleDrive() {
+  if (!firebaseAccount || !firebaseSyncReady || !driveConnected) return;
+  if (!window.confirm("Google Drive’daki yedek mevcut hafızanızla birleştirilecek. Devam edilsin mi?")) return;
+  driveBusy = true;
+  updateDriveButtons();
+  setDriveStatus("Google Drive yedeği okunuyor…");
+  try {
+    const result = await requestDriveAction("restore");
+    if (result.authorizationUrl) throw new Error("Drive bağlantısı yenilenmeli. Google Drive’ı yeniden bağlayın.");
+    state = mergeFirebaseMemory(state, result.backup.state);
+    state.firebaseOwnerUid = firebaseAccount.uid;
+    state.localUpdatedAt = new Date().toISOString();
+    persistStateLocally();
+    updateMemory();
+    await firebaseSdk.saveMemory(firebaseAccount, JSON.parse(JSON.stringify(state)));
+    setDriveStatus(`Yedek hafızayla birleştirildi ve Firebase’e eşitlendi${result.modifiedTime ? ` (${new Date(result.modifiedTime).toLocaleString("tr-TR")})` : ""}.`);
+  } catch (error) {
+    setDriveStatus(error.message || "Google Drive yedeği geri yüklenemedi.", true);
+  } finally {
+    driveBusy = false;
+    updateDriveButtons();
+  }
 }
 function mergeMemoryRecords(remoteRecords, localRecords, keyOf) {
   const merged = new Map();
@@ -416,6 +536,8 @@ async function initializeFirebaseMemory() {
   api.onAuthStateChanged(async (user) => {
     firebaseAccount = user || null;
     firebaseSyncReady = false;
+    driveConnected = false;
+    updateDriveButtons();
     $("firebaseSignOutButton").hidden = !user;
     $("firebaseAuthForm").hidden = Boolean(user);
     $("firebaseCreateAccountButton").hidden = Boolean(user);
@@ -438,6 +560,7 @@ async function initializeFirebaseMemory() {
       firebaseSyncReady = true;
       await api.saveMemory(user, JSON.parse(JSON.stringify(state)));
       setFirebaseStatus(`Hafıza Firebase hesabınızla eşitlendi: ${user.email || user.uid}`);
+      await refreshDriveStatus();
     } catch {
       firebaseSyncReady = false;
       setFirebaseStatus("Firebase verisi okunamadı. Yerel kayıtlar korundu; Firestore kurallarına users/{uid} için yalnızca aynı kullanıcı erişimini ekleyin.", true);
@@ -1203,6 +1326,13 @@ function resetHistory() {
 document.addEventListener("DOMContentLoaded", async () => {
   state = await restoreState();
   initializeFirebaseMemory().catch(() => setFirebaseStatus("Firebase bağlantısı başlatılamadı; yerel hafıza korunuyor.", true));
+  $("driveConnectButton")?.addEventListener("click", connectGoogleDrive);
+  $("driveBackupButton")?.addEventListener("click", backupToGoogleDrive);
+  $("driveRestoreButton")?.addEventListener("click", restoreFromGoogleDrive);
+  if (new URLSearchParams(location.search).get("drive") === "connected") {
+    setDriveStatus("Google Drive izni alındı; Firebase hesabınızı denetliyoruz…");
+    history.replaceState({}, "", `${location.pathname}${location.hash}`);
+  }
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;
