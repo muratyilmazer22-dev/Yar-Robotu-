@@ -2,6 +2,7 @@ const { and, gte, lte } = require('drizzle-orm');
 const { db } = require('../lib/db');
 const { raceHistory } = require('../lib/db/schema');
 const { analyzeEnsemble, normalizeName } = require('../scoring');
+const { getWinnerRank, getWinnerRankBucket } = require('../lib/backtest-metrics');
 
 function validDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const parsed = new Date(`${value}T00:00:00Z`); return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
@@ -47,8 +48,13 @@ module.exports = async function handler(req, res) {
     let topThreeHitRaces = 0;
     let totalTopThreeHits = 0;
     let winnerHits = 0;
+    let randomPickRateTotal = 0;
+    let winnerTopThreeRankHits = 0;
+    const winnerRankCounts = { "1": 0, "2–3": 0, "4–6": 0, "7+": 0 };
+    let totalWinnerRank = 0;
     let marketFavoriteHits = 0;
-    let surpriseSignalWinnerHits = 0;
+    let surpriseCandidateRaces = 0;
+    let surpriseCandidateWinnerHits = 0;
     let validationMarketFavoriteHits = 0;
 
     for (const row of rows) {
@@ -75,12 +81,24 @@ module.exports = async function handler(req, res) {
       const hits = selected.filter((entry) => Number.isFinite(entry.place) && entry.place <= 3).length;
       totalTopThreeHits += hits;
       if (hits > 0) topThreeHitRaces += 1;
-      const modelLeaderHit = scores[0]?.number === winnerEntry.horse.number;
+      const winnerRank = getWinnerRank(scores, winnerEntry.horse.number);
+      const winnerRankBucket = getWinnerRankBucket(winnerRank);
+      if (winnerRankBucket) {
+        winnerRankCounts[winnerRankBucket] += 1;
+        totalWinnerRank += winnerRank;
+        if (winnerRank <= 3) winnerTopThreeRankHits += 1;
+      }
+      const modelLeaderHit = winnerRank === 1;
       if (modelLeaderHit) winnerHits += 1;
+      randomPickRateTotal += 1 / Math.max(1, scores.length);
       const marketFavorite = scores.filter((horse) => horse.marketScore !== null).sort((a, b) => b.marketScore - a.marketScore)[0];
       const marketFavoriteHit = Boolean(marketFavorite && marketFavorite.number === winnerEntry.horse.number);
       if (marketFavoriteHit) marketFavoriteHits += 1;
-      if (winnerEntry?.horse.signal === 'Sürpriz adayı') surpriseSignalWinnerHits += 1;
+      const surpriseCandidates = scores.filter((horse) => horse.signal === 'Sürpriz adayı');
+      if (surpriseCandidates.length) {
+        surpriseCandidateRaces += 1;
+        if (surpriseCandidates.some((horse) => Number(horse.number) === Number(winnerEntry.horse.number))) surpriseCandidateWinnerHits += 1;
+      }
 
       if (validationStartDate && String(row.raceDate) >= validationStartDate) {
         validationRaces += 1;
@@ -125,8 +143,14 @@ module.exports = async function handler(req, res) {
       topThreeHitRaceRate: rate(topThreeHitRaces, evaluatedRaces),
       averageTopThreeHits: evaluatedRaces ? Number((totalTopThreeHits / evaluatedRaces).toFixed(2)) : null,
       winnerHitRate: rate(winnerHits, evaluatedRaces),
+      randomPickHitRate: evaluatedRaces ? Number((randomPickRateTotal / evaluatedRaces * 100).toFixed(1)) : null,
+      winnerTopThreeRankRate: rate(winnerTopThreeRankHits, evaluatedRaces),
+      averageWinnerRank: evaluatedRaces ? Number((totalWinnerRank / evaluatedRaces).toFixed(2)) : null,
+      winnerRankCounts,
       marketFavoriteHitRate: rate(marketFavoriteHits, evaluatedRaces),
-      surpriseSignalWinnerRate: rate(surpriseSignalWinnerHits, evaluatedRaces),
+      surpriseCandidateHitRate: rate(surpriseCandidateWinnerHits, surpriseCandidateRaces),
+      surpriseCandidateRaces,
+      surpriseCandidateWinnerHits,
       validation: {
         from: validationStartDate,
         to: validationDates.at(-1) || null,

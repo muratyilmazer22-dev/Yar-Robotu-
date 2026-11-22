@@ -161,8 +161,11 @@
         renderMetric('İlk 3 içinden en az 1 isabet', data.topThreeHitRaceRate == null ? '—' : `${data.topThreeHitRaceRate}%`),
         renderMetric('İlk 3 ortalama isabet', data.averageTopThreeHits == null ? '—' : String(data.averageTopThreeHits)),
         renderMetric('Model lideri birinci', data.winnerHitRate == null ? '—' : `${data.winnerHitRate}%`),
+        renderMetric('Rastgele seçim referansı', data.randomPickHitRate == null ? '—' : `${data.randomPickHitRate}%`),
+        renderMetric('Kazanan ilk 3 sıramızda', data.winnerTopThreeRankRate == null ? '—' : `${data.winnerTopThreeRankRate}%`),
+        renderMetric('Kazananın ortalama sırası', data.averageWinnerRank == null ? '—' : String(data.averageWinnerRank)),
         renderMetric('Piyasa favorisi birinci', data.marketFavoriteHitRate == null ? '—' : `${data.marketFavoriteHitRate}%`),
-        renderMetric('Sürpriz sinyali kazananı buldu', data.surpriseSignalWinnerRate == null ? '—' : `${data.surpriseSignalWinnerRate}%`)
+        renderMetric('Sürpriz adayları kazananı yakaladı', data.surpriseCandidateHitRate == null ? '—' : `${data.surpriseCandidateHitRate}%`)
       );
       const validation = data.validation || {};
       const validationTitle = document.createElement('h3');
@@ -170,7 +173,7 @@
       const validationNote = document.createElement('p');
       validationNote.className = 'sub';
       validationNote.textContent = validation.from
-        ? `Son tarih dilimi (${validation.from} – ${validation.to || '—'}) ağırlık güncellemesinde kullanılmadı; yalnızca eşik karşılaştırmasıdır. ${validation.races || 0} koşu. Referans lider isabeti: ${validation.baselineTop1HitRate ?? '—'}%. 30’dan az tek seçim adayı yetersiz örnektir. Test varsayılan ortak modeli kullanır; kullanıcıya özel öğrenilmiş ağırlıkları veya kupon getirisini temsil etmez.`
+        ? `Son tarih dilimi (${validation.from} – ${validation.to || '—'}) ağırlık güncellemesinde kullanılmadı; yalnızca eşik karşılaştırmasıdır. ${validation.races || 0} koşu. Model lideri: ${validation.baselineTop1HitRate ?? '—'}%, piyasa favorisi: ${validation.marketFavoriteHitRate ?? '—'}%. Model piyasa kıyasını geçmediyse yüksek puan tek başına güvenilir seçim sayılmamalı. 30’dan az tek seçim adayı yetersiz örnektir. Test varsayılan ortak modeli kullanır; kullanıcıya özel öğrenilmiş ağırlıkları veya kupon getirisini temsil etmez.`
         : 'En az 5 ayrı yarış tarihi olmadığından zamana göre ayrılmış doğrulama dilimi oluşturulmadı; eşik sonucu gösterilemiyor.';
       const thresholdList = document.createElement('ul');
       for (const item of validation.thresholds || []) {
@@ -189,6 +192,22 @@
       const note = document.createElement('p');
       note.className = 'sub';
       note.textContent = `Tek günlük veya küçük örnek sonuçları genellemez. Kaydedilmiş ${Number(data.storedRaces || 0).toLocaleString('tr-TR')} koşudan ${Number(data.omittedRaces || 0).toLocaleString('tr-TR')} tanesi gerekli program/sonuç eşleşmesi olmadığı için test dışı kaldı. ${data.method}`;
+      const rankBreakdown = document.createElement('section');
+      const rankTitle = document.createElement('h3');
+      rankTitle.textContent = 'Kazananın model sıralamasındaki yeri';
+      const rankNote = document.createElement('p');
+      rankNote.className = 'sub';
+      rankNote.textContent = 'Bu ölçüm, en yüksek puanlı seçimimizin dışında kazananların ne sıklıkta kaldığını gösterir. Sıralama puanı kazanma olasılığı değildir.';
+      const rankList = document.createElement('ul');
+      const rankLabels = [['1', 'Model lideri'], ['2–3', '2.–3. sıra'], ['4–6', '4.–6. sıra'], ['7+', '7. sıra ve altı']];
+      for (const [key, label] of rankLabels) {
+        const row = document.createElement('li');
+        const count = Number(data.winnerRankCounts?.[key] || 0);
+        const rate = data.evaluatedRaces ? (count / data.evaluatedRaces * 100).toFixed(1) : '0.0';
+        row.textContent = `${label}: ${count} koşu (%${rate})`;
+        rankList.append(row);
+      }
+      rankBreakdown.append(rankTitle, rankNote, rankList);
       const breakdown = document.createElement('section');
       const breakdownTitle = document.createElement('h3');
       breakdownTitle.textContent = 'Yarış türüne göre';
@@ -204,7 +223,7 @@
         breakdownList.append(item);
       }
       breakdown.append(breakdownTitle, breakdownList);
-      backtestSummary.replaceChildren(metrics, validationBlock, note, breakdown);
+      backtestSummary.replaceChildren(metrics, validationBlock, note, rankBreakdown, breakdown);
     } catch (error) {
       backtestSummary.textContent = error.message || 'Geriye dönük test çalıştırılamadı.';
     } finally {
