@@ -1,4 +1,4 @@
-const CACHE_NAME = "race-analysis-shell-v5";
+const CACHE_NAME = "race-analysis-shell-v6";
 const APP_FILES = ["./", "./index.html", "./script.js", "./parser.js", "./scoring.js", "./manifest.webmanifest", "./horse-icon-192.png", "./horse-icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -15,6 +15,13 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || requestUrl.origin !== self.location.origin || requestUrl.pathname.startsWith("/api/")) return;
   if (request.mode === "navigate") {
     event.respondWith(fetch(request).catch(() => caches.match("./index.html")));
+    return;
+  }
+  if (["/script.js", "/parser.js", "/scoring.js"].includes(requestUrl.pathname)) {
+    event.respondWith(fetch(request).then((response) => {
+      if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
+      return response;
+    }).catch(() => caches.match(request)));
     return;
   }
   event.respondWith(caches.match(request).then((cached) => cached || fetch(request).then((response) => {
