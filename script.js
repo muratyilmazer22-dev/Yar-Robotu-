@@ -270,7 +270,7 @@ function parseRaces(text) {
     if (header) {
       if (race) races.push(race);
       const detail = header[3] || "";
-      const distance = detail.match(/(\d{3,4})\s*(Kum|Çim|Sentetik)/i);
+      const distance = detail.match(/(\d{3,4})\s*m?\s*(Kum|Çim|Sentetik)/i);
       const surface = detail.match(/(?:^|\s)(Kum|Çim|Sentetik)(?=\s|$|[,.;])/i);
       const className = normalize(detail);
       race = { no: Number(header[1]), time: header[2] || "", title: detail.trim(), distance: distance ? Number(distance[1]) : 1400, surface: surface?.[1] || "Belirtilmemiş", horses: [] };
@@ -297,6 +297,11 @@ function parseRaces(text) {
     race.horses.push({ number, name, sire, damSire, odds: odds ? parseNumber(odds[1]) : null, agf: agf ? parseNumber(agf[1]) : null, hp, last6, place: placeMatch ? Number(placeMatch[1]) : null, scratched });
   }
   if (race) races.push(race);
+  for (const item of races) {
+    const placed = item.horses.filter((horse) => Number.isInteger(horse.place) && horse.place > 0);
+    const places = placed.map((horse) => horse.place);
+    item.finished = placed.length >= 2 && places.includes(1);
+  }
   const filtered = races.filter((item) => item.horses.length > 0);
   if (!filtered.length) warnings.push("Koşu ve at satırı bulunamadı. TJK metnini sekme ayrımları korunacak şekilde yeniden kopyalayın.");
   for (const item of races) if (!item.horses.length) warnings.push(`${item.no}. koşuda okunabilir at satırı bulunamadı.`);
@@ -385,22 +390,26 @@ async function analyzeWithDeterministicRobots(races) {
 function renderAnalysis(races, targetId = "kosuSonucAlani") {
   const target = $(targetId);
   target.innerHTML = races.map((race) => {
+    const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${escapeHtml(race.distance)} m ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}</span></h3>`;
+    if (race.finished) return `<article class="race">${heading}<p class="alert">Koşuldu · sonuç verisi bulundu. Bu ayak için tahmin gösterilmiyor.</p></article>`;
     const ranked = scoreRace(race);
-    return `<article class="race"><h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${escapeHtml(race.distance)} m ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}</span></h3>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· puan lideri</small>" : ""}<br><small>${horse.signal} · Veri kapsamı %${horse.coverage}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}</article>`;
+    return `<article class="race">${heading}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· puan lideri</small>" : ""}<br><small>${horse.signal} · Veri kapsamı %${horse.coverage}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}</article>`;
   }).join("");
 }
 function buildCoupon(races, budget, unit) {
-  const six = races.map((race) => ({ race, ranked: scoreRace(race) }));
-  if (six.length !== 6) return { error: "Altılı kupon için 6 okunabilir koşu gerekir." };
-  if (six.some(({ ranked }) => !ranked.length)) return { error: "Altılı içindeki koşulardan birinde koşabilir at bulunamadı." };
+  if (races.length !== 6) return { error: "Altılı kupon için 6 okunabilir koşu gerekir." };
+  const finishedNos = races.filter((race) => race.finished).map((race) => race.no);
+  const openLegs = races.filter((race) => !race.finished).map((race) => ({ race, ranked: scoreRace(race) }));
+  if (!openLegs.length) return { completedOnly: true, finishedNos };
+  if (openLegs.some(({ ranked }) => !ranked.length)) return { error: "Açık ayaklardan birinde koşabilir at bulunamadı." };
   if (!Number.isFinite(budget) || budget <= 0 || !Number.isFinite(unit) || unit <= 0) return { error: "Bütçe ve kolon fiyatı sıfırdan büyük olmalıdır." };
   const maxColumns = Math.floor(budget / unit);
   if (maxColumns < 1) return { error: "Bütçe, en az bir kolonun birim fiyatını karşılamıyor." };
-  const strongestSingle = six
+  const strongestSingle = openLegs
     .map(({ race, ranked }) => ({ race, ranked, gap: ranked.length > 1 ? ranked[0].score - ranked[1].score : 0 }))
     .filter((item) => item.gap >= SINGLE_GAP_THRESHOLD && item.ranked[0].independentCoverage >= 50)
     .sort((a, b) => b.gap - a.gap)[0];
-  const picks = six.map(({ race, ranked }) => ({
+  const picks = openLegs.map(({ race, ranked }) => ({
     no: race.no,
     ranked,
     gap: ranked.length > 1 ? ranked[0].score - ranked[1].score : 0,
@@ -442,16 +451,18 @@ function buildCoupon(races, budget, unit) {
     best.pick.count++;
   }
   const columns = combinations();
-  return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed) };
+  return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed), finishedNos };
 }
 function formatCoupon(coupon, title) {
   if (coupon.error) return `<div class="card"><h2>${title}</h2><div class="alert error">${escapeHtml(coupon.error)}</div></div>`;
+  if (coupon.completedOnly) return `<div class="card"><h2>${title}</h2><p class="hint">Bu altılıdaki tüm ayaklar koşuldu; analiz/tahmin ve kupon hesabı gösterilmiyor.</p></div>`;
+  const completed = coupon.finishedNos?.length ? `<p class="hint">Koşuldu, hesap dışında: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}.</p>` : "";
   const warning = coupon.budgetNarrowed ? `<div class="alert">Bütçe nedeniyle bazı koşular tek ata düşürüldü. Bunlar güçlü “banko” olarak değil, bütçe kısıtı olarak değerlendirilmelidir.</div>` : "";
   return `<div class="card"><h2>${title}</h2><p class="hint">Puanlar göreli sıralamadır; kazanma garantisi değildir. Favoriyle performans sinyali ayrışan ve bağımsız veri kapsamı yeterli sürpriz adayı, bütçe elverirse ayrıca eklenir.</p>${warning}${coupon.picks.map((pick) => {
     const horses = [...pick.ranked.slice(0, pick.count), ...(pick.surpriseHorse ? [pick.surpriseHorse] : [])];
     const horseLabels = horses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)}${horse === pick.surpriseHorse ? " · sürpriz sinyali" : ""}`).join(", ");
     return `<div class="alert"><b>${pick.no}. Koşu · ${horses.length} at${pick.confidentSingle && horses.length === 1 && !pick.surpriseHorse ? " · Tek at adayı" : pick.budgetNarrowed && horses.length === 1 ? " · Bütçe kısıtı" : ""}:</b> ${horseLabels}</div>`;
-  }).join("")}<b>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL / ${coupon.budget.toFixed(2)} TL bütçe</b></div>`;
+  }).join("")}${completed}<b>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL / ${coupon.budget.toFixed(2)} TL bütçe</b></div>`;
 }
 async function analyze() {
   const input = $("hamBultenInput").value.trim();
@@ -464,8 +475,11 @@ async function analyze() {
   const parsed = parseRaces(input);
   if (!parsed.races.length) { showMessage(warning, parsed.warnings.join(" "), "error"); return; }
   scoreCache = new WeakMap();
-  const { results, robotCount } = await analyzeWithDeterministicRobots(parsed.races);
-  lastAnalysis = parsed.races.map((race, index) => ({
+  const openRaces = parsed.races.filter((race) => !race.finished);
+  const { results, robotCount } = openRaces.length
+    ? await analyzeWithDeterministicRobots(openRaces)
+    : { results: [], robotCount: 0 };
+  lastAnalysis = openRaces.map((race, index) => ({
     no: race.no,
     surface: race.surface,
     type: race.type,
@@ -475,16 +489,23 @@ async function analyze() {
   state.predictions = lastAnalysis;
   saveState();
   renderAnalysis(parsed.races);
-  if (parsed.warnings.length) showMessage(warning, parsed.warnings.join(" "), "");
-  else showMessage(warning, `${parsed.races.length} koşu görevi ${robotCount} deterministik analiz robotuyla işlendi; ${parsed.races.reduce((n, race) => n + race.horses.filter((horse) => !horse.scratched).length, 0)} koşabilir at okundu. AGF/oran piyasa sinyaliyle HP/form/pedigri bağımsız performans sinyalleri ayrıştırılır.`, "success");
+  const completedCount = parsed.races.filter((race) => race.finished).length;
+  const statusMessage = openRaces.length
+    ? `${openRaces.length} açık koşu ${robotCount} deterministik analiz robotuyla işlendi; ${completedCount} koşulmuş ayak tahmin dışında bırakıldı.`
+    : `${completedCount} koşunun tamamı koşulmuş; tahmin üretilmedi.`;
+  if (parsed.warnings.length) showMessage(warning, `${statusMessage} ${parsed.warnings.join(" ")}`, "");
+  else showMessage(warning, `${statusMessage} Açık ayaklarda AGF/oran piyasa sinyaliyle HP/form/pedigri bağımsız performans sinyalleri ayrıştırılır.`, "success");
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
-  const first = buildCoupon(parsed.races.slice(0, 6), budget, unit);
-  const secondRaces = parsed.races.slice(6, 12);
-  const second = secondRaces.length === 6 ? buildCoupon(secondRaces, budget, unit) : null;
+  const firstLegs = parsed.races.filter((race) => race.no >= 1 && race.no <= 6);
+  const first = firstLegs.length === 6
+    ? buildCoupon(firstLegs, budget, unit)
+    : { error: `Birinci altılı için 1–6. koşuların tamamı gerekli. Şu an ${firstLegs.length}/6 koşu okundu.` };
+  const secondLegs = parsed.races.filter((race) => race.no >= 7 && race.no <= 12);
+  const second = secondLegs.length === 6 ? buildCoupon(secondLegs, budget, unit) : null;
   $("kuponAlani").innerHTML = formatCoupon(first, "Birinci altılı · 1–6. koşular") + (second
     ? formatCoupon(second, "İkinci altılı · 7–12. koşular")
-    : `<div class="card"><h2>İkinci altılı</h2><p class="hint">İkinci altılı için bültende 7–12. koşuların tamamı bulunmalı. Şu an ${secondRaces.length}/6 koşu okundu.</p></div>`);
+    : `<div class="card"><h2>İkinci altılı</h2><p class="hint">İkinci altılı için bültende 7–12. koşuların tamamı bulunmalı. Şu an ${secondLegs.length}/6 koşu okundu.</p></div>`);
   setTab("analiz");
 }
 function softmaxScores(horses, weights) {
