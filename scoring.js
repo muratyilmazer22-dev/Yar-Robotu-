@@ -167,17 +167,20 @@
   function analyzeEnsemble(race, options = {}) {
     const contextKey = `${race.surface || ""}|${race.type || ""}`;
     const adaptiveWeights = { ...BASE_WEIGHTS, ...(options.modelWeights || {}), ...(options.contextWeights?.[contextKey] || {}) };
+    const adaptiveWeight = Math.max(1, Number(options.adaptiveWeight) || 1);
     const rankings = ROBOT_STRATEGIES.map((robot) => ({
       name: robot.name,
+      weight: robot.weights ? 1 : adaptiveWeight,
       ranked: scoreRaceWithWeights(race, robot.weights ? { ...BASE_WEIGHTS, ...robot.weights } : adaptiveWeights, options.profileScore)
     }));
+    const totalRankWeight = rankings.reduce((sum, robot) => sum + robot.weight, 0);
     const stats = new Map();
-    for (const { name, ranked } of rankings) {
+    for (const { name, ranked, weight } of rankings) {
       ranked.forEach((horse, index) => {
         const item = stats.get(horse.number) || { horse, rankTotal: 0, scoreTotal: 0, shareTotal: 0, topThreeCount: 0, firstChoiceCount: 0, firstChoiceRobots: [] };
-        item.rankTotal += index + 1;
-        item.scoreTotal += horse.score;
-        item.shareTotal += horse.modelShare;
+        item.rankTotal += (index + 1) * weight;
+        item.scoreTotal += horse.score * weight;
+        item.shareTotal += horse.modelShare * weight;
         if (index < 3) item.topThreeCount += 1;
         if (index === 0) {
           item.firstChoiceCount += 1;
@@ -188,9 +191,9 @@
     }
     const fieldSize = Math.max(1, stats.size);
     return [...stats.values()].map(({ horse, rankTotal, scoreTotal, shareTotal, topThreeCount, firstChoiceCount, firstChoiceRobots }) => {
-      const averageRank = rankTotal / ROBOT_STRATEGIES.length;
-      const consensusScore = (fieldSize === 1 ? 100 : (fieldSize - averageRank) / (fieldSize - 1) * 100) * 0.8 + scoreTotal / ROBOT_STRATEGIES.length * 0.2;
-      return { ...horse, score: Math.round(consensusScore * 10) / 10, modelShare: shareTotal / ROBOT_STRATEGIES.length, robotTopThreeCount: topThreeCount, robotFirstChoiceCount: firstChoiceCount, robotFirstChoices: firstChoiceRobots };
+      const averageRank = rankTotal / totalRankWeight;
+      const consensusScore = (fieldSize === 1 ? 100 : (fieldSize - averageRank) / (fieldSize - 1) * 100) * 0.8 + scoreTotal / totalRankWeight * 0.2;
+      return { ...horse, score: Math.round(consensusScore * 10) / 10, modelShare: shareTotal / totalRankWeight, robotTopThreeCount: topThreeCount, robotFirstChoiceCount: firstChoiceCount, robotFirstChoices: firstChoiceRobots };
     }).sort((a, b) => b.score - a.score || b.modelShare - a.modelShare || Number(a.number) - Number(b.number));
   }
 

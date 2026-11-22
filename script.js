@@ -478,6 +478,7 @@ function scoreRace(race) {
   const combined = window.RaceScoring.analyzeEnsemble(race, {
     modelWeights: state.modelWeights,
     contextWeights: state.contextWeights,
+    adaptiveWeight: state.trainingReport?.updated ? 3 : 1,
     profileScore
   });
   scoreCache.set(race, combined);
@@ -629,11 +630,11 @@ function formatCoupon(coupon, title, poolKey) {
       ? `<div class="alert">Bütçe sınırı bazı ayaklarda daha geniş seçimi engelledi. Tek seçimler yalnızca ${SINGLE_GAP_THRESHOLD} puan farkı ve en az %${MIN_SINGLE_COVERAGE} bağımsız veri kapsamı eşiği karşılanınca önerilir; bu da garanti değildir.</div>`
       : "";
   const trainingNote = state.trainingReport?.updated
-    ? `Zamana göre ayrılmış testte iyileşen ağırlıklar kullanılıyor (${state.trainingReport.trainingRaces} eğitim / ${state.trainingReport.validationRaces} doğrulama koşusu; test başlangıcı ${state.trainingReport.validationStartDate}).`
+    ? `Zamana göre ayrılmış testte iyileşen ağırlıklar kupon sıralamasında güçlendirilerek kullanılıyor (${state.trainingReport.trainingRaces} eğitim / ${state.trainingReport.validationRaces} doğrulama koşusu; test başlangıcı ${state.trainingReport.validationStartDate}). Bu, düşük sıralı adayların geçmişte işe yarayan özelliklerle öne çıkmasına yardımcı olabilir; kesin kazanan garantisi değildir.`
     : !state.trainingReport?.validatedAt
       ? `Başlangıç ağırlıkları kullanılıyor. Eğitim için en az ${MODEL_MIN_RACES} uygun koşu, en az 5 ayrı tarih ve en az 5 doğrulama koşusu gerekir; mevcut uygun koşu ${state.trainingReport?.sampleSize || 0}.`
       : `Ayrılmış tarih doğrulamasında en az %2 iyileşme görülmedi; başlangıç ağırlıkları korunuyor (${state.trainingReport.trainingRaces} eğitim / ${state.trainingReport.validationRaces} doğrulama koşusu).`;
-  return `<div class="card"><h2>${title} · otomatik kurgu</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p>${warning}${coupon.picks.map((pick) => {
+  return `<div class="card"><h2>${title} · öğrenen model önerisi</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p>${warning}${coupon.picks.map((pick) => {
     const horses = pick.ranked.slice(0, pick.count);
     const horseLabels = horses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)} · sıralama payı %${Math.round(horse.modelShare * 100)}`).join(", ");
     const singleLabel = horses.length === 1
