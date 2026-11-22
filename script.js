@@ -172,11 +172,13 @@
 
   loadSummary();
 })();
-=======
 const STORAGE_KEY = "race-analysis-v1";
 const BASE_WEIGHTS = { rating: 0.3, form: 0.3, market: 0.25, pedigree: 0.15 };
 const MODEL_MIN_RACES = 30;
+const TRAINING_WINDOW_RACES = 2000;
 const SINGLE_GAP_THRESHOLD = 12.5;
+const MAX_DETERMINISTIC_ROBOTS = 8;
+let scoreCache = new WeakMap();
 const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], modelWeights: { ...BASE_WEIGHTS }, contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
@@ -251,7 +253,7 @@ function saveState() {
 }
 function showMessage(target, text, type = "") { target.innerHTML = `<div class="alert ${type}">${escapeHtml(text)}</div>`; }
 function setTab(name) {
-  document.querySelectorAll(".tab").forEach((button) => { const active = button.dataset.tab === name; button.setAttribute("aria-selected", String(active)); button.tabIndex = active ? 0 : -1; });
+  document.querySelectorAll(".tab").forEach((button) => { const active = (button.dataset.tab || button.dataset.panel) === name; button.setAttribute("aria-selected", String(active)); button.tabIndex = active ? 0 : -1; });
   document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === `panel-${name}`));
 }
 function normalize(text) { return text.toLocaleUpperCase("en-US").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "I"); }
@@ -312,6 +314,8 @@ function profileScore(name, distance) {
   return 45 + 55 * (distance <= 1300 ? speedFit : distance >= 1800 ? staminaFit : middleFit);
 }
 function scoreRace(race) {
+  const cached = scoreCache.get(race);
+  if (cached) return cached;
   const active = race.horses.filter((horse) => !horse.scratched);
   const maxHp = Math.max(1, ...active.map((horse) => horse.hp || 0));
   const maxAgf = Math.max(1, ...active.map((horse) => horse.agf || 0));
@@ -320,7 +324,7 @@ function scoreRace(race) {
   const contextKey = `${race.surface || ""}|${race.type || ""}`;
   const weights = { ...BASE_WEIGHTS, ...state.modelWeights, ...(state.contextWeights?.[contextKey] || {}) };
   const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0) || 1;
-  return active.map((horse) => {
+  const ranked = active.map((horse) => {
     const recent = horse.last6 ? [...horse.last6].slice(0, 6).map(Number).filter((n) => n >= 1 && n <= 9) : [];
     const sire = profileScore(horse.sire, race.distance);
     const damSire = profileScore(horse.damSire, race.distance);
@@ -362,6 +366,21 @@ function scoreRace(race) {
       signal
     };
   }).sort((a, b) => b.score - a.score);
+  scoreCache.set(race, ranked);
+  return ranked;
+}
+async function analyzeWithDeterministicRobots(races) {
+  const robotCount = Math.min(races.length, MAX_DETERMINISTIC_ROBOTS);
+  const results = new Array(races.length);
+  let nextTask = 0;
+  await Promise.all(Array.from({ length: robotCount }, async () => {
+    while (nextTask < races.length) {
+      const taskIndex = nextTask++;
+      results[taskIndex] = scoreRace(races[taskIndex]);
+      if (taskIndex % robotCount === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }));
+  return { results, robotCount };
 }
 function renderAnalysis(races, targetId = "kosuSonucAlani") {
   const target = $(targetId);
@@ -420,7 +439,7 @@ function formatCoupon(coupon, title) {
   const warning = coupon.budgetNarrowed ? `<div class="alert">Bütçe nedeniyle bazı koşular tek ata düşürüldü. Bunlar güçlü “banko” olarak değil, bütçe kısıtı olarak değerlendirilmelidir.</div>` : "";
   return `<div class="card"><h2>${title}</h2><p class="hint">Puanlar sıralama göstergesidir; kazanma olasılığı veya garanti değildir. Tek at eşiği ${SINGLE_GAP_THRESHOLD} puan ve en az %50 bağımsız veri kapsamıdır.</p>${warning}${coupon.picks.map((pick) => `<div class="alert"><b>${pick.no}. Koşu · ${pick.count} at${pick.confidentSingle ? " · Tek at adayı" : pick.budgetNarrowed && pick.count === 1 ? " · Bütçe kısıtı" : ""}:</b> ${pick.ranked.slice(0, pick.count).map((horse) => `#${horse.number} ${escapeHtml(horse.name)}`).join(", ")}</div>`).join("")}<b>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL / ${coupon.budget.toFixed(2)} TL bütçe</b></div>`;
 }
-function analyze() {
+async function analyze() {
   const input = $("hamBultenInput").value.trim();
   const warning = $("bultenUyariAlani");
   warning.innerHTML = "";
@@ -430,18 +449,20 @@ function analyze() {
   if (!input) { showMessage(warning, "Önce TJK bülten metnini yapıştırın.", "error"); return; }
   const parsed = parseRaces(input);
   if (!parsed.races.length) { showMessage(warning, parsed.warnings.join(" "), "error"); return; }
-  lastAnalysis = parsed.races.map((race) => ({
+  scoreCache = new WeakMap();
+  const { results, robotCount } = await analyzeWithDeterministicRobots(parsed.races);
+  lastAnalysis = parsed.races.map((race, index) => ({
     no: race.no,
     surface: race.surface,
     type: race.type,
     distance: race.distance,
-    horses: scoreRace(race).map((horse) => ({ number: horse.number, name: horse.name, score: horse.score, features: horse.features, performanceScore: horse.performanceScore, marketScore: horse.marketScore, coverage: horse.coverage, independentCoverage: horse.independentCoverage, signal: horse.signal }))
+    horses: results[index].map((horse) => ({ number: horse.number, name: horse.name, score: horse.score, features: horse.features, performanceScore: horse.performanceScore, marketScore: horse.marketScore, coverage: horse.coverage, independentCoverage: horse.independentCoverage, signal: horse.signal }))
   }));
   state.predictions = lastAnalysis;
   saveState();
   renderAnalysis(parsed.races);
   if (parsed.warnings.length) showMessage(warning, parsed.warnings.join(" "), "");
-  else showMessage(warning, `${parsed.races.length} koşu ve ${parsed.races.reduce((n, race) => n + race.horses.filter((horse) => !horse.scratched).length, 0)} koşabilir at okundu. AGF/oran piyasa sinyaliyle HP/form/pedigri bağımsız performans sinyalleri ayrıştırılır; pist ve koşu türü geçmiş performans raporlarında kullanılır.`, "success");
+  else showMessage(warning, `${parsed.races.length} koşu görevi ${robotCount} deterministik analiz robotuyla işlendi; ${parsed.races.reduce((n, race) => n + race.horses.filter((horse) => !horse.scratched).length, 0)} koşabilir at okundu. AGF/oran piyasa sinyaliyle HP/form/pedigri bağımsız performans sinyalleri ayrıştırılır.`, "success");
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
   const first = buildCoupon(parsed.races.slice(0, 6), budget, unit);
@@ -508,7 +529,7 @@ function fitModelWeights(races, referenceWeights) {
   return { sampleSize: races.length, baselineBrier, validationBrier: updated ? learnedBrier : baselineBrier, updated, weights: updated ? candidate : referenceWeights };
 }
 function trainModel() {
-  const races = state.outcomes.filter((item) => Array.isArray(item.horses) && item.horses.length > 1 && item.horses.some((horse) => horse.number === item.winner)).sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
+  const races = state.outcomes.filter((item) => Array.isArray(item.horses) && item.horses.length > 1 && item.horses.some((horse) => horse.number === item.winner)).sort((a, b) => String(a.at || "").localeCompare(String(b.at || ""))).slice(-TRAINING_WINDOW_RACES);
   const globalFit = fitModelWeights(races, state.modelWeights);
   if (globalFit) state.modelWeights = globalFit.weights;
   state.trainingReport = {
@@ -603,14 +624,33 @@ function archiveRowToOutcome(row) {
     at: `${String(row.race_date || "").slice(0, 10)}T12:00:00.000Z`
   };
 }
+async function refreshRemoteMemory() {
+  const target = $("cloudMemoryArea");
+  if (!target) return;
+  try {
+    const response = await fetch("/api/model-memory", { headers: { Accept: "application/json" } });
+    const memory = await response.json();
+    if (!response.ok) throw new Error(memory.error || "Neon hafızası alınamadı.");
+    target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu TJK koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}. Bu resmi arşiv tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi bu cihazda kalır.`;
+  } catch {
+    target.textContent = "Neon kalıcı hafızasına şu an ulaşılamıyor; bu cihazdaki kayıtlar korunuyor.";
+  }
+}
 async function syncHistoricalArchive() {
   const status = $("archiveStatus");
-  status.textContent = "TJK geçmiş arşivi kontrol ediliyor…";
+  if (status) status.textContent = "TJK geçmiş arşivi kontrol ediliyor…";
+  refreshRemoteMemory();
   try {
-    const response = await fetch("/api/race-history", { headers: { Accept: "application/json" } });
-    if (!response.ok) throw new Error("Arşiv hizmetine ulaşılamadı.");
-    const archive = await response.json();
-    if (!Array.isArray(archive)) throw new Error("Arşiv yanıt biçimi beklenmiyor.");
+    const archive = [];
+    const pageSize = 5000;
+    for (let offset = 0; offset < 100000; offset += pageSize) {
+      const response = await fetch(`/api/race-history?limit=${pageSize}&offset=${offset}`, { headers: { Accept: "application/json" } });
+      const page = await response.json();
+      if (!response.ok) throw new Error(page.error || "Arşiv hizmetine ulaşılamadı.");
+      if (!Array.isArray(page)) throw new Error("Arşiv yanıt biçimi beklenmiyor.");
+      archive.push(...page);
+      if (page.length < pageSize) break;
+    }
     const converted = archive.map(archiveRowToOutcome).filter(Boolean);
     const known = new Set(state.outcomes.map(outcomeKey));
     const fresh = converted.filter((item) => !known.has(outcomeKey(item)));
@@ -622,9 +662,9 @@ async function syncHistoricalArchive() {
     state.archiveLatestDate = archive.map((row) => String(row.race_date || "").slice(0, 10)).sort().at(-1) || "";
     state.archiveSyncedAt = new Date().toISOString();
     saveState();
-    status.textContent = `TJK arşivinden ${converted.length} sonuçlu koşu alındı; ${fresh.length} yeni koşu hafızaya eklendi. Son arşiv tarihi: ${state.archiveLatestDate || "bilinmiyor"}. ${state.trainingReport?.updated ? "Doğrulama iyileşti; öğrenilmiş ağırlıklar kullanılıyor." : `Ağırlıklar ${MODEL_MIN_RACES} yarış ve ayrılmış doğrulama iyileşmesi şartıyla güncellenir.`}`;
+    if (status) status.textContent = `Neon arşivinden ${converted.length.toLocaleString("tr-TR")} sonuçlu koşu alındı; ${fresh.length.toLocaleString("tr-TR")} yeni koşu öğrenme hafızasına eklendi. Son arşiv tarihi: ${state.archiveLatestDate || "bilinmiyor"}. ${state.trainingReport?.updated ? "Ayrılmış doğrulamada iyileşme görüldü; öğrenilmiş ağırlıklar etkin." : `Ağırlıklar ${MODEL_MIN_RACES} yarış ve ayrılmış doğrulama iyileşmesi şartıyla güncellenir.`}`;
   } catch {
-    status.textContent = "TJK arşivine şu an ulaşılamadı. Uygulama ve bu cihazdaki kayıtlar çalışmaya devam ediyor; bağlantı gelince arşiv yeniden kontrol edilebilir.";
+    if (status) status.textContent = "Neon yarış arşivine şu an ulaşılamadı. Bu cihazdaki kayıtlar korunuyor; bağlantı kurulduğunda arşiv yeniden kontrol edilir.";
   }
 }
 function compareResults() {
@@ -711,7 +751,7 @@ function updateMemory() {
   const report = state.trainingReport;
   $("modelBadge").textContent = `Model v${state.version}`;
   $("statsArea").innerHTML = n
-    ? `<div class="stats"><div class="stat"><b>${n}</b><span>ölçülen koşu</span></div><div class="stat"><b>%${Math.round(top3 / n * 100)}</b><span>ilk 3 isabet oranı</span></div><div class="stat"><b>%${Math.round(top1 / n * 100)}</b><span>model lideri</span></div></div><div class="meter" aria-label="İlk üç isabet oranı"><span style="width:${Math.round(top3 / n * 100)}%"></span></div><p class="hint">Yalnızca bu tarayıcıda kayıtlı karşılaştırmalar. ${trainable < MODEL_MIN_RACES ? `Ağırlık kalibrasyonu için ${MODEL_MIN_RACES} uygun yarış gerekir; şu an ${trainable} var.` : report?.updated ? `Ağırlıklar geçmiş veride eğitildi ve ayrılmış doğrulama grubunda iyileşme gösterdi (Brier ${report.validationBrier.toFixed(3)}).` : "Yeterli örnek var; fakat doğrulama grubu mevcut ağırlıkları geçemedi, bu yüzden model ağırlıkları değiştirilmedi."} Güçlü tek aday geçmişi: ${singleHits}/${singleResults.length}; doğrulanmış pist/koşu türü ağırlığı: ${contextCount}. Oranlar gelecekte kazanma garantisi değildir.</p>`
+    ? `<div class="stats"><div class="stat"><b>${n}</b><span>ölçülen koşu</span></div><div class="stat"><b>%${Math.round(top3 / n * 100)}</b><span>ilk 3 isabet oranı</span></div><div class="stat"><b>%${Math.round(top1 / n * 100)}</b><span>model lideri</span></div></div><div class="meter" aria-label="İlk üç isabet oranı"><span style="width:${Math.round(top3 / n * 100)}%"></span></div><p class="hint">Bu cihazdaki karşılaştırmalar ve Neon resmi yarış arşivi birlikte değerlendirilir. ${trainable < MODEL_MIN_RACES ? `Ağırlık kalibrasyonu için ${MODEL_MIN_RACES} uygun yarış gerekir; şu an ${trainable} var.` : report?.updated ? `Ağırlıklar geçmiş veride eğitildi ve ayrılmış doğrulama grubunda iyileşme gösterdi (Brier ${report.validationBrier.toFixed(3)}).` : "Yeterli örnek var; fakat doğrulama grubu mevcut ağırlıkları geçemedi, bu yüzden model ağırlıkları değiştirilmedi."} Güçlü tek aday geçmişi: ${singleHits}/${singleResults.length}; doğrulanmış pist/koşu türü ağırlığı: ${contextCount}. Oranlar gelecekte kazanma garantisi değildir.</p>`
     : `<p class="muted">Henüz ölçülmüş sonuç yok. Yüzde hesaplamak için tahminleri gerçek sonuçlarla karşılaştırın.</p>`;
   const profileNames = Object.keys(state.profiles).sort();
   $("aygirListeAlani").textContent = `${profileNames.length} pedigri profili: ${profileNames.slice(0, 12).join(", ")}${profileNames.length > 12 ? "…" : ""}`;
@@ -719,12 +759,15 @@ function updateMemory() {
 }
 function addProfile() {
   const name = normalize($("aygirAdInput").value).replace(/[^A-Z0-9]/g, "");
-  const values = $("dpValues").value.split(/[;,\s]+/).filter(Boolean).map(parseNumber);
+  const values = $("dpValues")
+    ? $("dpValues").value.split(/[;,\s]+/).filter(Boolean).map(parseNumber)
+    : ["dpB", "dpI", "dpC", "dpS", "dpP"].map((id) => parseNumber($(id)?.value ?? "0"));
   if (!name || values.length !== 5 || values.some((value) => value === null || value < 0)) { showMessage($("aygirListeAlani"), "Aygır adı ve sıfır veya daha büyük 5 sayısal profil değeri girin. Örnek: 6, 6, 4, 0, 0", "error"); return; }
   state.profiles[name] = values;
   saveState();
   $("aygirAdInput").value = "";
-  $("dpValues").value = "";
+  if ($("dpValues")) $("dpValues").value = "";
+  else ["dpB", "dpI", "dpC", "dpS", "dpP"].forEach((id) => { if ($(id)) $(id).value = ""; });
   showMessage($("aygirListeAlani"), `${name} profili kaydedildi.`, "success");
 }
 function resetHistory() {
@@ -749,18 +792,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     $("installAppBtn").hidden = true;
   });
   window.addEventListener("appinstalled", () => { $("installAppBtn").hidden = true; });
-  document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => setTab(button.dataset.tab)));
-  $("analyzeBtn").addEventListener("click", analyze);
-  $("clearBtn").addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
-  $("learnBtn").addEventListener("click", compareResults);
-  $("saveHorseBtn").addEventListener("click", addProfile);
+  document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => setTab(button.dataset.tab || button.dataset.panel)));
+  $("analyzeBtn")?.addEventListener("click", analyze);
+  $("analyzeButton")?.addEventListener("click", analyze);
+  $("clearBtn")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
+  $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
+  $("learnBtn")?.addEventListener("click", compareResults);
+  $("learnButton")?.addEventListener("click", compareResults);
+  $("saveHorseBtn")?.addEventListener("click", addProfile);
+  $("saveSireButton")?.addEventListener("click", addProfile);
   $("exportBackupBtn").addEventListener("click", exportBackup);
-  $("refreshArchiveBtn").addEventListener("click", syncHistoricalArchive);
+  $("refreshArchiveBtn")?.addEventListener("click", syncHistoricalArchive);
   $("importBackupInput").addEventListener("change", (event) => {
     importBackup(event.target.files?.[0]);
     event.target.value = "";
   });
-  $("resetBtn").addEventListener("click", resetHistory);
+  $("resetBtn")?.addEventListener("click", resetHistory);
+  $("resetButton")?.addEventListener("click", resetHistory);
   document.querySelectorAll(".tab").forEach((button, index, buttons) => button.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
@@ -772,4 +820,3 @@ document.addEventListener("DOMContentLoaded", async () => {
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js").catch(() => {});
   syncHistoricalArchive();
 });
->main

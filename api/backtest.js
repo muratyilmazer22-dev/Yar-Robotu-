@@ -108,7 +108,7 @@ module.exports = async function handler(req, res) {
         averageTopThreeHits: Number((group.totalTopThreeHits / group.races).toFixed(2)),
         winnerHitRate: rate(group.winnerHits, group.races)
       })),
-      method: 'Test yalnızca yarış programı verilerini ve sabit varsayılan pedigri profilini kullanır. Sonuçlar ölçüm içindir; tarayıcıdaki özel profiller kullanılmaz, puan ağırlıkları güncellenmez.'
+      method: 'Bu rapor sabit ağırlık ve varsayılan pedigri kullanan deterministic-baseline-v1 testidir; öğrenme ekranında Neon arşivinden eğitilen cihaz modelinin yüzdeleriyle doğrudan karşılaştırılamaz. Sonuçlar ölçüm içindir, kazanma garantisi değildir.'
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected server error.';

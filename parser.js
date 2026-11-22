@@ -111,7 +111,7 @@
           agf: agfMatch ? Number(agfMatch[1].replace(',', '.')) : 0,
           odds,
           scratched: /koşmaz|scratched/i.test(rowName),
-rank: Number.isFinite(assumedRank) ? assumedRank : (resultEvidence ? legacyNo : 0)
+rank: Number.isFinite(assumedRank) ? assumedRank : 0
         });
         continue;
       }

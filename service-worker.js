@@ -1,5 +1,5 @@
-const CACHE_NAME = "race-analysis-shell-v2";
-const APP_FILES = ["./", "./index.html", "./script.js", "./manifest.webmanifest", "./horse-icon-192.png", "./horse-icon-512.png"];
+const CACHE_NAME = "race-analysis-shell-v5";
+const APP_FILES = ["./", "./index.html", "./script.js", "./parser.js", "./scoring.js", "./manifest.webmanifest", "./horse-icon-192.png", "./horse-icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_FILES)).then(() => self.skipWaiting()));
