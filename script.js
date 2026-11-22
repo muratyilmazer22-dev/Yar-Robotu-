@@ -455,6 +455,7 @@ function showMessage(target, text, type = "") {
   target.setAttribute("role", type === "error" ? "alert" : "status");
   target.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
   target.innerHTML = `<div class="alert ${type}">${escapeHtml(text)}</div>`;
+  target.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 function setTab(name) {
   document.querySelectorAll(".tab").forEach((button) => { const active = (button.dataset.tab || button.dataset.panel) === name; button.setAttribute("aria-selected", String(active)); button.tabIndex = active ? 0 : -1; });
@@ -949,7 +950,10 @@ async function syncHistoricalArchive() {
 function compareResults() {
   const target = $("ogrenmeLogAlani");
   const parsed = parseRaces($("sonucluBultenInput").value.trim());
-  if (!parsed.races.length) { showMessage(target, parsed.warnings.join(" ") || "Sonuç metni ekleyin.", "error"); return; }
+  if (!parsed.races.length) {
+    showMessage(target, "Sonuç bülteninde koşu ve at sonuç satırları bulunamadı. Ekran görüntüsündeki metin bir web menüsü/başlık içeriği; sonuç tablosunu, at numarası ve Sıra/Rank/Position bilgileriyle birlikte kopyalayın.", "error");
+    return;
+  }
   const resultDate = $("resultsDateInput").value;
   if (!resultDate) { showMessage(target, "Sonuç bülteninin tarihini seçin.", "error"); return; }
   const datePredictions = state.predictions.filter((item) => item.date === resultDate);
@@ -959,7 +963,12 @@ function compareResults() {
   if (!resultCity && matchingCities.length > 1) { showMessage(target, "Aynı tarihte birden fazla hipodromun tahmini kayıtlı. Eşleştirmek için hipodrom adını girin.", "error"); return; }
   if (!resultCity) resultCity = matchingCities[0] || "";
   const matchingPredictions = datePredictions.filter((item) => normalize(item.city || "") === resultCity);
-  if (!matchingPredictions.length) { showMessage(target, "Bu tarih ve hipodrom için kayıtlı tahmin bulunamadı. Bültenle aynı bilgileri seçin.", "error"); return; }
+  if (!matchingPredictions.length) {
+    const savedCities = [...new Set(datePredictions.map((item) => item.city).filter(Boolean))];
+    const savedCityHint = savedCities.length ? ` Bu tarihte kayıtlı hipodrom: ${savedCities.join(", ")}.` : "";
+    showMessage(target, `Bu tarih ve hipodrom için kayıtlı tahmin bulunamadı. Analiz sırasında kaydettiğiniz hipodrom adını aynen kullanın.${savedCityHint}`, "error");
+    return;
+  }
   const timestamp = new Date().toISOString();
   const outcomes = [];
   let racesWithoutWinner = 0;
@@ -1022,6 +1031,7 @@ function compareResults() {
   target.setAttribute("role", "status");
   target.setAttribute("aria-live", "polite");
   target.innerHTML = `<div class="alert success"><b>${outcomes.length} koşu karşılaştırıldı.</b> ${escapeHtml(learningStatus + skippedSummary)} İlk 3 içinde birinci: ${top3Hits}/${outcomes.length} (%${Math.round(top3Hits / outcomes.length * 100)}); model lideri: ${top1Hits}/${outcomes.length} (%${Math.round(top1Hits / outcomes.length * 100)}); tek seçim eşiği (${SINGLE_GAP_THRESHOLD} puan, bağımsız kapsam ≥%${MIN_SINGLE_COVERAGE}): ${singleHits}/${singleCandidates.length} isabet${singleCandidates.length < 30 ? " · örnek yetersiz (<30)" : ""}; piyasa favorisi yanılgısı: ${favoriteErrors}/${outcomes.length}; sürpriz sinyalinin kazananı yakalaması: ${surpriseHits}/${outcomes.length}.</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · İlk üç ${item.top3Hit ? "isabet" : "isabet değil"} · Model lideri ${item.top1Hit ? "isabet" : "isabet değil"} · Tek seçim eşiği ${item.singleCandidate ? item.singleHit ? "isabet" : "isabet değil" : "karşılanmadı"} · Favori yanılgısı ${item.favoriteMiss === null ? "ölçülemedi" : item.favoriteMiss ? "var" : "yok"}</div>`).join("")}`;
+  target.scrollIntoView({ behavior: "smooth", block: "nearest" });
   updateMemory();
 }
 function handleCompareResults() {
