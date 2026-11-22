@@ -145,6 +145,10 @@
       return {
         ok: true,
         onAuthStateChanged: (callback) => authSdk.onAuthStateChanged(auth, callback),
+        getIdToken: async () => {
+          await auth.authStateReady();
+          return auth.currentUser ? auth.currentUser.getIdToken() : null;
+        },
         signIn: (email, password) => authSdk.signInWithEmailAndPassword(auth, email, password),
         createAccount: (email, password) => authSdk.createUserWithEmailAndPassword(auth, email, password),
         signOut: () => authSdk.signOut(auth),
