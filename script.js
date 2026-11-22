@@ -683,12 +683,12 @@ async function analyze() {
   const first = firstLegs.length === 6
     ? buildCoupon(firstLegs, budget, unit)
     : { error: `Birinci altılı için 1–6. koşuların tamamı gerekli. Şu an ${firstLegs.length}/6 koşu okundu.` };
-  const secondLegs = parsed.races.filter((race) => race.no >= 7 && race.no <= 12);
+  const secondLegs = parsed.races.filter((race) => race.no >= 6 && race.no <= 11);
   const second = secondLegs.length === 6 ? buildCoupon(secondLegs, budget, unit) : null;
   lastCoupons = { first, second };
   $("kuponAlani").innerHTML = formatCoupon(first, "Birinci altılı · 1–6. koşular", "first") + (second
-    ? formatCoupon(second, "İkinci altılı · 7–12. koşular", "second")
-    : `<div class="card"><h2>İkinci altılı</h2><p class="hint">İkinci altılı için bültende 7–12. koşuların tamamı bulunmalı. Şu an ${secondLegs.length}/6 koşu okundu.</p></div>`);
+    ? formatCoupon(second, "İkinci altılı · 6–11. koşular", "second")
+    : `<div class="card"><h2>İkinci altılı</h2><p class="hint">İkinci altılı için bültende 6–11. koşuların tamamı bulunmalı. Şu an ${secondLegs.length}/6 koşu okundu.</p></div>`);
   setTab("analiz");
 }
 function softmaxScores(horses, weights) {
