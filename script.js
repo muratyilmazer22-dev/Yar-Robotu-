@@ -179,7 +179,7 @@ const TRAINING_WINDOW_RACES = 2000;
 const SINGLE_GAP_THRESHOLD = 12.5;
 const MAX_DETERMINISTIC_ROBOTS = 8;
 let scoreCache = new WeakMap();
-const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], modelWeights: { ...BASE_WEIGHTS }, contextWeights: {} };
+const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], modelWeights: { ...BASE_WEIGHTS }, contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
   NATIVEKHAN: [2, 4, 8, 2, 0], LUXOR: [6, 6, 4, 0, 0], KANEKO: [4, 8, 6, 0, 0],
@@ -199,6 +199,7 @@ function normalizeState(saved) {
     profiles: { ...DEFAULT_PROFILES, ...(saved?.profiles || {}) },
     predictions: Array.isArray(saved?.predictions) ? saved.predictions : [],
     outcomes: Array.isArray(saved?.outcomes) ? saved.outcomes : [],
+    coupons: Array.isArray(saved?.coupons) ? saved.coupons : [],
     modelWeights: { ...BASE_WEIGHTS, ...(saved?.modelWeights || {}) },
     contextWeights: saved?.contextWeights && typeof saved.contextWeights === "object" ? saved.contextWeights : {}
   };
@@ -235,6 +236,7 @@ async function restoreState() {
 let state = normalizeState(null);
 let stateDb = null;
 let lastAnalysis = [];
+let lastCoupons = {};
 let deferredInstallPrompt = null;
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -370,7 +372,10 @@ function scoreRace(race) {
       independentCoverage,
       signal
     };
-  }).sort((a, b) => b.score - a.score);
+  });
+  const modelShares = softmaxScores(ranked, weights);
+  ranked.forEach((horse, index) => { horse.modelShare = modelShares[index]; });
+  ranked.sort((a, b) => b.modelShare - a.modelShare);
   scoreCache.set(race, ranked);
   return ranked;
 }
@@ -393,7 +398,7 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${escapeHtml(race.distance)} m ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}</span></h3>`;
     if (race.finished) return `<article class="race">${heading}<p class="alert">Koşuldu · sonuç verisi bulundu. Bu ayak için tahmin gösterilmiyor.</p></article>`;
     const ranked = scoreRace(race);
-    return `<article class="race">${heading}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· puan lideri</small>" : ""}<br><small>${horse.signal} · Veri kapsamı %${horse.coverage}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}</article>`;
+    return `<article class="race">${heading}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· modelin ilk tercihi</small>" : ""}<br><small>Model payı %${Math.round(horse.modelShare * 100)} · ${horse.signal} · Veri kapsamı %${horse.coverage}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}</article>`;
   }).join("");
 }
 function buildCoupon(races, budget, unit) {
@@ -404,65 +409,73 @@ function buildCoupon(races, budget, unit) {
   if (openLegs.some(({ ranked }) => !ranked.length)) return { error: "Açık ayaklardan birinde koşabilir at bulunamadı." };
   if (!Number.isFinite(budget) || budget <= 0 || !Number.isFinite(unit) || unit <= 0) return { error: "Bütçe ve kolon fiyatı sıfırdan büyük olmalıdır." };
   const maxColumns = Math.floor(budget / unit);
+  if (!Number.isSafeInteger(maxColumns)) return { error: "Bütçe, güvenli kolon hesabı sınırını aşıyor." };
   if (maxColumns < 1) return { error: "Bütçe, en az bir kolonun birim fiyatını karşılamıyor." };
-  const strongestSingle = openLegs
-    .map(({ race, ranked }) => ({ race, ranked, gap: ranked.length > 1 ? ranked[0].score - ranked[1].score : 0 }))
-    .filter((item) => item.gap >= SINGLE_GAP_THRESHOLD && item.ranked[0].independentCoverage >= 50)
-    .sort((a, b) => b.gap - a.gap)[0];
-  const picks = openLegs.map(({ race, ranked }) => ({
-    no: race.no,
-    ranked,
-    gap: ranked.length > 1 ? ranked[0].score - ranked[1].score : 0,
-    confidentSingle: strongestSingle?.race.no === race.no,
-    count: strongestSingle?.race.no === race.no ? 1 : Math.min(2, ranked.length),
-    budgetNarrowed: false
-  }));
-  const combinations = () => picks.reduce((product, pick) => product * (pick.count + (pick.surpriseHorse ? 1 : 0)), 1);
-  while (picks.reduce((product, pick) => product * pick.count, 1) > maxColumns) {
-    const reducible = picks.filter((pick) => pick.count > 1 && !pick.confidentSingle);
-    if (!reducible.length) break;
-    const leastCovered = reducible.sort((a, b) => {
-      const aGap = a.ranked[a.count - 2].score - a.ranked[a.count - 1].score;
-      const bGap = b.ranked[b.count - 2].score - b.ranked[b.count - 1].score;
-      return bGap - aGap;
-    })[0];
-    leastCovered.count--;
-    leastCovered.budgetNarrowed = true;
-  }
-  const surpriseCandidates = picks.flatMap((pick) => {
-    const horse = pick.ranked.find((runner, index) => index >= pick.count && runner.signal === "Sürpriz adayı" && runner.independentCoverage >= 50);
-    return horse ? [{ pick, horse, edge: horse.performanceScore - horse.marketScore }] : [];
-  }).sort((a, b) => b.edge - a.edge);
-  for (const candidate of surpriseCandidates) {
-    const { pick, horse } = candidate;
-    const next = combinations() * (pick.count + 1) / (pick.count + (pick.surpriseHorse ? 1 : 0));
-    if (next <= maxColumns) pick.surpriseHorse = horse;
-  }
-  while (true) {
-    let best = null;
-    for (const pick of picks) {
-      if (pick.count >= pick.ranked.length) continue;
-      const currentCount = pick.count + (pick.surpriseHorse ? 1 : 0);
-      const next = combinations() * (currentCount + 1) / currentCount;
-      const gap = pick.ranked[pick.count - 1].score - pick.ranked[pick.count].score;
-      if (next <= maxColumns && (!best || gap < best.gap)) best = { pick, gap };
+
+  const picks = openLegs.map(({ race, ranked }) => ({ no: race.no, ranked, count: 1 }));
+  let fullColumns = 1;
+  let allHorsesFit = true;
+  for (const pick of picks) {
+    if (fullColumns > maxColumns / pick.ranked.length) {
+      allHorsesFit = false;
+      break;
     }
-    if (!best) break;
-    best.pick.count++;
+    fullColumns *= pick.ranked.length;
   }
-  const columns = combinations();
+
+  let columns;
+  if (allHorsesFit) {
+    picks.forEach((pick) => { pick.count = pick.ranked.length; });
+    columns = fullColumns;
+  } else {
+    let states = new Map([[1, { score: 0, counts: [] }]]);
+    for (const pick of picks) {
+      const nextStates = new Map();
+      const cumulativeShares = [];
+      pick.ranked.forEach((horse, index) => {
+        cumulativeShares[index] = (cumulativeShares[index - 1] || 0) + horse.modelShare;
+      });
+      for (const [usedColumns, state] of states) {
+        for (let count = 1; count <= pick.ranked.length; count++) {
+          if (usedColumns > maxColumns / count) continue;
+          const nextColumns = usedColumns * count;
+          const score = state.score + Math.log(cumulativeShares[count - 1]);
+          const previous = nextStates.get(nextColumns);
+          if (!previous || score > previous.score) {
+            nextStates.set(nextColumns, { score, counts: [...state.counts, count] });
+          }
+        }
+      }
+      states = nextStates;
+    }
+    let best = null;
+    for (const [usedColumns, state] of states) {
+      if (!best || state.score > best.score) best = { ...state, columns: usedColumns };
+    }
+    picks.forEach((pick, index) => { pick.count = best.counts[index]; });
+    columns = best.columns;
+  }
+
+  for (const pick of picks) {
+    pick.modelCoverage = pick.ranked.slice(0, pick.count).reduce((sum, horse) => sum + horse.modelShare, 0);
+    pick.budgetNarrowed = pick.count < pick.ranked.length && columns / pick.count * (pick.count + 1) > maxColumns;
+  }
   return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed), finishedNos };
 }
-function formatCoupon(coupon, title) {
+function formatCoupon(coupon, title, poolKey) {
   if (coupon.error) return `<div class="card"><h2>${title}</h2><div class="alert error">${escapeHtml(coupon.error)}</div></div>`;
   if (coupon.completedOnly) return `<div class="card"><h2>${title}</h2><p class="hint">Bu altılıdaki tüm ayaklar koşuldu; analiz/tahmin ve kupon hesabı gösterilmiyor.</p></div>`;
   const completed = coupon.finishedNos?.length ? `<p class="hint">Koşuldu, hesap dışında: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}.</p>` : "";
-  const warning = coupon.budgetNarrowed ? `<div class="alert">Bütçe nedeniyle bazı koşular tek ata düşürüldü. Bunlar güçlü “banko” olarak değil, bütçe kısıtı olarak değerlendirilmelidir.</div>` : "";
-  return `<div class="card"><h2>${title}</h2><p class="hint">Puanlar göreli sıralamadır; kazanma garantisi değildir. Favoriyle performans sinyali ayrışan ve bağımsız veri kapsamı yeterli sürpriz adayı, bütçe elverirse ayrıca eklenir.</p>${warning}${coupon.picks.map((pick) => {
-    const horses = [...pick.ranked.slice(0, pick.count), ...(pick.surpriseHorse ? [pick.surpriseHorse] : [])];
-    const horseLabels = horses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)}${horse === pick.surpriseHorse ? " · sürpriz sinyali" : ""}`).join(", ");
-    return `<div class="alert"><b>${pick.no}. Koşu · ${horses.length} at${pick.confidentSingle && horses.length === 1 && !pick.surpriseHorse ? " · Tek at adayı" : pick.budgetNarrowed && horses.length === 1 ? " · Bütçe kısıtı" : ""}:</b> ${horseLabels}</div>`;
-  }).join("")}${completed}<b>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL / ${coupon.budget.toFixed(2)} TL bütçe</b></div>`;
+  const warning = coupon.budgetNarrowed ? `<div class="alert">Bütçe sınırı bazı ayaklarda tek seçime neden oldu; bu, “banko” veya garanti anlamına gelmez.</div>` : "";
+  const trainingNote = state.trainingReport?.updated
+    ? `Sonuç geçmişinden öğrenilen ve doğrulama grubunda iyileşen ağırlıklar kullanılıyor (${state.trainingReport.sampleSize} yarış).`
+    : `Doğrulamada iyileşme göstermiş öğrenilmiş ağırlık bulunmadığından başlangıç ağırlıkları kullanılıyor (${state.trainingReport?.sampleSize || 0} eğitim yarışı).`;
+  return `<div class="card"><h2>${title} · otomatik kurgu</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p>${warning}${coupon.picks.map((pick) => {
+    const horses = pick.ranked.slice(0, pick.count);
+    const horseLabels = horses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)} · model payı %${Math.round(horse.modelShare * 100)}`).join(", ");
+    const singleLabel = horses.length === 1 ? pick.budgetNarrowed ? " · bütçe sınırında tek seçim" : " · tek seçim" : "";
+    return `<div class="alert"><b>${pick.no}. Koşu · ${horses.length} at${singleLabel} · seçilen model payı %${Math.round(pick.modelCoverage * 100)}:</b> ${horseLabels}</div>`;
+  }).join("")}${completed}<b>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL / ${coupon.budget.toFixed(2)} TL bütçe</b><div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">Bu kuponu sonuç takibine kaydet</button></div></div>`;
 }
 async function analyze() {
   const input = $("hamBultenInput").value.trim();
@@ -474,6 +487,8 @@ async function analyze() {
   if (!input) { showMessage(warning, "Önce TJK bülten metnini yapıştırın.", "error"); return; }
   const parsed = parseRaces(input);
   if (!parsed.races.length) { showMessage(warning, parsed.warnings.join(" "), "error"); return; }
+  const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
+  const couponCity = $("couponCityInput")?.value.trim().slice(0, 80) || "";
   scoreCache = new WeakMap();
   const openRaces = parsed.races.filter((race) => !race.finished);
   const { results, robotCount } = openRaces.length
@@ -481,10 +496,12 @@ async function analyze() {
     : { results: [], robotCount: 0 };
   lastAnalysis = openRaces.map((race, index) => ({
     no: race.no,
+    date: couponDate,
+    city: couponCity,
     surface: race.surface,
     type: race.type,
     distance: race.distance,
-    horses: results[index].map((horse) => ({ number: horse.number, name: horse.name, score: horse.score, features: horse.features, performanceScore: horse.performanceScore, marketScore: horse.marketScore, coverage: horse.coverage, independentCoverage: horse.independentCoverage, signal: horse.signal }))
+    horses: results[index].map((horse) => ({ number: horse.number, name: horse.name, score: horse.score, modelShare: horse.modelShare, features: horse.features, performanceScore: horse.performanceScore, marketScore: horse.marketScore, coverage: horse.coverage, independentCoverage: horse.independentCoverage, signal: horse.signal }))
   }));
   state.predictions = lastAnalysis;
   saveState();
@@ -503,8 +520,9 @@ async function analyze() {
     : { error: `Birinci altılı için 1–6. koşuların tamamı gerekli. Şu an ${firstLegs.length}/6 koşu okundu.` };
   const secondLegs = parsed.races.filter((race) => race.no >= 7 && race.no <= 12);
   const second = secondLegs.length === 6 ? buildCoupon(secondLegs, budget, unit) : null;
-  $("kuponAlani").innerHTML = formatCoupon(first, "Birinci altılı · 1–6. koşular") + (second
-    ? formatCoupon(second, "İkinci altılı · 7–12. koşular")
+  lastCoupons = { first, second };
+  $("kuponAlani").innerHTML = formatCoupon(first, "Birinci altılı · 1–6. koşular", "first") + (second
+    ? formatCoupon(second, "İkinci altılı · 7–12. koşular", "second")
     : `<div class="card"><h2>İkinci altılı</h2><p class="hint">İkinci altılı için bültende 7–12. koşuların tamamı bulunmalı. Şu an ${secondLegs.length}/6 koşu okundu.</p></div>`);
   setTab("analiz");
 }
@@ -749,6 +767,108 @@ function compareResults() {
   target.innerHTML = `<div class="alert success"><b>${outcomes.length} koşu karşılaştırıldı.</b> İlk 3 içinde birinci: ${top3Hits}/${outcomes.length} (%${Math.round(top3Hits / outcomes.length * 100)}); model lideri: ${top1Hits}/${outcomes.length} (%${Math.round(top1Hits / outcomes.length * 100)}); piyasa favorisi yanılgısı: ${favoriteErrors}/${outcomes.length}; sürpriz sinyalinin kazananı yakalaması: ${surpriseHits}/${outcomes.length}.${fresh.length === 0 ? " Bu sonuçlar daha önce kaydedilmiş; özet tekrar hesaplandı." : ""}</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · İlk üç ${item.top3Hit ? "isabet" : "isabet değil"} · Model lideri ${item.top1Hit ? "isabet" : "isabet değil"} · Favori yanılgısı ${item.favoriteMiss === null ? "ölçülemedi" : item.favoriteMiss ? "var" : "yok"}</div>`).join("")}`;
   updateMemory();
 }
+const COUPON_STATUS_LABELS = { pending: "Sonuç bekleniyor", won: "Ödeme aldı", lost: "İsabetsiz", carryover: "Devretti" };
+function createCouponId() {
+  return window.crypto?.randomUUID?.() || `coupon-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+function saveGeneratedCoupon(poolKey) {
+  const coupon = lastCoupons[poolKey];
+  if (!coupon || coupon.error || coupon.completedOnly) return;
+  const date = $("couponDateInput")?.value || lastAnalysis[0]?.date || new Date().toISOString().slice(0, 10);
+  const city = $("couponCityInput")?.value.trim().slice(0, 80) || "";
+  const record = {
+    id: createCouponId(), date, city, poolType: poolKey, cost: coupon.total, payout: null, status: "pending",
+    source: "Yarış Robotu", columns: coupon.columns, unit: parseNumber($("birimInput")?.value),
+    legs: coupon.picks.map((pick) => ({ raceNo: pick.no, horses: pick.ranked.slice(0, pick.count).map((horse) => ({ number: horse.number, name: horse.name, modelShare: horse.modelShare })) })),
+    finishedNos: coupon.finishedNos || [],
+    createdAt: new Date().toISOString()
+  };
+  state.coupons.unshift(record);
+  state.coupons = state.coupons.slice(0, 500);
+  saveState();
+  showMessage($("ogrenmeLogAlani"), `${poolKey === "first" ? "Birinci" : "İkinci"} altılı kuponu sonuç takibine eklendi. Sonucu ve ödeme tutarını daha sonra ayrıca kaydedebilirsiniz.`, "success");
+}
+function addManualCoupon(event) {
+  event.preventDefault();
+  const cost = parseNumber($("manualCouponCost").value);
+  const payout = parseNumber($("manualCouponPayout").value);
+  const date = $("manualCouponDate").value;
+  const status = $("manualCouponStatus").value;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(cost) || cost <= 0 || !Number.isFinite(payout) || payout < 0 || !Object.hasOwn(COUPON_STATUS_LABELS, status)) {
+    showMessage($("ogrenmeLogAlani"), "Tarih, pozitif kupon maliyeti, geçerli durum ve sıfır veya daha yüksek ödeme girin.", "error");
+    return;
+  }
+  const record = {
+    id: createCouponId(), date, city: $("manualCouponCity").value.trim().slice(0, 80),
+    poolType: $("manualCouponPool").value, cost, payout: status === "pending" ? null : payout, status,
+    source: "Harici kupon", columns: null, unit: null, legs: [], createdAt: new Date().toISOString()
+  };
+  state.coupons.unshift(record);
+  state.coupons = state.coupons.slice(0, 500);
+  saveState();
+  showMessage($("ogrenmeLogAlani"), "Harici kupon kaydedildi. Devir durumu kazanç olarak sayılmaz; ödeme ayrıca girilir.", "success");
+  event.currentTarget.reset();
+  $("manualCouponDate").value = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
+  $("manualCouponPayout").value = "0";
+}
+function updateCouponResult(id, card) {
+  const record = state.coupons.find((coupon) => coupon.id === id);
+  const status = card.querySelector("[data-coupon-status]")?.value;
+  const payoutValue = card.querySelector("[data-coupon-payout]")?.value;
+  const payout = payoutValue === "" ? null : parseNumber(payoutValue);
+  if (!record || !Object.hasOwn(COUPON_STATUS_LABELS, status) || (status !== "pending" && (!Number.isFinite(payout) || payout < 0))) {
+    showMessage($("ogrenmeLogAlani"), "Sonucu bekleyen olarak bırakın veya geçerli bir ödeme tutarı girin.", "error");
+    return;
+  }
+  record.status = status;
+  record.payout = status === "pending" ? null : payout;
+  record.resolvedAt = status === "pending" ? null : new Date().toISOString();
+  saveState();
+  showMessage($("ogrenmeLogAlani"), "Kupon sonucu kaydedildi. Bu kayıt model ağırlıklarını değiştirmez.", "success");
+}
+function renderCouponHistory() {
+  const target = $("couponHistoryArea");
+  const metrics = $("couponMetrics");
+  if (!target || !metrics) return;
+  const records = Array.isArray(state.coupons) ? state.coupons : [];
+  const resolved = records.filter((record) => record.status !== "pending" && Number.isFinite(Number(record.payout)));
+  const cost = resolved.reduce((sum, record) => sum + Number(record.cost || 0), 0);
+  const payout = resolved.reduce((sum, record) => sum + Number(record.payout || 0), 0);
+  const net = payout - cost;
+  const money = (value) => `${Number(value).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`;
+  const metric = (label, value) => {
+    const item = document.createElement("div");
+    item.className = "stat";
+    const title = document.createElement("span");
+    title.textContent = label;
+    const strong = document.createElement("strong");
+    strong.textContent = value;
+    item.append(title, strong);
+    return item;
+  };
+  metrics.replaceChildren(
+    metric("Kaydedilen kupon", records.length.toLocaleString("tr-TR")),
+    metric("Sonucu girilen", resolved.length.toLocaleString("tr-TR")),
+    metric("Toplam maliyet", money(cost)),
+    metric("Net ödeme farkı", resolved.length ? money(net) : "—")
+  );
+  if (!records.length) {
+    target.innerHTML = '<p class="muted">Henüz kupon kaydı yok. Analizden üretilen kuponu kaydedin veya harici kuponun sonucunu ekleyin.</p>';
+    return;
+  }
+  target.innerHTML = records.map((record) => {
+    const pool = record.poolType === "second" ? "İkinci altılı" : "Birinci altılı";
+    const date = escapeHtml(record.date || "Tarih yok");
+    const venue = record.city ? ` · ${escapeHtml(record.city)}` : "";
+    const ticket = record.columns ? `${record.columns} kolon · ${money(record.cost)}` : `Maliyet ${money(record.cost)} · seçim dökümü yok`;
+    const paid = Number.isFinite(Number(record.payout)) && record.status !== "pending" ? money(record.payout) : "bekleniyor";
+    const netValue = Number(record.payout) - Number(record.cost);
+    const netText = record.status !== "pending" ? `<p>Net: <span class="coupon-net${netValue < 0 ? " negative" : ""}">${money(netValue)}</span></p>` : "";
+    const legs = Array.isArray(record.legs) && record.legs.length ? `<p>Seçimler: ${record.legs.map((leg) => `${leg.raceNo}. ayak #${leg.horses.map((horse) => horse.number).join(", #")}`).join(" · ")}</p>` : "";
+    const finished = Array.isArray(record.finishedNos) && record.finishedNos.length ? `<p>Sonucu alınmış ayaklar: ${record.finishedNos.join(", ")}. Kupon anlık olarak açık ayaklar üzerinden oluşturulmuş; önceki kuponun geriye dönük kopyası değildir.</p>` : "";
+    return `<article class="coupon-record" data-coupon-card="${escapeHtml(record.id)}"><h3>${pool} · ${date}${venue}</h3><p>${escapeHtml(record.source || "Kupon")} · ${ticket}</p>${legs}${finished}<p>Durum: ${escapeHtml(COUPON_STATUS_LABELS[record.status] || "Sonuç bekleniyor")} · Ödeme: ${paid}</p>${netText}<div class="controls"><label class="control"><small>Sonuç durumu</small><select data-coupon-status aria-label="${pool} ${date} sonuç durumu">${Object.entries(COUPON_STATUS_LABELS).map(([value, label]) => `<option value="${value}"${record.status === value ? " selected" : ""}>${label}</option>`).join("")}</select></label><label class="control"><small>Alınan ödeme (TL)</small><input data-coupon-payout type="number" min="0" step="0.01" value="${record.payout ?? ""}" placeholder="Sonuç bekleniyorsa boş bırakın" aria-label="${pool} ${date} alınan ödeme"></label><button class="btn secondary" type="button" data-update-coupon="${escapeHtml(record.id)}">Sonucu kaydet</button></div></article>`;
+  }).join("");
+}
 function exportBackup() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -791,6 +911,7 @@ function updateMemory() {
   const profileNames = Object.keys(state.profiles).sort();
   $("aygirListeAlani").textContent = `${profileNames.length} pedigri profili: ${profileNames.slice(0, 12).join(", ")}${profileNames.length > 12 ? "…" : ""}`;
   $("historyArea").innerHTML = n ? `<table class="table"><thead><tr><th>Hipodrom / koşu</th><th>Kazanan</th><th>İlk üç</th><th>Lider</th><th>Tarih</th></tr></thead><tbody>${state.outcomes.slice(-30).reverse().map((item) => `<tr><td>${escapeHtml(item.city || "Manuel")} · ${item.raceNo}</td><td>#${item.winner} ${escapeHtml(item.winnerName)}</td><td>${item.top3Hit ? "Evet" : "Hayır"}</td><td>${item.top1Hit ? "Evet" : "Hayır"}</td><td>${new Date(item.at).toLocaleDateString("tr-TR")}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Karşılaştırma geçmişi henüz yok.</p>`;
+  renderCouponHistory();
 }
 function addProfile() {
   const name = normalize($("aygirAdInput").value).replace(/[^A-Z0-9]/g, "");
@@ -806,9 +927,10 @@ function addProfile() {
   showMessage($("aygirListeAlani"), `${name} profili kaydedildi.`, "success");
 }
 function resetHistory() {
-  if (!window.confirm("Sonuç geçmişi ve eklenen profiller silinsin mi?")) return;
-  state = { ...DEFAULT_STATE, profiles: { ...DEFAULT_PROFILES } };
+  if (!window.confirm("Bu tarayıcıdaki yarış sonuçları, kupon sonuç kayıtları ve eklenen profiller silinsin mi?")) return;
+  state = { ...DEFAULT_STATE, profiles: { ...DEFAULT_PROFILES }, coupons: [] };
   lastAnalysis = [];
+  lastCoupons = {};
   saveState();
   $("ogrenmeLogAlani").innerHTML = "";
   showMessage($("ogrenmeLogAlani"), "Öğrenme geçmişi varsayılanlara döndürüldü.", "success");
@@ -828,6 +950,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   window.addEventListener("appinstalled", () => { $("installAppBtn").hidden = true; });
   document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => setTab(button.dataset.tab || button.dataset.panel)));
+  const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  $("couponDateInput").value = todayLocal;
+  $("manualCouponDate").value = todayLocal;
+  $("manualCouponForm")?.addEventListener("submit", addManualCoupon);
+  $("couponHistoryArea")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-update-coupon]");
+    if (button) updateCouponResult(button.dataset.updateCoupon, button.closest("[data-coupon-card]"));
+  });
+  $("kuponAlani")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-save-coupon]");
+    if (button) saveGeneratedCoupon(button.dataset.saveCoupon);
+  });
   $("analyzeBtn")?.addEventListener("click", analyze);
   $("analyzeButton")?.addEventListener("click", analyze);
   $("clearBtn")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });

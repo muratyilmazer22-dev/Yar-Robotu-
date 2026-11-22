@@ -1,4 +1,4 @@
-const CACHE_NAME = "race-analysis-shell-v6";
+const CACHE_NAME = "race-analysis-shell-v7";
 const APP_FILES = ["./", "./index.html", "./script.js", "./parser.js", "./scoring.js", "./manifest.webmanifest", "./horse-icon-192.png", "./horse-icon-512.png"];
 
 self.addEventListener("install", (event) => {
