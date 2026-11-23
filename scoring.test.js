@@ -55,6 +55,24 @@ test('the single model ranks by the active weighted signals', () => {
   assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
 });
 
+test('historical race-time performance influences ranking when available', () => {
+  const race = {
+    distance: 1400,
+    surface: 'Kum',
+    type: 'HANDİKAP',
+    horses: [
+      { number: 1, timePace: 90 },
+      { number: 2, timePace: 96 }
+    ]
+  };
+  const modelWeights = Object.fromEntries(Object.keys(require('./scoring').BASE_WEIGHTS).map((name) => [name, name === 'timeFit' ? 1 : 0]));
+  const ranked = analyzeRace(race, { modelWeights });
+
+  assert.equal(ranked[0].number, 1);
+  assert.ok(ranked[0].features.timeFit > ranked[1].features.timeFit);
+  assert.equal(analyzeRace({ ...race, horses: [{ number: 1, timePace: 60 }, { number: 2 }] }).find((horse) => horse.number === 1).features.timeFit, null);
+});
+
 test('venue, weather, and track history signals influence scores when matched data exists', () => {
   const race = {
     distance: 1400, surface: 'Kum', type: 'HANDIKAP',
