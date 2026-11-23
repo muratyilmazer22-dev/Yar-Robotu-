@@ -23,6 +23,16 @@ test('combined ranking works when the 20-criterion coupon has no selections', ()
   assert.equal(combined[0].modelShare, 1);
 });
 
+test('combined ranking keeps distinct named horses when program numbers are missing', () => {
+  const combined = combineRankings(
+    [horse(null, 'SANÇARLI BEY'), horse(null, 'FIRTINA BİÇEN')],
+    [horse(null, 'FIRTINA BİÇEN'), horse(null, 'SANÇARLI BEY')]
+  );
+
+  assert.equal(combined.length, 2);
+  assert.deepEqual(combined.map(({ name }) => name), ['SANÇARLI BEY', 'FIRTINA BİÇEN']);
+});
+
 test('combined ranking is deterministic when both options are unavailable', () => {
   assert.deepEqual(combineRankings([], []), []);
 });

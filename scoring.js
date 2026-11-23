@@ -63,7 +63,11 @@
   function scoreRaceWithWeights(race, weights, profileScoreFn) {
     const active = (Array.isArray(race?.horses) ? race.horses : []).filter((horse) => !horse.scratched).map((horse) => ({
       ...horse,
-      number: Number(horse.number ?? horse.horseNumber ?? horse.no),
+      number: (() => {
+        const value = horse.number ?? horse.horseNumber ?? horse.no;
+        const parsed = value === null || value === undefined || value === "" ? null : Number(value);
+        return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+      })(),
       hp: Number(horse.hp ?? horse.handicapPoints) || null,
       agf: Number(horse.agf) || null,
       odds: Number(horse.odds) || null,
@@ -204,7 +208,10 @@
     const stats = new Map();
     for (const { name, ranked, weight } of rankings) {
       ranked.forEach((horse, index) => {
-        const item = stats.get(horse.number) || { horse, rankTotal: 0, scoreTotal: 0, shareTotal: 0, topThreeCount: 0, firstChoiceCount: 0, firstChoiceRobots: [] };
+        const horseKey = Number.isSafeInteger(horse.number) && horse.number > 0
+          ? `number:${horse.number}`
+          : `name:${normalizeName(horse.name)}`;
+        const item = stats.get(horseKey) || { horse, rankTotal: 0, scoreTotal: 0, shareTotal: 0, topThreeCount: 0, firstChoiceCount: 0, firstChoiceRobots: [] };
         item.rankTotal += (index + 1) * weight;
         item.scoreTotal += horse.score * weight;
         item.shareTotal += horse.modelShare * weight;
@@ -213,7 +220,7 @@
           item.firstChoiceCount += 1;
           item.firstChoiceRobots.push(name);
         }
-        stats.set(horse.number, item);
+        stats.set(horseKey, item);
       });
     }
     const fieldSize = Math.max(1, stats.size);
