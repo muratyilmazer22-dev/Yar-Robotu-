@@ -54,6 +54,24 @@ test('the single model ranks by the active weighted signals', () => {
   assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
 });
 
+test('learned class-history evidence influences the ranking without replacing other features', () => {
+  const race = {
+    distance: 1400,
+    surface: 'Kum',
+    type: 'HANDİKAP',
+    horses: [
+      { number: 1, hp: 90, agf: 20, odds: 4, last6: '222222', classHistoryScore: 20 },
+      { number: 2, hp: 90, agf: 20, odds: 4, last6: '222222', classHistoryScore: 95 }
+    ]
+  };
+
+  const ranked = analyzeRace(race);
+
+  assert.equal(ranked[0].number, 2);
+  assert.equal(ranked[0].features.classHistory, 95);
+  assert.ok(ranked[0].score > ranked[1].score);
+});
+
 test('missing horse numbers do not collapse distinct runners in the main ranking', () => {
   const race = {
     distance: 1400,

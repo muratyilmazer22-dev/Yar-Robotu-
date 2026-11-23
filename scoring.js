@@ -50,7 +50,7 @@
     return [`${broad}|${distanceBand(race?.distance)}`, broad];
   }
 
-  const BASE_WEIGHTS = { rating: 0.3, form: 0.3, market: 0.25, pedigree: 0.15 };
+  const BASE_WEIGHTS = { rating: 0.27, form: 0.27, market: 0.225, pedigree: 0.135, classHistory: 0.1 };
   function softmaxScores(horses, weights) {
     const scores = horses.map((horse) => {
       const available = Object.entries(horse.features || {}).filter(([key, value]) => Number.isFinite(value) && weights[key] !== 0);
@@ -106,11 +106,12 @@
         rating: horse.hp ? horse.hp / maxHp * 100 : null,
         form: recent.length ? recent.reduce((sum, place) => sum + (10 - place), 0) / recent.length * 10 : null,
         market,
-        pedigree: sire !== null && damSire !== null ? sire * 0.65 + damSire * 0.35 : sire ?? damSire
+        pedigree: sire !== null && damSire !== null ? sire * 0.65 + damSire * 0.35 : sire ?? damSire,
+        classHistory: horse.classHistoryScore !== null && horse.classHistoryScore !== undefined && Number.isFinite(Number(horse.classHistoryScore)) ? Number(horse.classHistoryScore) : null
       };
       const availableWeight = Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : weights[key]), 0);
       const score = availableWeight ? Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : value * weights[key]), 0) / availableWeight : null;
-      const independentKeys = ["rating", "form", "pedigree"].filter((key) => features[key] !== null);
+      const independentKeys = ["rating", "form", "pedigree", "classHistory"].filter((key) => features[key] !== null);
       const independentWeight = independentKeys.reduce((sum, key) => sum + weights[key], 0);
       const performanceScore = independentWeight ? independentKeys.reduce((sum, key) => sum + features[key] * weights[key], 0) / independentWeight : null;
       const independentCoverage = Math.round(independentWeight / (totalWeight - weights.market || 1) * 100);

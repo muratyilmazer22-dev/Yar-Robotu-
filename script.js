@@ -249,6 +249,7 @@ const TRAINING_WINDOW_RACES = 2000;
 const SINGLE_GAP_THRESHOLD = 12.5;
 const MIN_SINGLE_COVERAGE = 50;
 let scoreCache = new WeakMap();
+let classHistoryArchive = new Map();
 const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
@@ -637,7 +638,16 @@ function profileScore(name, distance) {
 function scoreRace(race) {
   const cached = scoreCache.get(race);
   if (cached) return cached;
-  const ranked = window.RaceScoring.analyzeRace(race, {
+  const raceDate = race.date || $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
+  const raceClass = race.raceType || race.raceCategory || race.title || race.type;
+  const scoringRace = {
+    ...race,
+    horses: race.horses.map((horse) => ({
+      ...horse,
+      classHistoryScore: window.RaceClassHistory.scoreForHorse(classHistoryArchive, horse.name, raceClass, raceDate)
+    }))
+  };
+  const ranked = window.RaceScoring.analyzeRace(scoringRace, {
     modelWeights: state.modelWeights,
     contextWeights: state.contextWeights,
     profileScore
@@ -1020,6 +1030,8 @@ function archiveRowToOutcome(row) {
   const type = normalizedTitle.includes("HANDIKAP") ? "HANDIKAP" : normalizedTitle.includes("MAIDEN") || normalizedTitle.includes("SATIS") ? "MAIDEN / SATIŞ" : "DİĞER";
   const race = {
     no: Number(row.race_no),
+    date: String(row.race_date || "").slice(0, 10),
+    raceType: String(program.raceType || program.raceCategory || title),
     distance: distanceAndSurface ? Number(distanceAndSurface[1]) : 1400,
     surface,
     type,
@@ -1094,16 +1106,31 @@ async function syncHistoricalArchive() {
       archive.push(...page);
       if (page.length < pageSize) break;
     }
+    classHistoryArchive = window.RaceClassHistory.createIndex(archive);
+    scoreCache = new WeakMap();
     const converted = archive.map(archiveRowToOutcome).filter(Boolean);
     let freshCount = 0;
     let correctedCount = 0;
+    let refreshedClassHistoryCount = 0;
     for (const item of converted) {
+      const existingIndex = state.outcomes.findIndex((outcome) => outcomeKey(outcome) === outcomeKey(item));
+      const existing = existingIndex >= 0 ? state.outcomes[existingIndex] : null;
+      const existingHorses = new Map((existing?.horses || []).map((horse) => [Number(horse.number), horse]));
+      const classHistoryChanged = existing?.sourceKey?.startsWith("tjk:") && item.horses.some((horse) => {
+        const previousFeature = existingHorses.get(Number(horse.number))?.features?.classHistory;
+        return Number.isFinite(horse.features?.classHistory) && previousFeature !== horse.features.classHistory;
+      });
+      if (classHistoryChanged) {
+        state.outcomes[existingIndex] = item;
+        refreshedClassHistoryCount += 1;
+        continue;
+      }
       const merged = window.RaceLearningEvaluation.mergeOutcome(state.outcomes, item);
       state.outcomes = merged.outcomes;
       freshCount += Number(merged.added);
       correctedCount += Number(merged.corrected);
     }
-    if (freshCount || correctedCount) trainModel();
+    if (freshCount || correctedCount || refreshedClassHistoryCount) trainModel();
     state.archiveRaceCount = converted.length;
     state.archiveLatestDate = archive.map((row) => String(row.race_date || "").slice(0, 10)).sort().at(-1) || "";
     state.archiveSyncedAt = new Date().toISOString();
