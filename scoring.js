@@ -54,7 +54,7 @@
     return [...new Set(keys)];
   }
 
-  const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, classHistory: 0.08, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.015, distanceFit: 0.015, restFit: 0.01, weightFit: 0.01 };
+  const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, classHistory: 0.08, timeFit: 0.06, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.015, distanceFit: 0.015, restFit: 0.01, weightFit: 0.01 };
   function softmaxScores(horses, weights) {
     const scores = horses.map((horse) => {
       const available = Object.entries(horse.features || {}).filter(([key, value]) => Number.isFinite(value) && weights[key] !== 0);
@@ -82,6 +82,11 @@
       last6: String(horse.last6 ?? horse.form ?? "")
     }));
     if (!active.length) return [];
+    const timePaces = active.map((horse) => Number(horse.timePace)).filter((pace) => Number.isFinite(pace) && pace > 0).sort((a, b) => a - b);
+    const middlePace = Math.floor(timePaces.length / 2);
+    const medianTimePace = timePaces.length >= 2
+      ? timePaces.length % 2 ? timePaces[middlePace] : (timePaces[middlePace - 1] + timePaces[middlePace]) / 2
+      : null;
     const maxHp = Math.max(1, ...active.map((horse) => horse.hp || 0));
     const maxAgf = Math.max(1, ...active.map((horse) => horse.agf || 0));
     const validOdds = active.map((horse) => horse.odds).filter((odds) => odds > 0);
@@ -111,6 +116,9 @@
         form: recent.length ? recent.reduce((sum, place) => sum + (10 - place), 0) / recent.length * 10 : null,
         market,
         pedigree: sire !== null && damSire !== null ? sire * 0.65 + damSire * 0.35 : sire ?? damSire,
+        timeFit: Number.isFinite(Number(horse.timePace)) && Number(horse.timePace) > 0 && medianTimePace !== null
+          ? Math.max(0, Math.min(100, Math.round((50 + (medianTimePace - Number(horse.timePace)) / medianTimePace * 400) * 10) / 10))
+          : null,
         classHistory: horse.classHistoryScore !== null && horse.classHistoryScore !== undefined && Number.isFinite(Number(horse.classHistoryScore)) ? Number(horse.classHistoryScore) : null,
         venueFit: horse.venueFit !== null && horse.venueFit !== undefined && Number.isFinite(Number(horse.venueFit)) ? Number(horse.venueFit) : null,
         weatherFit: horse.weatherFit !== null && horse.weatherFit !== undefined && Number.isFinite(Number(horse.weatherFit)) ? Number(horse.weatherFit) : null,
@@ -122,7 +130,7 @@
       };
       const availableWeight = Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : weights[key]), 0);
       const score = availableWeight ? Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : value * weights[key]), 0) / availableWeight : null;
-      const independentKeys = ["rating", "form", "pedigree", "classHistory"].filter((key) => features[key] !== null);
+      const independentKeys = ["rating", "form", "pedigree", "classHistory", "timeFit"].filter((key) => features[key] !== null);
       const independentWeight = independentKeys.reduce((sum, key) => sum + weights[key], 0);
       const performanceScore = independentWeight ? independentKeys.reduce((sum, key) => sum + features[key] * weights[key], 0) / independentWeight : null;
       const independentCoverage = Math.round(independentWeight / (totalWeight - weights.market || 1) * 100);
