@@ -48,6 +48,27 @@ test('20-criterion shadow scoring reports missing data and normalizes only obser
   assert.ok(experiment.criteria.filter((criterion) => !criterion.available).length >= 15);
 });
 
+test('missing horse numbers do not collapse runners in main or 20-criterion rankings', () => {
+  const { analyzeAHPShadow } = require('./scoring');
+  const race = {
+    distance: 1400,
+    surface: 'Kum',
+    type: 'HANDIKAP',
+    horses: [
+      { name: 'SANÇARLI BEY', hp: 90, agf: 40, odds: 2, last6: '111111', weight: 60 },
+      { name: 'FIRTINA BİÇEN', hp: 30, agf: 5, odds: 12, last6: '888888', weight: 54 }
+    ]
+  };
+
+  const main = analyzeEnsemble(race);
+  const experiment = analyzeAHPShadow(race);
+
+  assert.equal(main.length, 2);
+  assert.equal(experiment.ranked.length, 2);
+  assert.ok(main.every((horse) => horse.number === null));
+  assert.deepEqual(new Set(experiment.ranked.map((horse) => horse.name)), new Set(['SANÇARLI BEY', 'FIRTINA BİÇEN']));
+});
+
 test('20-criterion shadow scoring does not invent a ranking when all factor data is missing', () => {
   const { analyzeAHPShadow } = require('./scoring');
   const experiment = analyzeAHPShadow({ horses: [{ number: 1 }, { number: 2 }] });
