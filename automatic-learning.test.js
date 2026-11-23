@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { BASE_WEIGHTS, dateInTurkey, fitModel, raceToTrainingExample } = require('./lib/automatic-learning');
+const { BASE_WEIGHTS, TRAINING_WINDOW_DAYS, trainingCutoff, dateInTurkey, fitModel, raceToTrainingExample } = require('./lib/automatic-learning');
 const { createIndex } = require('./lib/race-context');
 const classHistory = require('./class-history');
 const pedigreeHistory = require('./lib/pedigree-history');
@@ -25,6 +25,11 @@ test('daily automation handler runs only for an authorized GET request', async (
   await handler({ method: 'GET', headers: { authorization: 'Bearer private-secret' } }, res);
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { ok: true, imported: { records: 3 } });
+});
+
+test('model training window uses the latest 365 days without deleting older archive rows', () => {
+  assert.equal(TRAINING_WINDOW_DAYS, 365);
+  assert.equal(trainingCutoff(new Date('2026-11-24T00:00:00.000Z')), '2025-11-24');
 });
 
 test('Turkey-local date conversion honors the configured race day timezone', () => {
