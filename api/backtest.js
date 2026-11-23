@@ -1,7 +1,7 @@
 const { and, gte, lte } = require('drizzle-orm');
 const { db } = require('../lib/db');
 const { raceHistory } = require('../lib/db/schema');
-const { analyzeEnsemble, normalizeName } = require('../scoring');
+const { analyzeRace, normalizeName } = require('../scoring');
 const { getWinnerRank, getWinnerRankBucket } = require('../lib/backtest-metrics');
 
 function validDate(value) {
@@ -68,7 +68,7 @@ module.exports = async function handler(req, res) {
       }
 
       const finishById = new Map(finishers.map((horse) => [identity(horse), Number(horse.finishPosition)]).filter(([, place]) => Number.isFinite(place) && place > 0));
-      const scores = analyzeEnsemble({ distance: Number(program.distance) || 1400, surface: program.surface, type: program.raceCategory || program.raceType, horses });
+      const scores = analyzeRace({ distance: Number(program.distance) || 1400, surface: program.surface, type: program.raceCategory || program.raceType, horses });
       const matched = scores.map((horse) => ({ horse, place: finishById.get(identity(horse)) })).filter((entry) => Number.isFinite(entry.place));
       const winnerEntry = matched.find((entry) => entry.place === 1);
       if (!winnerEntry) {
@@ -182,7 +182,7 @@ module.exports = async function handler(req, res) {
         averageTopThreeHits: Number((group.totalTopThreeHits / group.races).toFixed(2)),
         winnerHitRate: rate(group.winnerHits, group.races)
       })),
-      method: 'Bu rapor uygulamadaki ortak sekiz stratejili puanlama motorunun varsayılan ağırlıklarını kullanır. Son tarihlerden ayrılan %20 bölüm eşik karşılaştırması için tutulur; kullanıcıya özel profiller/öğrenilmiş ağırlıklar ve kupon ödeme verileri bu sunucu testinde yer almaz. 30’dan az eşik adayı sonuçları yön gösterici sayılmamalıdır. Sonuçlar kazanma garantisi değildir.'
+      method: 'Bu rapor dört mevcut sinyali (handikap, form, piyasa ve pedigri) tek ağırlıklı modelle değerlendirir. Son tarihlerden ayrılan %20 bölüm doğrulama için tutulur; kullanıcıya özel profiller ve öğrenilmiş ağırlıklar bu sunucu testinde yer almaz. 30’dan az eşik adayı sonuçları yön gösterici sayılmamalıdır. Sonuçlar kazanma garantisi değildir.'
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected server error.';

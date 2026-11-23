@@ -35,18 +35,22 @@
     return String(value || '').toLocaleUpperCase('tr-TR').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9 ]/g, '').trim();
   }
 
-  const BASE_WEIGHTS = { rating: 0.3, form: 0.3, market: 0.25, pedigree: 0.15 };
-  const ROBOT_STRATEGIES = [
-    { name: "Öğrenen denge", weights: null },
-    { name: "Form", weights: { rating: 0.18, form: 0.46, market: 0.21, pedigree: 0.15 } },
-    { name: "Piyasa", weights: { rating: 0.18, form: 0.16, market: 0.52, pedigree: 0.14 } },
-    { name: "Handikap", weights: { rating: 0.5, form: 0.18, market: 0.2, pedigree: 0.12 } },
-    { name: "Pedigri", weights: { rating: 0.18, form: 0.18, market: 0.18, pedigree: 0.46 } },
-    { name: "Eşit ağırlık", weights: { rating: 0.25, form: 0.25, market: 0.25, pedigree: 0.25 } },
-    { name: "Piyasa dışı", weights: { rating: 0.38, form: 0.38, market: 0, pedigree: 0.24 } },
-    { name: "Temkinli", weights: { rating: 0.28, form: 0.24, market: 0.34, pedigree: 0.14 } }
-  ];
+  function distanceBand(distance) {
+    const value = Number(distance);
+    if (!Number.isFinite(value) || value <= 0) return 'mesafe-belirsiz';
+    if (value <= 1300) return 'kisa';
+    if (value < 1800) return 'orta';
+    return 'uzun';
+  }
 
+  function raceContextKeys(race) {
+    const surface = String(race?.surface || '');
+    const type = String(race?.type || '');
+    const broad = `${surface}|${type}`;
+    return [`${broad}|${distanceBand(race?.distance)}`, broad];
+  }
+
+  const BASE_WEIGHTS = { rating: 0.3, form: 0.3, market: 0.25, pedigree: 0.15 };
   function softmaxScores(horses, weights) {
     const scores = horses.map((horse) => {
       const available = Object.entries(horse.features || {}).filter(([key, value]) => Number.isFinite(value) && weights[key] !== 0);
@@ -124,112 +128,12 @@
     return ranked.map((horse, index) => ({ ...horse, modelShare: shares[index] })).sort((a, b) => b.modelShare - a.modelShare);
   }
 
-  const AHP_CRITERIA = [
-    { id: "son6YarisFormu", label: "Son 6 yarış formu", feature: "form" },
-    { id: "pistYatkinligi", label: "Pist yatkınlığı", feature: null },
-    { id: "mesafeYatkinligi", label: "Mesafe yatkınlığı", feature: null },
-    { id: "kiloAvantaji", label: "Sıklet / kilo avantajı", feature: "weight" },
-    { id: "kiloDegisimi", label: "Kilo değişimi", feature: null },
-    { id: "orijinDna", label: "Orijin ve pedigri DNA", feature: "pedigree" },
-    { id: "galopIdman", label: "Galop ve idman", feature: null },
-    { id: "ilkKezKosanPotansiyeli", label: "İlk kez koşan tay potansiyeli", feature: null },
-    { id: "jokeyIstatistigi", label: "Jokey istatistikleri", feature: null },
-    { id: "antrenorIstatistigi", label: "Antrenör istatistikleri", feature: null },
-    { id: "jokeyAntrenorSinerjisi", label: "Jokey–antrenör sinerjisi", feature: null },
-    { id: "handikapPuani", label: "Handikap puanı ve sınıf gücü", feature: "rating" },
-    { id: "tempoUyumu", label: "Tempo ve koşu stili uyumu", feature: null },
-    { id: "ahirNiyeti", label: "Ahır niyeti", feature: null },
-    { id: "akrabalikIliskisi", label: "Akraba jokey / eküri ilişkisi", feature: null },
-    { id: "takiDegisikligi", label: "Takı değişikliği", feature: null },
-    { id: "kulvarAvantaji", label: "Kulvar ve pist eğilimi", feature: null },
-    { id: "agfPiyasaDengesi", label: "AGF ve piyasa dengesi", feature: "market" },
-    { id: "sonDuzlukSprint", label: "Son düzlük sprinti ve derece", feature: null },
-    { id: "dinlenmeTazelik", label: "Dinlenme ve tazelik", feature: null }
-  ];
-
-  function analyzeAHPShadow(race, options = {}) {
-    const baseline = analyzeEnsemble(race, { profileScore: options.profileScore });
-    const validWeights = (race?.horses || []).filter((horse) => !horse.scratched).map((horse) => Number(horse.weight)).filter((weight) => Number.isFinite(weight) && weight > 0);
-    const minimumWeight = validWeights.length ? Math.min(...validWeights) : null;
-    const maximumWeight = validWeights.length ? Math.max(...validWeights) : null;
-    const weightRange = minimumWeight === null ? 0 : maximumWeight - minimumWeight;
-    const criteria = AHP_CRITERIA.map((criterion) => ({ ...criterion, available: false }));
-    const scored = baseline.map((horse) => {
-      const values = criteria.map((criterion) => {
-        if (criterion.feature === "weight") {
-          const weight = Number(horse.weight);
-          return Number.isFinite(weight) && weight > 0
-            ? weightRange === 0 ? 50 : 100 - ((weight - minimumWeight) / weightRange) * 100
-            : null;
-        }
-        return criterion.feature ? horse.features?.[criterion.feature] ?? null : null;
-      });
-      values.forEach((value, index) => {
-        if (Number.isFinite(value)) criteria[index].available = true;
-      });
-      const available = values.filter(Number.isFinite);
-      const score = available.length ? available.reduce((sum, value) => sum + value, 0) / available.length : null;
-      return {
-        ...horse,
-        score: score === null ? null : Math.round(score * 10) / 10,
-        modelShare: 0,
-        criteriaCoverage: Math.round((available.length / AHP_CRITERIA.length) * 100),
-        availableCriteria: available.length
-      };
-    });
-    const ranked = scored.filter((horse) => horse.score !== null).sort((a, b) => b.score - a.score || Number(a.number) - Number(b.number));
-    if (ranked.length) {
-      const maximum = ranked[0].score / 12.5;
-      const shares = ranked.map((horse) => Math.exp(horse.score / 12.5 - maximum));
-      const total = shares.reduce((sum, value) => sum + value, 0) || 1;
-      ranked.forEach((horse, index) => { horse.modelShare = shares[index] / total; });
-    }
-    return {
-      robotName: "20 Kriter Deterministik Robot",
-      robotType: "Gölge deney · ana kupondan bağımsız",
-      ranked,
-      criteria: criteria.map(({ id, label, available }) => ({ id, label, available })),
-      availableCriteria: criteria.filter((criterion) => criterion.available).length,
-      totalCriteria: AHP_CRITERIA.length,
-      weighting: "Eşit ağırlık; yalnızca at için verisi bulunan kriterler arasında normalize edilir."
-    };
+  function analyzeRace(race, options = {}) {
+    const contextKeys = raceContextKeys(race);
+    const contextualWeights = contextKeys.map((key) => options.contextWeights?.[key]).find(Boolean) || {};
+    const weights = { ...BASE_WEIGHTS, ...(options.modelWeights || {}), ...contextualWeights };
+    return scoreRaceWithWeights(race, weights, options.profileScore);
   }
 
-  function analyzeEnsemble(race, options = {}) {
-    const contextKey = `${race.surface || ""}|${race.type || ""}`;
-    const adaptiveWeights = { ...BASE_WEIGHTS, ...(options.modelWeights || {}), ...(options.contextWeights?.[contextKey] || {}) };
-    const adaptiveWeight = Math.max(1, Number(options.adaptiveWeight) || 1);
-    const rankings = ROBOT_STRATEGIES.map((robot) => ({
-      name: robot.name,
-      weight: robot.weights ? 1 : adaptiveWeight,
-      ranked: scoreRaceWithWeights(race, robot.weights ? { ...BASE_WEIGHTS, ...robot.weights } : adaptiveWeights, options.profileScore)
-    }));
-    const totalRankWeight = rankings.reduce((sum, robot) => sum + robot.weight, 0);
-    const stats = new Map();
-    for (const { name, ranked, weight } of rankings) {
-      ranked.forEach((horse, index) => {
-        const horseKey = Number.isSafeInteger(horse.number) && horse.number > 0
-          ? `number:${horse.number}`
-          : `name:${normalizeName(horse.name)}`;
-        const item = stats.get(horseKey) || { horse, rankTotal: 0, scoreTotal: 0, shareTotal: 0, topThreeCount: 0, firstChoiceCount: 0, firstChoiceRobots: [] };
-        item.rankTotal += (index + 1) * weight;
-        item.scoreTotal += horse.score * weight;
-        item.shareTotal += horse.modelShare * weight;
-        if (index < 3) item.topThreeCount += 1;
-        if (index === 0) {
-          item.firstChoiceCount += 1;
-          item.firstChoiceRobots.push(name);
-        }
-        stats.set(horseKey, item);
-      });
-    }
-    const fieldSize = Math.max(1, stats.size);
-    return [...stats.values()].map(({ horse, rankTotal, scoreTotal, shareTotal, topThreeCount, firstChoiceCount, firstChoiceRobots }) => {
-      const averageRank = rankTotal / totalRankWeight;
-      const consensusScore = (fieldSize === 1 ? 100 : (fieldSize - averageRank) / (fieldSize - 1) * 100) * 0.8 + scoreTotal / totalRankWeight * 0.2;
-      return { ...horse, score: Math.round(consensusScore * 10) / 10, averageRank: Math.round(averageRank * 100) / 100, modelShare: shareTotal / totalRankWeight, robotTopThreeCount: topThreeCount, robotFirstChoiceCount: firstChoiceCount, robotFirstChoices: firstChoiceRobots };
-    }).sort((a, b) => b.score - a.score || b.modelShare - a.modelShare || Number(a.number) - Number(b.number));
-  }
-
-  return { DEFAULT_DNA, BASE_WEIGHTS, ROBOT_STRATEGIES, AHP_CRITERIA, normalizeName, softmaxScores, analyzeEnsemble, analyzeAHPShadow };
+  return { DEFAULT_DNA, BASE_WEIGHTS, normalizeName, distanceBand, raceContextKeys, softmaxScores, analyzeRace };
 });
