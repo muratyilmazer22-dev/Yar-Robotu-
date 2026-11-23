@@ -1,6 +1,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseRaces } = require('./parser');
+const { parseRaces, parseRaceConditions } = require('./parser');
+
+test('extracts weather and surface-change notes from the bulletin text', () => {
+  const conditions = parseRaceConditions('Hava Durumu: Parçalı Bulutlu\nPist Durumu: Islak\nPist Değişikliği: Çim yerine sentetik pistte koşulacaktır');
+  assert.deepEqual(conditions, { weather: 'parcali bulutlu', trackCondition: 'islak', surfaceChange: 'cim yerine sentetik pistte kosulacaktir' });
+});
+
+test('attaches bulletin conditions to every parsed race', () => {
+  const [race] = parseRaces('Hava: Yağmurlu\nPist Zemini: Ağır\n1. Koşu 14:00 Maiden 1400 Kum\nAt İsmi\tHP\nKIR AT (1)\t60');
+  assert.equal(race.weather, 'yagmurlu');
+  assert.equal(race.trackCondition, 'agir');
+});
 
 test('parses tabular race bulletins by their column headers', () => {
   const bulletin = [

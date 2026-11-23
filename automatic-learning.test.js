@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { BASE_WEIGHTS, dateInTurkey, fitModel, raceToTrainingExample } = require('./lib/automatic-learning');
+const { createIndex } = require('./lib/race-context');
 const cronHandler = require('./api/cron/daily-learning');
 
 function response() {
@@ -32,6 +33,24 @@ test('ambiguous, missing-winner, and unmatched race results are excluded from tr
   const base = { raceDate: '2026-11-22', program: { runners: [{ no: 1 }, { no: 2 }] }, results: { runners: [{ no: 3, finishPosition: 1 }] } };
   assert.equal(raceToTrainingExample(base), null);
   assert.equal(raceToTrainingExample({ ...base, results: { runners: [{ no: 1, finishPosition: 1 }, { no: 2, finishPosition: 1 }] } }), null);
+});
+
+test('archive training examples include prior venue, weather, and track performance only', () => {
+  const previous = {
+    race_date: '2026-11-01', city: 'Ankara',
+    program: { weather: 'Yağmurlu', surface: 'Kum', trackCondition: 'Islak', runners: [{ no: 1, name: 'KIR AT' }] },
+    results: { runners: [{ no: 1, finishPosition: 1 }] }
+  };
+  const target = {
+    raceDate: '2026-11-02', city: 'Ankara',
+    program: { weather: 'Yağmurlu', surface: 'Kum', trackCondition: 'Islak', raceCategory: 'Maiden', runners: [{ no: 1, name: 'KIR AT' }, { no: 2, name: 'AK AT' }] },
+    results: { runners: [{ no: 1, finishPosition: 1 }, { no: 2, finishPosition: 2 }] }
+  };
+  const example = raceToTrainingExample(target, { contextIndex: createIndex([previous]) });
+  assert.ok(example.horses[0].features.venueFit > 50);
+  assert.ok(example.horses[0].features.weatherFit > 50);
+  assert.ok(example.horses[0].features.trackFit > 50);
+  assert.equal(example.horses[1].features.weatherFit, null);
 });
 
 test('model fitter preserves trusted weights until it has a forward validation sample', () => {

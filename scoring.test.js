@@ -54,6 +54,20 @@ test('the single model ranks by the active weighted signals', () => {
   assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
 });
 
+test('venue, weather, and track history signals influence scores when matched data exists', () => {
+  const race = {
+    distance: 1400, surface: 'Kum', type: 'HANDIKAP',
+    horses: [
+      { number: 1, rating: 50, venueFit: 90, weatherFit: 90, trackFit: 90 },
+      { number: 2, rating: 50, venueFit: 10, weatherFit: 10, trackFit: 10 }
+    ]
+  };
+  for (const key of ['venueFit', 'weatherFit', 'trackFit']) {
+    const weights = Object.fromEntries(Object.keys(require('./scoring').BASE_WEIGHTS).map((name) => [name, name === key ? 1 : 0]));
+    assert.equal(analyzeRace(race, { modelWeights: weights })[0].number, 1, `${key} should affect the rank`);
+  }
+});
+
 test('learned class-history evidence influences the ranking without replacing other features', () => {
   const race = {
     distance: 1400,

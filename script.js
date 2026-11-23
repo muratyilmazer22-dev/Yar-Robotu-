@@ -251,6 +251,7 @@ const MIN_SINGLE_COVERAGE = 50;
 let scoreCache = new WeakMap();
 let classHistoryArchive = new Map();
 let raceRelationArchive = new Map();
+let raceContextArchive = new Map();
 const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
@@ -643,8 +644,16 @@ function scoreRace(race) {
   const raceClass = race.raceType || race.raceCategory || race.title || race.type;
   const scoringRace = {
     ...race,
+    city: race.city || $("couponCityInput")?.value.trim() || "",
     horses: race.horses.map((horse) => ({
       ...horse,
+      ...window.RaceContextPerformance.scoreForHorse(raceContextArchive, horse.name, {
+        city: race.city || $("couponCityInput")?.value.trim() || "",
+        weather: race.weather,
+        surface: race.surface,
+        trackCondition: race.trackCondition,
+        surfaceChange: race.surfaceChange
+      }, raceDate),
       classHistoryScore: window.RaceClassHistory.scoreForHorse(classHistoryArchive, horse.name, raceClass, raceDate)
     }))
   };
@@ -711,7 +720,8 @@ function historicalEvidenceMarkup(race, horse) {
 function renderAnalysis(races, targetId = "kosuSonucAlani") {
   const target = $(targetId);
   target.innerHTML = races.map((race) => {
-    const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${escapeHtml(race.distance)} m ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}</span></h3>`;
+    const contextLabels = [race.weather && `Hava: ${race.weather}`, race.trackCondition && `Pist: ${race.trackCondition}`, race.surfaceChange && `Pist değişikliği: ${race.surfaceChange}`].filter(Boolean).map(escapeHtml).join(" · ");
+    const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${escapeHtml(race.distance)} m ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}${contextLabels ? ` · ${contextLabels}` : ""}</span></h3>`;
     const signalLabels = { banko: "Banko", favorite: "Favorim", rival: "Rakip", surprise: "Sürpriz" };
     const signalBadges = Object.entries(race.externalSignals || {}).map(([key, numbers]) => `<span class="signal-badge">${signalLabels[key]} #${numbers.join(", #")}</span>`).join(" ");
     const signalNote = signalBadges ? `<p class="external-signals"><strong>Harici yorum:</strong> ${signalBadges}</p>` : "";
@@ -733,7 +743,7 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
       if (group) ekuriCounts.set(group, (ekuriCounts.get(group) || 0) + 1);
     }
     const ekuriPairCount = [...ekuriCounts.values()].filter((count) => count > 1).length;
-    const relationshipNote = `<p class="hint historical-summary">Arşiv eşleşmeleri bilgilendirme amaçlıdır, tahmin puanına katılmaz. ${repeatedJockeyCount ? `${repeatedJockeyCount} jokey birden fazla ayakta görünüyor.` : "Ayaklar arasında tekrarlanan jokey tespit edilmedi."} Eküri yalnızca bültendeki açık eküri kodu aynı olan atlarda uygulanır; ${ekuriPairCount ? `${ekuriPairCount} eküri grubu bulundu.` : "bu bültende açık eküri kodu bulunmadı."} Sistem at sahibi benzerliğinden eşleşme tahmin etmez.</p>`;
+    const relationshipNote = `<p class="hint historical-summary">Atın geçmiş hipodrom, hava ve pist koşullarındaki sonuçları yeterli eşleşme varsa puana katılır; eşleşmeyen bağlam puanı etkilemez. Jokey/rakip arşiv bilgileri bilgilendirme amaçlıdır. ${repeatedJockeyCount ? `${repeatedJockeyCount} jokey birden fazla ayakta görünüyor.` : "Ayaklar arasında tekrarlanan jokey tespit edilmedi."} Eküri yalnızca bültendeki açık eküri kodu aynı olan atlarda uygulanır; ${ekuriPairCount ? `${ekuriPairCount} eküri grubu bulundu.` : "bu bültende açık eküri kodu bulunmadı."} Sistem at sahibi benzerliğinden eşleşme tahmin etmez.</p>`;
     const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Puanlar yalnızca bu koşudaki göreli sıralamayı gösterir; kazanma olasılığı değildir. Eksik kaynak verileri gösterilmez.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td></tr>`).join("")}</tbody></table></div></details>` : "";
     return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${relationshipNote}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}${horse.isCoupled ? `<small>Eküri · ${horse.members.map((member) => `#${member.number} ${escapeHtml(member.name)}`).join(" + ")}</small>` : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small></span><span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small>${historicalEvidenceMarkup(race, horse)}</div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
@@ -1054,9 +1064,13 @@ function archiveRowToOutcome(row) {
   const race = {
     no: Number(row.race_no),
     date: String(row.race_date || "").slice(0, 10),
+    city: String(row.city || ""),
+    weather: String(program.weather || ""),
+    trackCondition: String(program.trackCondition || ""),
+    surfaceChange: String(program.surfaceChange || ""),
     raceType: String(program.raceType || program.raceCategory || title),
-    distance: distanceAndSurface ? Number(distanceAndSurface[1]) : 1400,
-    surface,
+    distance: Number(program.distance) || (distanceAndSurface ? Number(distanceAndSurface[1]) : 1400),
+    surface: String(program.surface || surface),
     type,
     horses: runners.map((runner) => {
       const form = String(runner.form || "").replace(/[^1-9]/g, "").slice(0, 6);
@@ -1143,6 +1157,7 @@ async function syncHistoricalArchive() {
     }
     classHistoryArchive = window.RaceClassHistory.createIndex(archive);
     raceRelationArchive = window.RaceRelations.createIndex(archive);
+    raceContextArchive = window.RaceContextPerformance.createIndex(archive);
     scoreCache = new WeakMap();
     const converted = archive.map(archiveRowToOutcome).filter(Boolean);
     let freshCount = 0;
