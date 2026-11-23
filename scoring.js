@@ -35,6 +35,21 @@
     return String(value || '').toLocaleUpperCase('tr-TR').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9 ]/g, '').trim();
   }
 
+  function distanceBand(distance) {
+    const value = Number(distance);
+    if (!Number.isFinite(value) || value <= 0) return 'mesafe-belirsiz';
+    if (value <= 1300) return 'kisa';
+    if (value < 1800) return 'orta';
+    return 'uzun';
+  }
+
+  function raceContextKeys(race) {
+    const surface = String(race?.surface || '');
+    const type = String(race?.type || '');
+    const broad = `${surface}|${type}`;
+    return [`${broad}|${distanceBand(race?.distance)}`, broad];
+  }
+
   const BASE_WEIGHTS = { rating: 0.3, form: 0.3, market: 0.25, pedigree: 0.15 };
   const ROBOT_STRATEGIES = [
     { name: "Öğrenen denge", weights: null },
@@ -196,8 +211,9 @@
   }
 
   function analyzeEnsemble(race, options = {}) {
-    const contextKey = `${race.surface || ""}|${race.type || ""}`;
-    const adaptiveWeights = { ...BASE_WEIGHTS, ...(options.modelWeights || {}), ...(options.contextWeights?.[contextKey] || {}) };
+    const contextKeys = raceContextKeys(race);
+    const contextualWeights = contextKeys.map((key) => options.contextWeights?.[key]).find(Boolean) || {};
+    const adaptiveWeights = { ...BASE_WEIGHTS, ...(options.modelWeights || {}), ...contextualWeights };
     const adaptiveWeight = Math.max(1, Number(options.adaptiveWeight) || 1);
     const rankings = ROBOT_STRATEGIES.map((robot) => ({
       name: robot.name,
@@ -231,5 +247,5 @@
     }).sort((a, b) => b.score - a.score || b.modelShare - a.modelShare || Number(a.number) - Number(b.number));
   }
 
-  return { DEFAULT_DNA, BASE_WEIGHTS, ROBOT_STRATEGIES, AHP_CRITERIA, normalizeName, softmaxScores, analyzeEnsemble, analyzeAHPShadow };
+  return { DEFAULT_DNA, BASE_WEIGHTS, ROBOT_STRATEGIES, AHP_CRITERIA, normalizeName, distanceBand, raceContextKeys, softmaxScores, analyzeEnsemble, analyzeAHPShadow };
 });

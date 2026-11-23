@@ -2,6 +2,41 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { analyzeEnsemble } = require('./scoring');
 
+test('race context selects a distance-specific model before the legacy surface/type fallback', () => {
+  const { raceContextKeys } = require('./scoring');
+  const race = { surface: 'Kum', type: 'HANDİKAP', distance: 1200 };
+
+  assert.deepEqual(raceContextKeys(race), ['Kum|HANDİKAP|kisa', 'Kum|HANDİKAP']);
+  assert.deepEqual(raceContextKeys({ ...race, distance: 1600 }), ['Kum|HANDİKAP|orta', 'Kum|HANDİKAP']);
+  assert.deepEqual(raceContextKeys({ ...race, distance: 2000 }), ['Kum|HANDİKAP|uzun', 'Kum|HANDİKAP']);
+});
+
+test('ensemble uses the exact distance context when both exact and broad models exist', () => {
+  const race = {
+    distance: 1200,
+    surface: 'Kum',
+    type: 'HANDİKAP',
+    horses: [
+      { number: 1, hp: 95, agf: 20, odds: 4, last6: '888888' },
+      { number: 2, hp: 45, agf: 15, odds: 5, last6: '111111' }
+    ]
+  };
+  const broadOnly = analyzeEnsemble(race, {
+    contextWeights: { 'Kum|HANDİKAP': { rating: 0.8, form: 0.05, market: 0.1, pedigree: 0.05 } },
+    adaptiveWeight: 5
+  });
+  const exactAndBroad = analyzeEnsemble(race, {
+    contextWeights: {
+      'Kum|HANDİKAP': { rating: 0.8, form: 0.05, market: 0.1, pedigree: 0.05 },
+      'Kum|HANDİKAP|kisa': { rating: 0.05, form: 0.8, market: 0.1, pedigree: 0.05 }
+    },
+    adaptiveWeight: 5
+  });
+
+  assert.equal(broadOnly[0].number, 1);
+  assert.equal(exactAndBroad[0].number, 2);
+});
+
 test('ensemble exposes average rank without changing consensus score ordering', () => {
   const race = {
     distance: 1400,

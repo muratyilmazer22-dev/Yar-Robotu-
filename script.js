@@ -988,14 +988,17 @@ function trainModel() {
   const contexts = new Map();
   for (const race of races) {
     if (!race.surface || !race.type) continue;
-    const key = `${race.surface}|${race.type}`;
-    if (!contexts.has(key)) contexts.set(key, []);
-    contexts.get(key).push(race);
+    for (const key of window.RaceScoring.raceContextKeys(race)) {
+      if (!contexts.has(key)) contexts.set(key, []);
+      contexts.get(key).push(race);
+    }
   }
   const contextWeights = {};
   const contextReports = {};
   for (const [key, contextRaces] of contexts) {
-    const referenceWeights = state.contextWeights?.[key] || state.modelWeights;
+    const [surface, type] = key.split("|");
+    const broadKey = `${surface}|${type}`;
+    const referenceWeights = state.contextWeights?.[key] || (key === broadKey ? state.modelWeights : state.contextWeights?.[broadKey]) || state.modelWeights;
     const fit = fitModelWeights(contextRaces, referenceWeights);
     if (!fit) continue;
     contextWeights[key] = fit.weights;
