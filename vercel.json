@@ -10,9 +10,6 @@
     "api/backtest.js": {
       "maxDuration": 30
     },
-    "api/google-drive-backup.js": {
-      "maxDuration": 30
-    },
     "api/result-image-ocr.js": {
       "maxDuration": 30
     }
