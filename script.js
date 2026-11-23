@@ -787,38 +787,26 @@ function formatCoupon(coupon, title, poolKey, options = {}) {
   const kind = options.kind || "main";
   const optionTitle = kind === "combined" ? "Birleşik kupon" : kind === "criteria" ? "20 kriter kuponu" : "Ana sistem kuponu";
   if (coupon.error) return `<article class="card coupon-detail"><h3>${optionTitle}</h3><p class="coupon-intro">${escapeHtml(coupon.error)}</p></article>`;
-  if (coupon.completedOnly) return `<article class="card coupon-detail"><h3>${optionTitle}</h3><p class="coupon-intro">Bu altılıdaki tüm koşular tamamlandı; kupon oluşturulmadı.</p></article>`;
+  if (coupon.completedOnly) return `<article class="card coupon-detail"><h3>${optionTitle}</h3><p class="coupon-intro">Koşular tamamlandı; kupon oluşturulmadı.</p></article>`;
 
   const warning = coupon.budgetForcedMultipleSingles
-    ? `<div class="alert">Bütçe nedeniyle ${coupon.forcedSingleCount} ayakta doğrulanmamış tek at seçildi; risk artar.</div>`
+    ? `<div class="alert">Bütçe nedeniyle ${coupon.forcedSingleCount} ayakta doğrulanmamış tek seçim var.</div>`
     : coupon.budgetForcedSingle
-      ? `<div class="alert">Bütçe nedeniyle bir ayakta doğrulanmamış tek at seçildi.</div>`
+      ? `<div class="alert">Bütçe nedeniyle bir ayakta doğrulanmamış tek seçim var.</div>`
       : coupon.budgetNarrowed
-        ? `<div class="alert">Bütçe seçimleri daralttı; bu kupon tahmin garantisi vermez.</div>`
+        ? `<div class="alert">Bütçe bazı ayaklardaki at sayısını sınırladı.</div>`
         : "";
-  const intro = kind === "combined"
-    ? "Ana ve 20 kriter kuponlarında bütçeyle seçilmiş atların birleşimi; iki sıralama eşit ağırlıkta."
-    : kind === "criteria"
-      ? "Yalnızca bültende verisi bulunan kriterlerle çalışan deneysel robot."
-      : "Sekiz stratejinin ortak sıralamasına ve geçmiş doğrulama durumuna dayalı ana sistem.";
-  const method = kind === "combined"
-    ? "Önce ana ve 20 kriter kuponları aynı bütçeyle ayrı hesaplanır. Bu iki kuponun seçtiği atlar birleştirilir, iki sıralama eşit ağırlıkta harmanlanır ve ortak kupon aynı bütçe sınırıyla yeniden hesaplanır."
-    : kind === "criteria"
-      ? "At başına verisi bulunan kriterler eşit ağırlıkla puanlanır; eksik kriterler sıfır sayılmaz. Bu eşit ağırlıklı deney doğrulanmış AHP matrisi değildir."
-      : state.trainingReport?.updated
-        ? `Ana modelin ağırlıkları ayrılmış tarih doğrulamasında iyileşmiştir (${state.trainingReport.trainingRaces} eğitim, ${state.trainingReport.validationRaces} doğrulama koşusu). Bu bir kazanma garantisi değildir.`
-        : `Ana model sekiz stratejinin ortak sıralamasını kullanır. Başlangıç ağırlıkları korunuyor; doğrulama için ${state.trainingReport?.sampleSize || 0} uygun koşu mevcut.`;
-  const completed = coupon.finishedNos?.length ? `<p class="coupon-intro">Koşulan ayaklar kupon hesabına katılmadı: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}.</p>` : "";
+  const intro = kind === "combined" ? "Ana model + 20 kriter"
+    : kind === "criteria" ? "20 kriter robotu"
+      : "Ana sistem";
+  const completed = coupon.finishedNos?.length ? `<p class="coupon-intro">Koşulan ayaklar: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}</p>` : "";
   const legs = coupon.picks.map((pick) => {
     const horses = pick.ranked.slice(0, pick.count);
-    const labels = horses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)}`).join(", ");
-    const singleLabel = horses.length !== 1 ? "" : kind === "main"
-      ? pick.budgetForcedSingle ? " · bütçe zorladı; doğrulanmış tek değil" : pick.ranked.length === 1 ? " · tek koşabilir at" : " · tek seçim eşiği karşılandı"
-      : " · kuponda tek tercih, doğrulanmış değil";
-    return `<li class="coupon-leg"><strong>${pick.no}. koşu <span>· ${horses.length} at${singleLabel}</span></strong><p>${labels}</p></li>`;
+    const labels = horses.map((horse) => `<span class="coupon-horse">#${horse.number} ${escapeHtml(horse.name)}</span>`).join("");
+    return `<li class="coupon-leg"><strong>${pick.no}. Koşu</strong><div class="coupon-horses">${labels}</div></li>`;
   }).join("");
   const saveLabel = kind === "combined" ? "Birleşik kuponu kaydet" : kind === "criteria" ? "20 kriter kuponunu kaydet" : "Ana sistem kuponunu kaydet";
-  return `<article class="card coupon-detail"><header><h3>${optionTitle}</h3><p class="coupon-intro">${intro}</p></header><details class="coupon-details"><summary>Hesaplama yöntemi</summary><p>${method} Sıralama puanı kazanma olasılığı değildir.</p></details>${warning}${completed}<ol class="coupon-legs">${legs}</ol><div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Bu seçenek için bütçe: ${coupon.budget.toFixed(2)} TL</span></div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">${saveLabel}</button></article>`;
+  return `<article class="card coupon-detail"><header><h3>${optionTitle}</h3><p class="coupon-intro">${intro}</p></header>${warning}${completed}<ol class="coupon-legs">${legs}</ol><div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Bütçe ${coupon.budget.toFixed(2)} TL</span></div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">${saveLabel}</button></article>`;
 }
 function couponChoiceSummary(coupon) {
   if (coupon.error) return "Bu bütçeyle oluşmadı";
