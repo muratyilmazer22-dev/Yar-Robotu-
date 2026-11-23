@@ -4,6 +4,8 @@
   const importButton = document.getElementById('importHistoryButton');
   const stopButton = document.getElementById('stopHistoryButton');
   const backtestButton = document.getElementById('backtestButton');
+  const backtestStartInput = document.getElementById('backtestFrom');
+  const backtestEndInput = document.getElementById('backtestTo');
   const status = document.getElementById('historyStatus');
   const progress = document.getElementById('historyProgress');
   const summary = document.getElementById('historySummary');
@@ -24,6 +26,12 @@
   endInput.value = toIsoDate(today);
   startInput.max = endInput.value;
   endInput.max = endInput.value;
+  backtestStartInput.min = earliestDate;
+  backtestEndInput.min = earliestDate;
+  backtestStartInput.value = earliestDate;
+  backtestEndInput.value = toIsoDate(today);
+  backtestStartInput.max = backtestEndInput.value;
+  backtestEndInput.max = backtestEndInput.value;
 
   let stopRequested = false;
   let importing = false;
@@ -150,7 +158,7 @@
     backtestButton.disabled = true;
     backtestSummary.textContent = 'Geriye dönük test hesaplanıyor…';
     try {
-      const query = new URLSearchParams({ from: startInput.value, to: endInput.value });
+      const query = new URLSearchParams({ from: backtestStartInput.value, to: backtestEndInput.value });
       const response = await fetch(`/api/backtest?${query}`, { headers: { Accept: 'application/json' } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Test çalıştırılamadı.');
@@ -241,7 +249,7 @@ const TRAINING_WINDOW_RACES = 2000;
 const SINGLE_GAP_THRESHOLD = 12.5;
 const MIN_SINGLE_COVERAGE = 50;
 let scoreCache = new WeakMap();
-const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], modelWeights: { ...BASE_WEIGHTS }, contextWeights: {} };
+const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
   NATIVEKHAN: [2, 4, 8, 2, 0], LUXOR: [6, 6, 4, 0, 0], KANEKO: [4, 8, 6, 0, 0],
@@ -254,6 +262,9 @@ const DEFAULT_PROFILES = {
 };
 
 function normalizeState(saved) {
+  const modelWeights = { ...BASE_WEIGHTS, ...(saved?.modelWeights || {}) };
+  const hasWeightHistory = Array.isArray(saved?.modelWeightVersions) && saved.modelWeightVersions.length > 0;
+  const modelWeightVersions = hasWeightHistory ? saved.modelWeightVersions.slice(-20) : Object.keys(BASE_WEIGHTS).some((key) => Math.abs(Number(modelWeights[key]) - Number(BASE_WEIGHTS[key])) > 1e-8) ? [{ version: 1, weights: modelWeights, createdAt: saved?.trainingReport?.validatedAt || null, legacy: true }] : [];
   return {
     ...DEFAULT_STATE,
     ...(saved && typeof saved === "object" ? saved : {}),
@@ -262,7 +273,9 @@ function normalizeState(saved) {
     predictions: Array.isArray(saved?.predictions) ? saved.predictions : [],
     outcomes: Array.isArray(saved?.outcomes) ? saved.outcomes : [],
     coupons: Array.isArray(saved?.coupons) ? saved.coupons : [],
-    modelWeights: { ...BASE_WEIGHTS, ...(saved?.modelWeights || {}) },
+    modelWeights,
+    lastGoodModelWeights: { ...BASE_WEIGHTS, ...(saved?.lastGoodModelWeights || saved?.modelWeights || {}) },
+    modelWeightVersions,
     contextWeights: saved?.contextWeights && typeof saved.contextWeights === "object" ? saved.contextWeights : {}
   };
 }
@@ -299,6 +312,7 @@ let state = normalizeState(null);
 let stateDb = null;
 let lastAnalysis = [];
 let lastCoupons = {};
+let pendingResultImport = null;
 let deferredInstallPrompt = null;
 let singleEvidenceCache = null;
 let firebaseSdk = null;
@@ -674,7 +688,10 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
   const target = $(targetId);
   target.innerHTML = races.map((race) => {
     const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${escapeHtml(race.distance)} m ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}</span></h3>`;
-    if (race.finished) return `<article class="race">${heading}<p class="alert">Koşuldu · sonuç verisi bulundu. Bu ayak için tahmin gösterilmiyor.</p></article>`;
+    const signalLabels = { banko: "Banko", favorite: "Favorim", rival: "Rakip", surprise: "Sürpriz" };
+    const signalBadges = Object.entries(race.externalSignals || {}).map(([key, numbers]) => `<span class="signal-badge">${signalLabels[key]} #${numbers.join(", #")}</span>`).join(" ");
+    const signalNote = signalBadges ? `<p class="external-signals"><strong>Harici yorum:</strong> ${signalBadges}</p>` : "";
+    if (race.finished) return `<article class="race">${heading}${signalNote}<p class="alert">Koşuldu · sonuç verisi bulundu. Bu ayak için tahmin gösterilmiyor.</p></article>`;
     const ranked = scoreRace(race);
     const leaderGap = ranked.length > 1 ? Number((ranked[0].score - ranked[1].score).toFixed(1)) : 0;
     const evidence = singleSelectionEvidence();
@@ -686,7 +703,7 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
       ? `Lider farkı ${leaderGap} puan · bağımsız veri kapsamı %${ranked[0].independentCoverage} · ${singleEligible ? "tek seçim eşiği geçmiş doğrulamada desteklendi" : `tek seçim önerilmiyor: ${SINGLE_GAP_THRESHOLD} puan fark, %${MIN_SINGLE_COVERAGE} kapsam ve doğrulamada genel liderden iyi sonuç gerekir (${evidenceDetail})`}. Puan farkı olasılık değildir.`
       : "Tek koşabilir at var; bu bir tahmin üstünlüğü anlamına gelmez.";
     const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Puanlar yalnızca bu koşudaki göreli sıralamayı gösterir; kazanma olasılığı değildir. Eksik kaynak verileri gösterilmez.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td></tr>`).join("")}</tbody></table></div></details>` : "";
-    return `<article class="race">${heading}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>${Number.isSafeInteger(horse.number) && horse.number > 0 ? `#${horse.number}` : "No belirtilmemiş"}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· model lideri</small>" : ""}<br><small>${horse.signal}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
+    return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small></span><span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
 function buildCoupon(races, budget, unit) {
@@ -704,6 +721,7 @@ function buildCoupon(races, budget, unit) {
     return {
       no: race.no,
       ranked,
+      externalSignals: race.externalSignals || null,
       count: 1,
       singleEligible: isValidatedSingle(ranked)
     };
@@ -803,6 +821,8 @@ async function analyze() {
   if (!parsed.races.length) { showMessage(warning, parsed.warnings.join(" "), "error"); return; }
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
   const couponCity = $("couponCityInput")?.value.trim().slice(0, 80) || "";
+  const externalSignals = window.TipSignals.parseAnalystSignals($("analystSignalInput")?.value || "");
+  parsed.races.forEach((race) => { race.externalSignals = externalSignals[race.no] || null; });
   scoreCache = new WeakMap();
   const openRaces = parsed.races.filter((race) => !race.finished);
   const results = openRaces.length ? await analyzeRaces(openRaces) : [];
@@ -814,6 +834,7 @@ async function analyze() {
     type: race.type,
     distance: race.distance,
     modelVersion: MODEL_VERSION,
+    externalSignals: parsed.races.find((race) => race.no === openRaces[index].no)?.externalSignals || null,
     horses: results[index].map((horse) => ({ number: horse.number, name: horse.name, score: horse.score, modelShare: horse.modelShare, features: horse.features, performanceScore: horse.performanceScore, marketScore: horse.marketScore, coverage: horse.coverage, independentCoverage: horse.independentCoverage, signal: horse.signal }))
   }));
   state.predictions = mergePredictionHistory(state.predictions, lastAnalysis);
@@ -871,7 +892,7 @@ function projectWeights(weights) {
   const total = Object.values(positive).reduce((sum, weight) => sum + weight, 0);
   return Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, positive[key] / total]));
 }
-function fitModelWeights(races, referenceWeights) {
+function fitModelWeights(races, referenceWeights, protectedWeights = referenceWeights) {
   if (races.length < MODEL_MIN_RACES) return null;
   const dates = [...new Set(races.map((race) => String(race.at || "").slice(0, 10)).filter(Boolean))].sort();
   if (dates.length < 5) return null;
@@ -900,14 +921,39 @@ function fitModelWeights(races, referenceWeights) {
     candidate = projectWeights(Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, candidate[key] - rate * (gradient[key] + 0.15 * (candidate[key] - referenceWeights[key]))])));
   }
   const baselineBrier = brierScore(validation, referenceWeights);
+  const protectedBrier = brierScore(validation, protectedWeights);
   const learnedBrier = brierScore(validation, candidate);
-  const updated = learnedBrier < baselineBrier * 0.98;
-  return { sampleSize: races.length, trainingRaces: training.length, validationRaces: validation.length, validationStartDate, baselineBrier, validationBrier: updated ? learnedBrier : baselineBrier, updated, weights: updated ? candidate : referenceWeights };
+  const updated = learnedBrier < baselineBrier * 0.98 && learnedBrier < protectedBrier;
+  return { sampleSize: races.length, trainingRaces: training.length, validationRaces: validation.length, validationStartDate, baselineBrier, protectedBrier, validationBrier: updated ? learnedBrier : protectedBrier, updated, weights: updated ? candidate : protectedWeights };
+}
+function renderTrainingReport() {
+  const target = $("trainingReportArea");
+  if (!target) return;
+  const report = state.trainingReport || {};
+  const comparison = window.RaceLearningEvaluation.evaluateForwardComparison(state.outcomes, BASE_WEIGHTS);
+  if (!report.sampleSize && !comparison.validated) {
+    target.textContent = `Öğrenme raporu: ${state.outcomes.length.toLocaleString("tr-TR")} kayıtlı sonuç · ileri tarih kıyaslaması için en az 5 ayrı yarış tarihi gerekir.`;
+    return;
+  }
+  const currentValidation = report.validationMethod === "fixed-forward-v1";
+  const modelStatus = currentValidation ? report.updated ? "Yeni ağırlıklar sabit temel modele karşı ileri tarih doğrulamasını geçti ve etkinleştirildi." : report.verified ? "Yeni ağırlıklar doğrulama eşiğini geçmedi; son iyi ağırlıklar korundu." : `Doğrulama için yeterli veri yok (en az ${MODEL_MIN_RACES} yarış).` : "Kayıtlı model eski doğrulama yöntemiyle eğitilmiş; sonraki yeni sonuçlarda sabit temel ve son iyi modelle yeniden doğrulanacak.";
+  const metrics = comparison.validated ? ["learned", "favorite", "fixed"].map((key) => {
+    const item = comparison.byModel[key];
+    return `${key === "learned" ? "tahmin anındaki model" : key === "favorite" ? "piyasa favorisi" : "sabit temel model"}: ${item.races ? `${item.wins}/${item.races} (%${(item.hitRate * 100).toFixed(1)})` : "ölçülemedi"}`;
+  }).join(" · ") : "İleri tarih karşılaştırması için henüz yeterli tarih yok.";
+  const segments = comparison.byContext.filter((item) => item.eligible).map((item) => `${item.name} (${item.kind === "surface" ? "zemin" : "yarış türü"}, n=${item.races})`).join(", ");
+  target.textContent = `Öğrenme raporu: ${report.sampleSize || state.outcomes.length} uygun yarış · eğitim ${report.trainingRaces || 0} · doğrulama ${report.validationRaces || 0}${report.validationStartDate ? ` (${report.validationStartDate} sonrası)` : ""}. ${modelStatus} Brier temel: ${currentValidation && Number.isFinite(report.baselineBrier) ? report.baselineBrier.toFixed(4) : "—"} · doğrulama: ${currentValidation && Number.isFinite(report.validationBrier) ? report.validationBrier.toFixed(4) : "—"}. ${comparison.validated ? `Aynı son tarih dilimi (${comparison.startDate}–${comparison.endDate}, n=${comparison.races}): ${metrics}` : "İleri tarih kıyaslaması için beş ayrı tarihe yayılmış, yarış öncesinde kaydedilmiş sonuç bulunamadı"}. Yeterli örnekli zemin/tür: ${segments || `henüz yok (eşik ${comparison.minimumContextSample})`}. Sızıntıyı önlemek için TJK arşivinden sonradan puanlanan kayıtlar bu kıyasa dahil edilmez; yalnız yarış öncesi saklanan tahminler kullanılır. Ağırlık sürümü: ${(state.modelWeightVersions || []).at(-1)?.version || 0}.`;
 }
 function trainModel() {
   const races = state.outcomes.filter((item) => Array.isArray(item.horses) && item.horses.length > 1 && item.horses.some((horse) => horse.number === item.winner)).sort((a, b) => String(a.at || "").localeCompare(String(b.at || ""))).slice(-TRAINING_WINDOW_RACES);
-  const globalFit = fitModelWeights(races, state.modelWeights);
-  if (globalFit) state.modelWeights = globalFit.weights;
+  const globalFit = fitModelWeights(races, BASE_WEIGHTS, state.lastGoodModelWeights || state.modelWeights);
+  const validatedAt = new Date().toISOString();
+  let weightsChanged = false;
+  if (globalFit?.updated) {
+    state.modelWeights = { ...globalFit.weights };
+    state.lastGoodModelWeights = { ...globalFit.weights };
+    weightsChanged = true;
+  }
   state.trainingReport = {
     sampleSize: races.length,
     trainingRaces: globalFit?.trainingRaces ?? 0,
@@ -917,7 +963,9 @@ function trainModel() {
     baselineBrier: globalFit?.baselineBrier ?? null,
     validationBrier: globalFit?.validationBrier ?? null,
     updated: Boolean(globalFit?.updated),
-    validatedAt: globalFit ? new Date().toISOString() : null
+    verified: Boolean(globalFit),
+    validationMethod: "fixed-forward-v1",
+    validatedAt: globalFit ? validatedAt : null
   };
   const contexts = new Map();
   for (const race of races) {
@@ -930,19 +978,32 @@ function trainModel() {
   const contextWeights = {};
   const contextReports = {};
   for (const [key, contextRaces] of contexts) {
-    const [surface, type] = key.split("|");
-    const broadKey = `${surface}|${type}`;
-    const referenceWeights = state.contextWeights?.[key] || (key === broadKey ? state.modelWeights : state.contextWeights?.[broadKey]) || state.modelWeights;
-    const fit = fitModelWeights(contextRaces, referenceWeights);
+    const protectedContext = state.contextWeights?.[key] || state.modelWeights;
+    const fit = fitModelWeights(contextRaces, BASE_WEIGHTS, protectedContext);
     if (!fit) continue;
-    contextWeights[key] = fit.weights;
+    if (fit.updated) {
+      contextWeights[key] = fit.weights;
+      weightsChanged = true;
+    }
     contextReports[key] = { sampleSize: fit.sampleSize, updated: fit.updated, validationBrier: fit.validationBrier };
   }
-  state.contextWeights = contextWeights;
-  state.contextReports = contextReports;
+  state.contextWeights = { ...(state.contextWeights || {}), ...contextWeights };
+  state.contextReports = { ...(state.contextReports || {}), ...contextReports };
+  if (weightsChanged) {
+    state.modelWeightVersions = [...(state.modelWeightVersions || []), {
+      version: (state.modelWeightVersions?.at(-1)?.version || 0) + 1,
+      weights: { ...state.modelWeights },
+      contextWeights: { ...state.contextWeights },
+      createdAt: validatedAt,
+      baselineBrier: globalFit?.baselineBrier ?? null,
+      validationBrier: globalFit?.validationBrier ?? null,
+      validationStartDate: globalFit?.validationStartDate ?? null
+    }].slice(-20);
+  }
+  renderTrainingReport();
 }
 function outcomeKey(item) {
-  return item.sourceKey || `${String(item.at || "").slice(0, 10)}:${item.city || ""}:${item.raceNo}:${item.winner}`;
+  return window.RaceLearningEvaluation.identity(item);
 }
 function archiveRowToOutcome(row) {
   const program = row.program || {};
@@ -1034,22 +1095,27 @@ async function syncHistoricalArchive() {
       if (page.length < pageSize) break;
     }
     const converted = archive.map(archiveRowToOutcome).filter(Boolean);
-    const known = new Set(state.outcomes.map(outcomeKey));
-    const fresh = converted.filter((item) => !known.has(outcomeKey(item)));
-    if (fresh.length) {
-      state.outcomes.push(...fresh);
-      trainModel();
+    let freshCount = 0;
+    let correctedCount = 0;
+    for (const item of converted) {
+      const merged = window.RaceLearningEvaluation.mergeOutcome(state.outcomes, item);
+      state.outcomes = merged.outcomes;
+      freshCount += Number(merged.added);
+      correctedCount += Number(merged.corrected);
     }
+    if (freshCount || correctedCount) trainModel();
     state.archiveRaceCount = converted.length;
     state.archiveLatestDate = archive.map((row) => String(row.race_date || "").slice(0, 10)).sort().at(-1) || "";
     state.archiveSyncedAt = new Date().toISOString();
     saveState();
-    if (status) status.textContent = `Neon arşivinden ${converted.length.toLocaleString("tr-TR")} sonuçlu koşu alındı; ${fresh.length.toLocaleString("tr-TR")} yeni koşu öğrenme hafızasına eklendi. Son arşiv tarihi: ${state.archiveLatestDate || "bilinmiyor"}. ${state.trainingReport?.updated ? "Ayrılmış doğrulamada iyileşme görüldü; öğrenilmiş ağırlıklar etkin." : `Ağırlıklar ${MODEL_MIN_RACES} yarış ve ayrılmış doğrulama iyileşmesi şartıyla güncellenir.`}`;
+    renderTrainingReport();
+    if (status) status.textContent = `Neon arşivinden ${converted.length.toLocaleString("tr-TR")} sonuçlu koşu alındı; ${freshCount.toLocaleString("tr-TR")} yeni koşu eklendi; ${correctedCount.toLocaleString("tr-TR")} eski sonuç düzeltildi. Son arşiv tarihi: ${state.archiveLatestDate || "bilinmiyor"}. ${state.trainingReport?.updated ? "Ayrılmış doğrulamada iyileşme görüldü; öğrenilmiş ağırlıklar etkin." : `Ağırlıklar ${MODEL_MIN_RACES} yarış ve ayrılmış doğrulama iyileşmesi şartıyla güncellenir.`}`;
   } catch {
     if (status) status.textContent = "Neon yarış arşivine şu an ulaşılamadı. Bu cihazdaki kayıtlar korunuyor; bağlantı kurulduğunda arşiv yeniden kontrol edilir.";
   }
 }
 function compareResults() {
+  pendingResultImport = null;
   const target = $("ogrenmeLogAlani");
   const parsed = parseRaces($("sonucluBultenInput").value.trim());
   if (!parsed.races.length) {
@@ -1057,7 +1123,8 @@ function compareResults() {
     return;
   }
   const resultDate = $("resultsDateInput").value;
-  if (!resultDate) { showMessage(target, "Sonuç bülteninin tarihini seçin.", "error"); return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(resultDate) || Number.isNaN(Date.parse(`${resultDate}T00:00:00Z`)) || new Date(`${resultDate}T00:00:00Z`).toISOString().slice(0, 10) !== resultDate) { showMessage(target, "Sonuç bülteninin geçerli tarihini seçin.", "error"); return; }
+  if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) { showMessage(target, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu kaldırıp yeniden deneyin.", "error"); return; }
   const datePredictions = state.predictions.filter((item) => item.date === resultDate);
   if (!datePredictions.length) { showMessage(target, `${resultDate} tarihi için kaydedilmiş tahmin bulunamadı. Önce o günün bültenini analiz edin.`, "error"); return; }
   const matchingCities = [...new Set(datePredictions.map((item) => normalize(item.city || "")))];
@@ -1078,7 +1145,7 @@ function compareResults() {
   for (const race of parsed.races) {
     const winner = race.horses.find((horse) => horse.place === 1);
     const prediction = matchingPredictions.find((item) => item.no === race.no);
-    if (!winner) { racesWithoutWinner += 1; continue; }
+    if (!winner || !Number.isSafeInteger(Number(winner.number)) || Number(winner.number) < 1) { racesWithoutWinner += 1; continue; }
     if (!prediction) { racesWithoutPrediction += 1; continue; }
     const top3 = prediction.horses.slice(0, 3);
     const marketFavorite = prediction.horses.filter((horse) => horse.marketScore !== null).sort((a, b) => b.marketScore - a.marketScore)[0];
@@ -1088,6 +1155,7 @@ function compareResults() {
     outcomes.push({
       city: prediction.city || "",
       raceNo: race.no,
+      sourceKey: `${prediction.date || resultDate}:${prediction.city || ""}:${race.no}`,
       winner: winner.number,
       winnerName: winner.name,
       modelVersion: prediction.modelVersion === MODEL_VERSION ? MODEL_VERSION : "legacy-ensemble-v0",
@@ -1112,30 +1180,40 @@ function compareResults() {
     showMessage(target, reason, "error");
     return;
   }
-  const known = new Set(state.outcomes.map(outcomeKey));
-  const fresh = outcomes.filter((item) => !known.has(outcomeKey(item)));
-  state.outcomes.push(...fresh);
-  if (fresh.length) trainModel();
-  saveState();
-  const top3Hits = outcomes.filter((item) => item.top3Hit).length;
-  const top1Hits = outcomes.filter((item) => item.top1Hit).length;
-  const favoriteErrors = outcomes.filter((item) => item.favoriteMiss === true).length;
-  const surpriseHits = outcomes.filter((item) => item.surpriseHit).length;
-  const singleCandidates = outcomes.filter((item) => item.singleCandidate);
-  const singleHits = singleCandidates.filter((item) => item.singleHit).length;
-  const learningStatus = fresh.length === 0
-    ? "Sonuçlar daha önce kaydedilmiş; özet yeniden hesaplandı."
-    : state.trainingReport?.updated
-      ? "Yeni sonuçlar kaydedildi; tarih bazlı doğrulamada iyileşme görüldüğü için öğrenilmiş ağırlıklar etkinleştirildi."
-      : "Yeni sonuçlar eğitim hafızasına kaydedildi; ağırlıklar yalnızca yeterli veri ve doğrulama iyileşmesi oluşursa değişir.";
-  const skippedSummary = racesWithoutWinner || racesWithoutPrediction
-    ? ` Eşleşmeyenler: birincisi okunamayan ${racesWithoutWinner}, tahmini bulunamayan ${racesWithoutPrediction} koşu.`
-    : "";
+  pendingResultImport = { outcomes, resultDate, resultCity, racesWithoutWinner, racesWithoutPrediction };
+  const existingById = new Map(state.outcomes.map((item) => [window.RaceLearningEvaluation.identity(item), item]));
+  const corrections = outcomes.filter((item) => Number(existingById.get(window.RaceLearningEvaluation.identity(item))?.winner) !== Number(item.winner) && existingById.has(window.RaceLearningEvaluation.identity(item))).length;
+  const newCount = outcomes.filter((item) => !existingById.has(window.RaceLearningEvaluation.identity(item))).length;
+  const skipped = racesWithoutWinner + racesWithoutPrediction;
   target.setAttribute("role", "status");
   target.setAttribute("aria-live", "polite");
-  target.innerHTML = `<div class="alert success"><b>${outcomes.length} koşu karşılaştırıldı.</b> ${escapeHtml(learningStatus + skippedSummary)} İlk 3 içinde birinci: ${top3Hits}/${outcomes.length} (%${Math.round(top3Hits / outcomes.length * 100)}); model lideri: ${top1Hits}/${outcomes.length} (%${Math.round(top1Hits / outcomes.length * 100)}); tek seçim eşiği (${SINGLE_GAP_THRESHOLD} puan, bağımsız kapsam ≥%${MIN_SINGLE_COVERAGE}): ${singleHits}/${singleCandidates.length} isabet${singleCandidates.length < 30 ? " · örnek yetersiz (<30)" : ""}; piyasa favorisi yanılgısı: ${favoriteErrors}/${outcomes.length}; sürpriz sinyalinin kazananı yakalaması: ${surpriseHits}/${outcomes.length}.</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · İlk üç ${item.top3Hit ? "isabet" : "isabet değil"} · Model lideri ${item.top1Hit ? "isabet" : "isabet değil"} · Tek seçim eşiği ${item.singleCandidate ? item.singleHit ? "isabet" : "isabet değil" : "karşılanmadı"} · Favori yanılgısı ${item.favoriteMiss === null ? "ölçülemedi" : item.favoriteMiss ? "var" : "yok"}</div>`).join("")}`;
+  target.innerHTML = `<div class="alert"><b>Kaydetmeden önce kontrol edin · ${escapeHtml(resultDate)} · ${escapeHtml(resultCity)}</b><br>${outcomes.length} eşleşen koşu · ${newCount} yeni sonuç · ${corrections} düzeltme adayı · ${skipped} atlanan koşu (birincisi okunamadı: ${racesWithoutWinner}, tahmini eşleşmedi: ${racesWithoutPrediction}). Görselden/metinden okunan kazanan numarası ve at adlarını doğrulayın.</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · model lideri ${item.top1Hit ? "isabet" : "isabet değil"}</div>`).join("")}<div class="actions"><button class="btn green" id="confirmResultsButton" type="button">Bu sonuçları onayla ve kaydet</button><button class="btn secondary" id="cancelResultsButton" type="button">İptal</button></div>`;
+  $("confirmResultsButton").addEventListener("click", () => {
+    if (!pendingResultImport) return;
+    let added = 0;
+    let corrected = 0;
+    let duplicates = 0;
+    for (const item of pendingResultImport.outcomes) {
+      const result = window.RaceLearningEvaluation.mergeOutcome(state.outcomes, item);
+      state.outcomes = result.outcomes;
+      added += Number(result.added);
+      corrected += Number(result.corrected);
+      duplicates += Number(!result.added && !result.corrected);
+    }
+    if (added || corrected) trainModel();
+    saveState();
+    const imported = pendingResultImport;
+    pendingResultImport = null;
+    const report = state.trainingReport || {};
+    target.innerHTML = `<div class="alert success"><b>Sonuçlar onaylandı.</b> ${added} yeni kayıt işlendi · ${corrected} eski sonuç düzeltildi · ${duplicates} yinelenen kayıt değişmedi · ${imported.racesWithoutWinner + imported.racesWithoutPrediction} koşu atlandı. Eğitim: ${report.updated ? "doğrulama geçti, yeni ağırlıklar etkin" : report.verified ? "eşik geçilmedi, son iyi ağırlıklar korundu" : `henüz doğrulanmadı (en az ${MODEL_MIN_RACES} uygun yarış gerekir)`}. Ağırlık sürümü ${(state.modelWeightVersions || []).at(-1)?.version || 0}.</div>`;
+    renderTrainingReport();
+    updateMemory();
+  });
+  $("cancelResultsButton").addEventListener("click", () => {
+    pendingResultImport = null;
+    target.textContent = "Sonuç kaydı iptal edildi; öğrenme hafızası değiştirilmedi.";
+  });
   target.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  updateMemory();
 }
 function handleCompareResults() {
   try {
@@ -1157,7 +1235,8 @@ function saveGeneratedCoupon(poolKey) {
     id: createCouponId(), date, city, poolType: poolKey, cost: coupon.total, payout: null, status: "pending",
     source: "Yarış Robotu", columns: coupon.columns, unit: parseNumber($("birimInput")?.value),
     modelVersion: MODEL_VERSION,
-    legs: coupon.picks.map((pick) => ({ raceNo: pick.no, horses: pick.ranked.slice(0, pick.count).map((horse) => ({ number: horse.number, name: horse.name, modelShare: horse.modelShare })) })),
+    legs: coupon.picks.map((pick) => ({ raceNo: pick.no, externalSignals: pick.externalSignals || null, horses: pick.ranked.slice(0, pick.count).map((horse) => ({ number: horse.number, name: horse.name, modelShare: horse.modelShare })) })),
+    legResults: [],
     finishedNos: coupon.finishedNos || [],
     createdAt: new Date().toISOString()
   };
@@ -1196,6 +1275,9 @@ function addManualCoupon(event) {
   $("manualCouponDate").value = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
   $("manualCouponPayout").value = "0";
 }
+function findSavedPrediction(date, city, raceNo) {
+  return state.predictions.find((prediction) => prediction.date === date && normalize(prediction.city || "") === normalize(city || "") && Number(prediction.no) === Number(raceNo));
+}
 function updateCouponResult(id, card) {
   const record = state.coupons.find((coupon) => coupon.id === id);
   const status = card.querySelector("[data-coupon-status]")?.value;
@@ -1205,11 +1287,45 @@ function updateCouponResult(id, card) {
     showMessage($("ogrenmeLogAlani"), "Sonucu bekleyen olarak bırakın veya geçerli bir ödeme tutarı girin.", "error");
     return;
   }
+  const legResults = new Map((record.legResults || []).map((result) => [Number(result.raceNo), Number(result.winnerNumber)]));
+  for (const input of card.querySelectorAll("[data-leg-result]")) {
+    if (!input.value.trim()) continue;
+    const raceNo = Number(input.dataset.legResult);
+    const winnerNumber = Number(input.value);
+    if (!Number.isSafeInteger(winnerNumber) || winnerNumber < 1) {
+      showMessage($("ogrenmeLogAlani"), "Ayak kazananı için 1 veya daha büyük geçerli at numarası girin.", "error");
+      return;
+    }
+    legResults.set(raceNo, winnerNumber);
+  }
+  record.legResults = [...legResults].map(([raceNo, winnerNumber]) => ({ raceNo, winnerNumber }));
   record.status = status;
   record.payout = status === "pending" ? null : payout;
   record.resolvedAt = status === "pending" ? null : new Date().toISOString();
+  let learnedLegs = 0;
+  let correctedLegs = 0;
+  for (const result of record.legResults) {
+    const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
+    const outcome = prediction && window.CouponLearning.outcomeFromPrediction(prediction, result.winnerNumber);
+    if (!outcome) continue;
+    const identity = window.CouponLearning.raceIdentity(outcome);
+    const existingIndex = state.outcomes.findIndex((item) => window.CouponLearning.raceIdentity(item) === identity);
+    if (existingIndex < 0) {
+      state.outcomes.push(outcome);
+      learnedLegs += 1;
+    } else if (Number(state.outcomes[existingIndex].winner) !== Number(outcome.winner)) {
+      state.outcomes[existingIndex] = outcome;
+      learnedLegs += 1;
+      correctedLegs += 1;
+    }
+  }
+  if (learnedLegs) trainModel();
   saveState();
-  showMessage($("ogrenmeLogAlani"), "Kupon sonucu kaydedildi. Bu kayıt model ağırlıklarını değiştirmez.", "success");
+  renderCouponHistory();
+  const learningNote = learnedLegs
+    ? ` ${learnedLegs} ayak tam tahmin kaydıyla eşleşip öğrenme hafızasına alındı${correctedLegs ? `; ${correctedLegs} eski sonuç düzeltildi` : ""}. ${state.trainingReport?.updated ? "Ayrılmış doğrulama iyileşti; güncellenmiş ağırlıklar etkin." : "Ağırlıklar yalnızca yeterli veri ve ileri tarihli doğrulama iyileşmesiyle güncellenir."}`
+    : " Eşleşen yeni tam tahmin bulunmadığından model eğitimi için yeni yarış eklenmedi; kupon/ödeme kaydı saklandı.";
+  showMessage($("ogrenmeLogAlani"), `Kupon ve ayak sonuçları kaydedildi.${learningNote}`, "success");
 }
 function renderCouponHistory() {
   const target = $("couponHistoryArea");
@@ -1227,6 +1343,11 @@ function renderCouponHistory() {
   const baselineCost = baselineResolved.reduce((sum, record) => sum + Number(record.cost || 0), 0);
   const baselineNet = baselineResolved.reduce((sum, record) => sum + Number(record.payout || 0) - Number(record.cost || 0), 0);
   const baselineRoi = baselineCost > 0 ? (baselineNet / baselineCost) * 100 : null;
+  const legDiagnostics = records.flatMap((record) => (record.legResults || []).map((result) => {
+    const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
+    return window.CouponLearning.analyzePredictionResult(prediction, result.winnerNumber, record.legs?.find((leg) => Number(leg.raceNo) === Number(result.raceNo))?.horses?.map((horse) => horse.number) || []);
+  }));
+  const matchedLegDiagnostics = legDiagnostics.filter((item) => item.matched);
   const money = (value) => `${Number(value).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`;
   const metric = (label, value) => {
     const item = document.createElement("div");
@@ -1247,7 +1368,9 @@ function renderCouponHistory() {
     metric("Devreden kupon", carryovers.length.toLocaleString("tr-TR")),
     metric("Ana model kuponu / sonuçlanan", `${baselineRecords.length} / ${baselineResolved.length}`),
     metric("Ana model net ödeme farkı", baselineResolved.length ? money(baselineNet) : "—"),
-    metric("Ana model net getiri / maliyet", baselineRoi === null ? "—" : `${baselineRoi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`)
+    metric("Ana model net getiri / maliyet", baselineRoi === null ? "—" : `${baselineRoi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
+    metric("Tahminle eşleşen ayak sonucu", `${matchedLegDiagnostics.length} / ${legDiagnostics.length}`),
+    metric("Model ilk 3 içinde · kupon isabeti", `${matchedLegDiagnostics.filter((item) => item.top3Hit).length} / ${matchedLegDiagnostics.length}`)
   );
   if (!records.length) {
     target.innerHTML = '<p class="muted">Henüz kupon kaydı yok. Analizden üretilen kuponu kaydedin veya harici kuponun sonucunu ekleyin.</p>';
@@ -1262,8 +1385,20 @@ function renderCouponHistory() {
     const netValue = Number(record.payout) - Number(record.cost);
     const netText = record.status !== "pending" ? `<p>Net: <span class="coupon-net${netValue < 0 ? " negative" : ""}">${money(netValue)}</span></p>` : "";
     const legs = Array.isArray(record.legs) && record.legs.length ? `<p>Seçimler: ${record.legs.map((leg) => `${leg.raceNo}. ayak #${leg.horses.map((horse) => horse.number).join(", #")}`).join(" · ")}</p>` : "";
+    const legEvaluation = window.CouponResults.evaluateCouponLegs(record.legs, record.legResults);
+    const legSummary = legEvaluation.total ? `<p class="coupon-leg-summary">${legEvaluation.completed === legEvaluation.total ? `${legEvaluation.hits}/${legEvaluation.total} ayak tuttu` : `${legEvaluation.hits} isabet · ${legEvaluation.completed}/${legEvaluation.total} ayak sonucu girildi`}${legEvaluation.missedRaceNos.length ? ` · kaçan ayak: ${legEvaluation.missedRaceNos.join(", ")}` : ""}</p>` : "";
+    const legLearningReport = (record.legResults || []).map((result) => {
+      const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
+      const selected = record.legs?.find((leg) => Number(leg.raceNo) === Number(result.raceNo))?.horses?.map((horse) => horse.number) || [];
+      const insight = window.CouponLearning.analyzePredictionResult(prediction, result.winnerNumber, selected);
+      const categoryLabel = { "kupon-isabeti": "kupon isabeti", "model-top3-kupon-dışı": "model ilk 3\u2019te, kupona alınmamış", "model-sıralaması-geride": "model sıralaması geride", "tahmin-eşleşmedi": "kayıtlı tahmin eşleşmedi" }[insight.category];
+      const context = insight.matched ? ` · ${escapeHtml(insight.surface)} / ${escapeHtml(insight.type)}${insight.distance ? ` / ${insight.distance} m` : ""}` : "";
+      return `<p class="coupon-leg-learning">${Number(result.raceNo)}. ayak · kazanan #${Number(result.winnerNumber)} · ${insight.winnerRank ? `model sırası #${insight.winnerRank}` : "sıra yok"} · ${categoryLabel}${context}</p>`;
+    }).join("");
+    const existingLegResults = new Map((record.legResults || []).map((result) => [Number(result.raceNo), result.winnerNumber]));
+    const legResultEditor = legEvaluation.total ? `<fieldset class="leg-result-grid"><legend class="sr-only">Her ayaktaki gerçek kazanan at numarası</legend>${record.legs.map((leg) => `<label>${leg.raceNo}. ayak kazananı<input data-leg-result="${Number(leg.raceNo)}" type="number" min="1" step="1" value="${existingLegResults.get(Number(leg.raceNo)) ?? ""}" aria-label="${Number(leg.raceNo)}. ayak kazanan at numarası"></label>`).join("")}</fieldset>` : "";
     const finished = Array.isArray(record.finishedNos) && record.finishedNos.length ? `<p>Sonucu alınmış ayaklar: ${record.finishedNos.join(", ")}. Kupon anlık olarak açık ayaklar üzerinden oluşturulmuş; önceki kuponun geriye dönük kopyası değildir.</p>` : "";
-    return `<article class="coupon-record" data-coupon-card="${escapeHtml(record.id)}"><h3>${pool} · ${date}${venue}</h3><p>${escapeHtml(record.source || "Kupon")} · ${ticket}</p>${legs}${finished}<p>Durum: ${escapeHtml(COUPON_STATUS_LABELS[record.status] || "Sonuç bekleniyor")} · Ödeme: ${paid}</p>${netText}<div class="controls"><label class="control"><small>Sonuç durumu</small><select data-coupon-status aria-label="${pool} ${date} sonuç durumu">${Object.entries(COUPON_STATUS_LABELS).map(([value, label]) => `<option value="${value}"${record.status === value ? " selected" : ""}>${label}</option>`).join("")}</select></label><label class="control"><small>Alınan ödeme (TL)</small><input data-coupon-payout type="number" min="0" step="0.01" value="${record.payout ?? ""}" placeholder="Sonuç bekleniyorsa boş bırakın" aria-label="${pool} ${date} alınan ödeme"></label><button class="btn secondary" type="button" data-update-coupon="${escapeHtml(record.id)}">Sonucu kaydet</button></div></article>`;
+    return `<article class="coupon-record" data-coupon-card="${escapeHtml(record.id)}"><h3>${pool} · ${date}${venue}</h3><p>${escapeHtml(record.source || "Kupon")} · ${ticket}</p>${legs}${legSummary}${legLearningReport}${legResultEditor}${finished}<p>Durum: ${escapeHtml(COUPON_STATUS_LABELS[record.status] || "Sonuç bekleniyor")} · Ödeme: ${paid}</p>${netText}<div class="controls"><label class="control"><small>Sonuç durumu</small><select data-coupon-status aria-label="${pool} ${date} sonuç durumu">${Object.entries(COUPON_STATUS_LABELS).map(([value, label]) => `<option value="${value}"${record.status === value ? " selected" : ""}>${label}</option>`).join("")}</select></label><label class="control"><small>Alınan ödeme (TL)</small><input data-coupon-payout type="number" min="0" step="0.01" value="${record.payout ?? ""}" placeholder="Sonuç bekleniyorsa boş bırakın" aria-label="${pool} ${date} alınan ödeme"></label><button class="btn secondary" type="button" data-update-coupon="${escapeHtml(record.id)}">Sonucu kaydet</button></div></article>`;
   }).join("");
 }
 function exportBackup() {
@@ -1393,6 +1528,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }));
   if (state.predictions?.length) lastAnalysis = state.predictions;
   updateMemory();
+  renderTrainingReport();
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js").catch(() => {});
   syncHistoricalArchive();
 });
