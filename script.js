@@ -652,7 +652,10 @@ function scoreRace(race) {
         weather: race.weather,
         surface: race.surface,
         trackCondition: race.trackCondition,
-        surfaceChange: race.surfaceChange
+        surfaceChange: race.surfaceChange,
+        distance: race.distance,
+        jockey: horse.jockey,
+        weight: horse.weight
       }, raceDate),
       classHistoryScore: window.RaceClassHistory.scoreForHorse(classHistoryArchive, horse.name, raceClass, raceDate)
     }))
@@ -1128,7 +1131,8 @@ async function refreshRemoteMemory() {
     const automatedStatus = automated?.report?.verified
       ? ` · otomatik model ${automated.report.updated ? "doğrulamayı geçti ve etkin" : "doğrulamayı geçmedi; son iyi ağırlıklar korundu"}`
       : " · otomatik model için henüz yeterli ileri tarih doğrulaması yok";
-    target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu TJK koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Bu resmi arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi bu cihazda kalır.`;
+    const learnedContexts = Object.keys(automated?.contextWeights || {}).length;
+    target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu TJK koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Öğrenme hedefi: tüm mevcut yarış sinyallerinde ve hipodrom/zemin/tür/mesafe kesişimlerinde daha iyi ileri-tarih tahminleri bulmak; yalnızca doğrulama kazanan değişiklikleri etkinleştirmek. ${learnedContexts} doğrulanmış bağlam modeli ortak hafızada. Bu resmi arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi bu cihazda kalır.`;
     return memory;
   } catch {
     target.textContent = "Neon kalıcı hafızasına şu an ulaşılamıyor; bu cihazdaki kayıtlar korunuyor.";
@@ -1139,10 +1143,14 @@ async function syncHistoricalArchive() {
   const status = $("archiveStatus");
   if (status) status.textContent = "TJK geçmiş arşivi kontrol ediliyor…";
   const remoteMemory = await refreshRemoteMemory();
-  const sharedWeights = remoteMemory?.automaticModel?.weights;
+  const sharedModel = remoteMemory?.automaticModel;
+  const sharedWeights = sharedModel?.weights;
   if (sharedWeights && Object.keys(BASE_WEIGHTS).every((key) => Number.isFinite(Number(sharedWeights[key])))) {
     state.modelWeights = { ...BASE_WEIGHTS, ...sharedWeights };
     state.lastGoodModelWeights = { ...state.modelWeights };
+    if (sharedModel.contextWeights && typeof sharedModel.contextWeights === "object") {
+      state.contextWeights = { ...state.contextWeights, ...sharedModel.contextWeights };
+    }
   }
   try {
     const archive = [];
