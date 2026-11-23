@@ -25,6 +25,36 @@ test('parses tabular race bulletins by their column headers', () => {
   assert.equal(race.horses[0].rank, 0);
 });
 
+test('keeps the program horse number separate from the starting stall', () => {
+  const bulletin = [
+    '1. Koşu 13:30 Handikap 17 2100 Kum',
+    'At İsmi\tSt\tHP\tAGF\tGNY\tForm\tOrijin',
+    '1 - STEEL STRONG\t2\t80\t%34.93\t1.95\t2111\tTOROK - EXAMPLE / LUXOR',
+    '2 - RICO PASHA\t3\t79\t%10.35\t5.50\t7343\tMENDIP - EXAMPLE / KAIZBERT'
+  ].join('\n');
+
+  const [race] = parseRaces(bulletin);
+
+  assert.deepEqual(race.horses.map((horse) => ({ number: horse.horseNumber, no: horse.no, name: horse.name, stall: horse.programStartNumber })), [
+    { number: 1, no: 1, name: 'STEEL STRONG', stall: 2 },
+    { number: 2, no: 2, name: 'RICO PASHA', stall: 3 }
+  ]);
+});
+
+test('does not substitute starting stall for an unknown horse number', () => {
+  const bulletin = [
+    '1. Koşu 13:30 Handikap 17 2100 Kum',
+    'At İsmi\tSt\tHP',
+    'STEEL STRONG\t2\t80'
+  ].join('\n');
+
+  const [race] = parseRaces(bulletin);
+
+  assert.equal(race.horses[0].horseNumber, null);
+  assert.equal(race.horses[0].no, null);
+  assert.equal(race.horses[0].programStartNumber, 2);
+});
+
 test('reads finishing positions from result-table headers', () => {
   const results = [
     '1. Koşu 14:00 Maiden 1400 Kum',
