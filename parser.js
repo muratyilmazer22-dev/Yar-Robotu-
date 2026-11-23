@@ -91,6 +91,7 @@
         const handicapPoints = parseNumber(column('hp'));
         const programStartNumber = parseNumber(column('st'));
         const odds = parseNumber(column('gny'));
+        const couplingGroup = column('ekuri') || column('ekuri grubu') || column('ekuri no');
         const weight = parseNumber(weightText);
         const name = rowName.replace(/\s*\(\d{1,2}\).*$/, '').replace(/^\s*\d{1,2}\s*[-–.)]\s*/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
         if (!name) continue;
@@ -109,6 +110,7 @@
           form,
           agf: agfMatch ? Number(agfMatch[1].replace(',', '.')) : 0,
           odds,
+          couplingGroup: couplingGroup.trim(),
           scratched: /koşmaz|scratched/i.test(rowName),
 rank: Number.isFinite(assumedRank) ? assumedRank : 0
         });

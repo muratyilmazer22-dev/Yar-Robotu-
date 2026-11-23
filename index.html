@@ -37,7 +37,7 @@
 <body>
   <main class="shell">
     <header class="topbar"><div class="brand"><div class="mark" aria-hidden="true">YR</div><div><p class="eyebrow">Yarış analiz platformu</p><h1>Yarış Robotu</h1></div></div><div class="actions"><button class="btn secondary" id="installAppBtn" type="button" aria-label="Uygulamayı ana ekrana yükle" hidden>Yükle</button><span class="status" id="appStatus">● Hazır</span><span class="status" id="modelBadge">Deterministik model</span></div></header>
-    <p class="intro">Bülteni ekleyin; sistem analiz, kayıt ve öğrenme adımlarını otomatik yürütür.</p>
+    <p class="intro">Bülteni analiz edin; tahminler kaydolur. Sonuçları kontrol edip onaylayın, model yalnızca doğrulama eşiğini geçerse güncellenir.</p>
     <nav class="tabs" aria-label="Uygulama bölümleri" role="tablist">
       <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="panel-bulten" data-panel="bulten">Bülten</button>
       <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-analiz" data-panel="analiz">Tahminler & Kupon</button>
@@ -56,6 +56,7 @@
   <script src="/class-history.js"></script>
   <script src="/lib/race-relations.js"></script>
   <script src="/lib/coupon-optimizer.js"></script>
+  <script src="/lib/ekuri.js"></script>
   <script src="/lib/tip-signals.js"></script>
     <script src="/lib/coupon-results.js"></script>
     <script src="/lib/coupon-learning.js"></script>
