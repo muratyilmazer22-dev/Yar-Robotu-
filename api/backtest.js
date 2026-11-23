@@ -1,7 +1,7 @@
-const { and, gte, lte } = require('drizzle-orm');
+const { and, eq, gte, lte } = require('drizzle-orm');
 const { db } = require('../lib/db');
-const { raceHistory } = require('../lib/db/schema');
-const { analyzeRace, normalizeName } = require('../scoring');
+const { raceHistory, robotMemory } = require('../lib/db/schema');
+const { analyzeRace, normalizeName, BASE_WEIGHTS, softmaxScores } = require('../scoring');
 const classHistory = require('../class-history');
 const raceContext = require('../lib/race-context');
 const pedigreeHistory = require('../lib/pedigree-history');
@@ -37,6 +37,15 @@ module.exports = async function handler(req, res) {
     const rows = await db.select().from(raceHistory)
       .where(and(gte(raceHistory.raceDate, from), lte(raceHistory.raceDate, to)))
       .orderBy(raceHistory.raceDate, raceHistory.city, raceHistory.raceNo);
+    const [storedAutomaticModel] = await db.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, 'automatic-learning-model')).limit(1);
+    const automaticModel = storedAutomaticModel?.memoryValue || null;
+    const acceptedValidation = automaticModel?.lastAcceptedValidation || null;
+    const automaticWeights = automaticModel?.weights;
+    const hasValidatedAutomaticModel = Boolean(
+      acceptedValidation?.from
+      && automaticWeights
+      && Object.keys(BASE_WEIGHTS).every((key) => Number.isFinite(Number(automaticWeights[key])))
+    );
     const bySurface = new Map();
     const byRaceType = new Map();
     const thresholds = [10, 12.5, 15];
@@ -59,6 +68,11 @@ module.exports = async function handler(req, res) {
     let surpriseCandidateRaces = 0;
     let surpriseCandidateWinnerHits = 0;
     let validationMarketFavoriteHits = 0;
+    let automaticValidationRaces = 0;
+    let automaticModelTop1Hits = 0;
+    let automaticMarketFavoriteHits = 0;
+    let automaticBaselineBrierTotal = 0;
+    let automaticLearnedBrierTotal = 0;
     const contextIndex = raceContext.createIndex(rows);
     const classIndex = classHistory.createIndex(rows);
     const pedigreeIndex = pedigreeHistory.createIndex(rows);
@@ -91,13 +105,14 @@ module.exports = async function handler(req, res) {
         groupFit: classHistory.groupFitForHorse(classIndex, horse.name, raceDate),
         pedigreeFit: pedigreeHistory.scoreForHorse(pedigreeIndex, horse, { surface: program.surface, distance: program.distance }, raceDate)
       }));
-      const scores = analyzeRace({
+      const scoringRace = {
         distance: Number(program.distance) || 1400,
         surface: program.surface,
         type: program.raceCategory || program.raceType,
         city: row.city,
         horses: scoringHorses
-      });
+      };
+      const scores = analyzeRace(scoringRace);
       const matched = scores.map((horse) => ({ horse, place: finishById.get(identity(horse)) })).filter((entry) => Number.isFinite(entry.place));
       const winnerEntry = matched.find((entry) => entry.place === 1);
       if (!winnerEntry) {
@@ -142,6 +157,19 @@ module.exports = async function handler(req, res) {
             }
           }
         }
+      }
+
+      if (hasValidatedAutomaticModel && raceDate >= acceptedValidation.from) {
+        const learnedScores = analyzeRace(scoringRace, { modelWeights: automaticWeights });
+        const learnedWinnerRank = getWinnerRank(learnedScores, winnerEntry.horse.number);
+        const learnedFavorite = learnedScores.filter((horse) => horse.marketScore !== null).sort((a, b) => b.marketScore - a.marketScore)[0];
+        if (learnedWinnerRank === 1) automaticModelTop1Hits += 1;
+        if (learnedFavorite?.number === winnerEntry.horse.number) automaticMarketFavoriteHits += 1;
+        const baselineProbabilities = softmaxScores(scores, BASE_WEIGHTS);
+        const learnedProbabilities = softmaxScores(learnedScores, automaticWeights);
+        automaticBaselineBrierTotal += baselineProbabilities.reduce((total, probability, index) => total + (probability - Number(scores[index].number === winnerEntry.horse.number)) ** 2, 0);
+        automaticLearnedBrierTotal += learnedProbabilities.reduce((total, probability, index) => total + (probability - Number(learnedScores[index].number === winnerEntry.horse.number)) ** 2, 0);
+        automaticValidationRaces += 1;
       }
 
       const surface = String(program.surface || 'Belirtilmedi');
@@ -197,6 +225,18 @@ module.exports = async function handler(req, res) {
           validated: item.candidates >= 30 && validationRaces > 0 && item.wins / item.candidates > validationTop1Hits / validationRaces
         }))
       },
+      automaticModelValidation: {
+        available: hasValidatedAutomaticModel,
+        reason: hasValidatedAutomaticModel ? null : 'Ortak hafızada ileri-tarih doğrulaması bulunan öğrenilmiş ağırlık yok.',
+        model: hasValidatedAutomaticModel ? automaticModel.model : null,
+        from: acceptedValidation?.from || null,
+        to: acceptedValidation?.to || null,
+        races: automaticValidationRaces,
+        modelTop1HitRate: rate(automaticModelTop1Hits, automaticValidationRaces),
+        marketFavoriteHitRate: rate(automaticMarketFavoriteHits, automaticValidationRaces),
+        baselineBrier: automaticValidationRaces ? Number((automaticBaselineBrierTotal / automaticValidationRaces).toFixed(4)) : null,
+        learnedBrier: automaticValidationRaces ? Number((automaticLearnedBrierTotal / automaticValidationRaces).toFixed(4)) : null
+      },
       bySurface: Array.from(bySurface, ([surface, group]) => ({
         surface,
         races: group.races,
@@ -211,7 +251,7 @@ module.exports = async function handler(req, res) {
         averageTopThreeHits: Number((group.totalTopThreeHits / group.races).toFixed(2)),
         winnerHitRate: rate(group.winnerHits, group.races)
       })),
-      method: 'Bu rapor sabit temel ağırlıklarla form, piyasa, HP, pedigri, grup seviyesi/bitiriş, sınıf geçmişi, hipodrom, hava, pist ve derece sinyallerini değerlendirir. Tüm arşiv indeksleri hedef tarihten önceki yarışlarla sınırlandırılır; son tarihlerden ayrılan %20 bölüm doğrulama için tutulur. Kullanıcıya özel profiller ve sonradan öğrenilmiş ağırlıklar bu sunucu testinde yer almaz. 30’dan az eşik adayı sonuçları yön gösterici sayılmamalıdır. Sonuçlar kazanma garantisi değildir.'
+      method: 'Ana rapor sabit temel ağırlıklarla form, piyasa, HP, pedigri, grup seviyesi/bitiriş, sınıf geçmişi, hipodrom, hava, pist ve derece sinyallerini değerlendirir. Ayrı otomatik-model karşılaştırması yalnızca modelin eğitiminde kullanılmamış, kabul edilmiş ileri tarih doğrulama aralığını kullanır. Tüm arşiv indeksleri hedef tarihten önceki yarışlarla sınırlandırılır. 30’dan az eşik adayı sonuçları yön gösterici sayılmamalıdır. Sonuçlar kazanma garantisi değildir.'
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected server error.';

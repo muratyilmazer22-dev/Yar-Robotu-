@@ -197,9 +197,19 @@
       }
       const validationBlock = document.createElement('section');
       validationBlock.append(validationTitle, validationNote, thresholdList);
+      const automaticValidation = data.automaticModelValidation || {};
+      const automaticValidationBlock = document.createElement('section');
+      const automaticValidationTitle = document.createElement('h3');
+      automaticValidationTitle.textContent = 'Doğrulanmış otomatik model — ileri tarih karşılaştırması';
+      const automaticValidationNote = document.createElement('p');
+      automaticValidationNote.className = 'sub';
+      automaticValidationNote.textContent = automaticValidation.available
+        ? `${automaticValidation.from} – ${automaticValidation.to || '—'} arasında ${Number(automaticValidation.races || 0).toLocaleString('tr-TR')} koşu. Otomatik model lider isabeti: ${automaticValidation.modelTop1HitRate ?? '—'}%; piyasa favorisi: ${automaticValidation.marketFavoriteHitRate ?? '—'}%. Aynı koşulardaki Brier skoru: temel ${automaticValidation.baselineBrier?.toFixed(3) ?? '—'}, öğrenilmiş ${automaticValidation.learnedBrier?.toFixed(3) ?? '—'}; düşük değer daha iyi olasılık kalibrasyonu demektir. Bu doğrulama dilimi model ağırlıklarının eğitiminde kullanılmadı.`
+        : automaticValidation.reason || 'Henüz ileri tarih diliminde doğrulanmış otomatik model bulunmuyor.';
+      automaticValidationBlock.append(automaticValidationTitle, automaticValidationNote);
       const note = document.createElement('p');
       note.className = 'sub';
-      note.textContent = `Tek günlük veya küçük örnek sonuçları genellemez. Kaydedilmiş ${Number(data.storedRaces || 0).toLocaleString('tr-TR')} koşudan ${Number(data.omittedRaces || 0).toLocaleString('tr-TR')} tanesi gerekli program/sonuç eşleşmesi olmadığı için test dışı kaldı. ${data.method}`;
+      note.textContent = `Tek günlük veya küçük örnek sonuçları genellemez. Kaydedilmiş ${Number(data.storedRaces || 0).toLocaleString('tr-TR')} koşudan ${Number(data.omittedRaces || 0).toLocaleString('tr-TR')} tanesi gerekli program/sonuç eşleşmesi olmadığı için test dışı kaldı. Ana metrikler sabit başlangıç modeline aittir; doğrulanmış otomatik model, ağırlıkların eğitiminde kullanılmamış ayrı tarih diliminde yukarıda ayrıca karşılaştırılır. ${data.method}`;
       const rankBreakdown = document.createElement('section');
       const rankTitle = document.createElement('h3');
       rankTitle.textContent = 'Kazananın model sıralamasındaki yeri';
@@ -231,7 +241,7 @@
         breakdownList.append(item);
       }
       breakdown.append(breakdownTitle, breakdownList);
-      backtestSummary.replaceChildren(metrics, validationBlock, note, rankBreakdown, breakdown);
+      backtestSummary.replaceChildren(metrics, validationBlock, automaticValidationBlock, note, rankBreakdown, breakdown);
     } catch (error) {
       backtestSummary.textContent = error.message || 'Geriye dönük test çalıştırılamadı.';
     } finally {
@@ -1131,9 +1141,13 @@ async function refreshRemoteMemory() {
     const memory = await response.json();
     if (!response.ok) throw new Error(memory.error || "Neon hafızası alınamadı.");
     const automated = memory.automaticModel;
-    const automatedStatus = automated?.report?.verified
-      ? ` · otomatik model ${automated.report.updated ? "doğrulamayı geçti ve etkin" : "doğrulamayı geçmedi; son iyi ağırlıklar korundu"}`
-      : " · otomatik model için henüz yeterli ileri tarih doğrulaması yok";
+    const automatedStatus = automated?.report?.updated
+      ? " · yeni otomatik ağırlıklar ileri tarih doğrulamasını geçti ve etkin"
+      : automated?.lastAcceptedValidation
+        ? " · bu çalışmada yeni iyileşme yok; önceki doğrulanmış ağırlıklar etkin"
+        : automated?.report?.verified
+          ? " · aday model doğrulamayı geçemedi; başlangıç ağırlıkları korunuyor"
+          : " · otomatik model için henüz yeterli ileri tarih doğrulaması yok";
     const learnedContexts = Object.keys(automated?.contextWeights || {}).length;
     target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu TJK koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Öğrenme hedefi: tüm mevcut yarış sinyallerinde ve hipodrom/zemin/tür/mesafe kesişimlerinde daha iyi ileri-tarih tahminleri bulmak; yalnızca doğrulama kazanan değişiklikleri etkinleştirmek. ${learnedContexts} doğrulanmış bağlam modeli ortak hafızada. Bu resmi arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi bu cihazda kalır.`;
     return memory;
