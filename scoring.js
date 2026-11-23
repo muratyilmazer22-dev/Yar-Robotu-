@@ -47,7 +47,11 @@
     const surface = String(race?.surface || '');
     const type = String(race?.type || '');
     const broad = `${surface}|${type}`;
-    return [`${broad}|${distanceBand(race?.distance)}`, broad];
+    const city = String(race?.city || '').trim().toLocaleUpperCase('tr-TR');
+    const band = distanceBand(race?.distance);
+    const keys = [`${broad}|${band}`, broad];
+    if (city) keys.unshift(`${city}|${broad}|${band}`, `${city}|${broad}`);
+    return [...new Set(keys)];
   }
 
   const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, classHistory: 0.08, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.015, distanceFit: 0.015, restFit: 0.01, weightFit: 0.01 };

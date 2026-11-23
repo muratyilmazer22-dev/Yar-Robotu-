@@ -2,13 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { analyzeRace } = require('./scoring');
 
-test('race context selects a distance-specific model before the legacy surface/type fallback', () => {
+test('race context discovers venue-specific distance and surface combinations with safe fallbacks', () => {
   const { raceContextKeys } = require('./scoring');
-  const race = { surface: 'Kum', type: 'HANDİKAP', distance: 1200 };
+  const race = { city: 'İstanbul', surface: 'Kum', type: 'HANDİKAP', distance: 1200 };
 
-  assert.deepEqual(raceContextKeys(race), ['Kum|HANDİKAP|kisa', 'Kum|HANDİKAP']);
-  assert.deepEqual(raceContextKeys({ ...race, distance: 1600 }), ['Kum|HANDİKAP|orta', 'Kum|HANDİKAP']);
-  assert.deepEqual(raceContextKeys({ ...race, distance: 2000 }), ['Kum|HANDİKAP|uzun', 'Kum|HANDİKAP']);
+  assert.deepEqual(raceContextKeys(race), ['İSTANBUL|Kum|HANDİKAP|kisa', 'İSTANBUL|Kum|HANDİKAP', 'Kum|HANDİKAP|kisa', 'Kum|HANDİKAP']);
+  assert.deepEqual(raceContextKeys({ ...race, distance: 1600 }), ['İSTANBUL|Kum|HANDİKAP|orta', 'İSTANBUL|Kum|HANDİKAP', 'Kum|HANDİKAP|orta', 'Kum|HANDİKAP']);
+  assert.deepEqual(raceContextKeys({ ...race, distance: 2000 }), ['İSTANBUL|Kum|HANDİKAP|uzun', 'İSTANBUL|Kum|HANDİKAP', 'Kum|HANDİKAP|uzun', 'Kum|HANDİKAP']);
+  assert.deepEqual(raceContextKeys({ ...race, city: '', distance: 1200 }), ['Kum|HANDİKAP|kisa', 'Kum|HANDİKAP']);
 });
 
 test('the model prefers an exact distance context over a broader one', () => {
