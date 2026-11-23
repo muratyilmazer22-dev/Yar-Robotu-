@@ -250,6 +250,7 @@ const SINGLE_GAP_THRESHOLD = 12.5;
 const MIN_SINGLE_COVERAGE = 50;
 let scoreCache = new WeakMap();
 let classHistoryArchive = new Map();
+let raceRelationArchive = new Map();
 const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
@@ -694,6 +695,19 @@ async function analyzeRaces(races) {
   }
   return results;
 }
+function historicalEvidenceMarkup(race, horse) {
+  const insight = window.RaceRelations.horseInsights(race, horse, raceRelationArchive, race.date || $("couponDateInput")?.value);
+  const jockey = insight.jockey;
+  const jockeyText = !jockey.available
+    ? "Jokey eşleşmesi: bültende jokey verisi yok."
+    : jockey.starts
+      ? `${escapeHtml(horse.jockey)} ile geçmişte ${jockey.starts} start · ${jockey.wins} birincilik · ${jockey.topThree} ilk üç`
+      : `${escapeHtml(horse.jockey)} ile arşivde önceki eşleşme bulunamadı`;
+  const rivalText = insight.headToHead
+    ? `${escapeHtml(insight.headToHead.name)} ile ${insight.headToHead.meetings} önceki karşılaşma · bu at ${insight.headToHead.ahead} kez önde bitirdi`
+    : "Mevcut rakiplerle ortak sonuç kaydı bulunamadı";
+  return `<small class="horse-meta historical-evidence">Geçmiş veri: ${jockeyText}. ${rivalText}. Bu kayıtlar puana/olasılığa eklenmez.</small>`;
+}
 function renderAnalysis(races, targetId = "kosuSonucAlani") {
   const target = $(targetId);
   target.innerHTML = races.map((race) => {
@@ -712,8 +726,10 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     const singleNote = ranked.length > 1
       ? `Lider farkı ${leaderGap} puan · bağımsız veri kapsamı %${ranked[0].independentCoverage} · ${singleEligible ? "tek seçim eşiği geçmiş doğrulamada desteklendi" : `tek seçim önerilmiyor: ${SINGLE_GAP_THRESHOLD} puan fark, %${MIN_SINGLE_COVERAGE} kapsam ve doğrulamada genel liderden iyi sonuç gerekir (${evidenceDetail})`}. Puan farkı olasılık değildir.`
       : "Tek koşabilir at var; bu bir tahmin üstünlüğü anlamına gelmez.";
+    const repeatedJockeyCount = window.RaceRelations.repeatedJockeysAcrossLegs(races);
+    const relationshipNote = `<p class="hint historical-summary">Arşiv eşleşmeleri bilgilendirme amaçlıdır, tahmin puanına katılmaz. ${repeatedJockeyCount ? `${repeatedJockeyCount} jokey birden fazla ayakta görünüyor.` : "Ayaklar arasında tekrarlanan jokey tespit edilmedi."} İçe aktarılan arşivde antrenör/sahip ve kişiler arası akrabalık alanı olmadığından eküri veya akrabalık varsayımı yapılmaz.</p>`;
     const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Puanlar yalnızca bu koşudaki göreli sıralamayı gösterir; kazanma olasılığı değildir. Eksik kaynak verileri gösterilmez.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td></tr>`).join("")}</tbody></table></div></details>` : "";
-    return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small></span><span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
+    return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${relationshipNote}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small></span><span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small>${historicalEvidenceMarkup(race, horse)}</div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
 function buildCoupon(races, budget, unit) {
@@ -1108,6 +1124,7 @@ async function syncHistoricalArchive() {
       if (page.length < pageSize) break;
     }
     classHistoryArchive = window.RaceClassHistory.createIndex(archive);
+    raceRelationArchive = window.RaceRelations.createIndex(archive);
     scoreCache = new WeakMap();
     const converted = archive.map(archiveRowToOutcome).filter(Boolean);
     let freshCount = 0;
