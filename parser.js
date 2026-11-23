@@ -26,8 +26,17 @@
     return { sire, damSire };
   }
 
+  function parseRaceConditions(text) {
+    const lines = String(text || '').split(/\r?\n/).map(fold);
+    const weatherMatch = lines.map((line) => line.match(/(?:hava durumu|hava)\s*[:：-]\s*(parcali bulutlu|az bulutlu|gunesli|acik|bulutlu|kapali|yagmurlu|saganak|sisli|ruzgarli|karli|kar yagisli)/)).find(Boolean);
+    const trackMatch = lines.map((line) => line.match(/(?:pist durumu|pist zemini|hava\s*[/]\s*pist)\s*[:：-]?\s*(normal|islak|sulu|nemli|agir|hizli|yavas|cok agir)/)).find(Boolean);
+    const changeMatch = lines.map((line) => line.match(/(?:pist|zemin|yaris)\s+degisikligi\s*[:：-]\s*([^.!?]{2,120})/)).find(Boolean);
+    return { weather: weatherMatch?.[1] || '', trackCondition: trackMatch?.[1] || '', surfaceChange: changeMatch?.[1]?.trim() || '' };
+  }
+
   function parseRaces(text) {
     const races = [];
+    const conditions = parseRaceConditions(text);
     let current = null;
     let headers = null;
 
@@ -46,6 +55,9 @@
           raceType: detail.split(',')[0].trim() || '',
           distance: distanceMatch ? Number(distanceMatch[1]) : 1400,
           surface: distanceMatch?.[2] || 'Belirtilmedi',
+          weather: conditions.weather,
+          trackCondition: conditions.trackCondition,
+          surfaceChange: conditions.surfaceChange,
           horses: []
         };
         headers = null;
@@ -167,5 +179,5 @@ rank: Number.isFinite(assumedRank) ? assumedRank : 0
     return races.filter((race) => race.horses.length > 0);
   }
 
-  return { parseRaces };
+  return { parseRaces, parseRaceConditions };
 });

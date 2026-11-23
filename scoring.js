@@ -50,7 +50,7 @@
     return [`${broad}|${distanceBand(race?.distance)}`, broad];
   }
 
-  const BASE_WEIGHTS = { rating: 0.27, form: 0.27, market: 0.225, pedigree: 0.135, classHistory: 0.1 };
+  const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, classHistory: 0.08, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.015, distanceFit: 0.015, restFit: 0.01, weightFit: 0.01 };
   function softmaxScores(horses, weights) {
     const scores = horses.map((horse) => {
       const available = Object.entries(horse.features || {}).filter(([key, value]) => Number.isFinite(value) && weights[key] !== 0);
@@ -107,7 +107,14 @@
         form: recent.length ? recent.reduce((sum, place) => sum + (10 - place), 0) / recent.length * 10 : null,
         market,
         pedigree: sire !== null && damSire !== null ? sire * 0.65 + damSire * 0.35 : sire ?? damSire,
-        classHistory: horse.classHistoryScore !== null && horse.classHistoryScore !== undefined && Number.isFinite(Number(horse.classHistoryScore)) ? Number(horse.classHistoryScore) : null
+        classHistory: horse.classHistoryScore !== null && horse.classHistoryScore !== undefined && Number.isFinite(Number(horse.classHistoryScore)) ? Number(horse.classHistoryScore) : null,
+        venueFit: horse.venueFit !== null && horse.venueFit !== undefined && Number.isFinite(Number(horse.venueFit)) ? Number(horse.venueFit) : null,
+        weatherFit: horse.weatherFit !== null && horse.weatherFit !== undefined && Number.isFinite(Number(horse.weatherFit)) ? Number(horse.weatherFit) : null,
+        trackFit: horse.trackFit !== null && horse.trackFit !== undefined && Number.isFinite(Number(horse.trackFit)) ? Number(horse.trackFit) : null,
+        jockeyFit: horse.jockeyFit !== null && horse.jockeyFit !== undefined && Number.isFinite(Number(horse.jockeyFit)) ? Number(horse.jockeyFit) : null,
+        distanceFit: horse.distanceFit !== null && horse.distanceFit !== undefined && Number.isFinite(Number(horse.distanceFit)) ? Number(horse.distanceFit) : null,
+        restFit: horse.restFit !== null && horse.restFit !== undefined && Number.isFinite(Number(horse.restFit)) ? Number(horse.restFit) : null,
+        weightFit: horse.weightFit !== null && horse.weightFit !== undefined && Number.isFinite(Number(horse.weightFit)) ? Number(horse.weightFit) : null
       };
       const availableWeight = Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : weights[key]), 0);
       const score = availableWeight ? Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : value * weights[key]), 0) / availableWeight : null;
