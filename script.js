@@ -4,6 +4,8 @@
   const importButton = document.getElementById('importHistoryButton');
   const stopButton = document.getElementById('stopHistoryButton');
   const backtestButton = document.getElementById('backtestButton');
+  const backtestStartInput = document.getElementById('backtestFrom');
+  const backtestEndInput = document.getElementById('backtestTo');
   const status = document.getElementById('historyStatus');
   const progress = document.getElementById('historyProgress');
   const summary = document.getElementById('historySummary');
@@ -24,6 +26,12 @@
   endInput.value = toIsoDate(today);
   startInput.max = endInput.value;
   endInput.max = endInput.value;
+  backtestStartInput.min = earliestDate;
+  backtestEndInput.min = earliestDate;
+  backtestStartInput.value = earliestDate;
+  backtestEndInput.value = toIsoDate(today);
+  backtestStartInput.max = backtestEndInput.value;
+  backtestEndInput.max = backtestEndInput.value;
 
   let stopRequested = false;
   let importing = false;
@@ -150,7 +158,7 @@
     backtestButton.disabled = true;
     backtestSummary.textContent = 'Geriye dönük test hesaplanıyor…';
     try {
-      const query = new URLSearchParams({ from: startInput.value, to: endInput.value });
+      const query = new URLSearchParams({ from: backtestStartInput.value, to: backtestEndInput.value });
       const response = await fetch(`/api/backtest?${query}`, { headers: { Accept: 'application/json' } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Test çalıştırılamadı.');
@@ -674,7 +682,10 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
   const target = $(targetId);
   target.innerHTML = races.map((race) => {
     const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${escapeHtml(race.distance)} m ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}</span></h3>`;
-    if (race.finished) return `<article class="race">${heading}<p class="alert">Koşuldu · sonuç verisi bulundu. Bu ayak için tahmin gösterilmiyor.</p></article>`;
+    const signalLabels = { banko: "Banko", favorite: "Favorim", rival: "Rakip", surprise: "Sürpriz" };
+    const signalBadges = Object.entries(race.externalSignals || {}).map(([key, numbers]) => `<span class="signal-badge">${signalLabels[key]} #${numbers.join(", #")}</span>`).join(" ");
+    const signalNote = signalBadges ? `<p class="external-signals"><strong>Harici yorum:</strong> ${signalBadges}</p>` : "";
+    if (race.finished) return `<article class="race">${heading}${signalNote}<p class="alert">Koşuldu · sonuç verisi bulundu. Bu ayak için tahmin gösterilmiyor.</p></article>`;
     const ranked = scoreRace(race);
     const leaderGap = ranked.length > 1 ? Number((ranked[0].score - ranked[1].score).toFixed(1)) : 0;
     const evidence = singleSelectionEvidence();
@@ -686,7 +697,7 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
       ? `Lider farkı ${leaderGap} puan · bağımsız veri kapsamı %${ranked[0].independentCoverage} · ${singleEligible ? "tek seçim eşiği geçmiş doğrulamada desteklendi" : `tek seçim önerilmiyor: ${SINGLE_GAP_THRESHOLD} puan fark, %${MIN_SINGLE_COVERAGE} kapsam ve doğrulamada genel liderden iyi sonuç gerekir (${evidenceDetail})`}. Puan farkı olasılık değildir.`
       : "Tek koşabilir at var; bu bir tahmin üstünlüğü anlamına gelmez.";
     const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Puanlar yalnızca bu koşudaki göreli sıralamayı gösterir; kazanma olasılığı değildir. Eksik kaynak verileri gösterilmez.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td></tr>`).join("")}</tbody></table></div></details>` : "";
-    return `<article class="race">${heading}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>${Number.isSafeInteger(horse.number) && horse.number > 0 ? `#${horse.number}` : "No belirtilmemiş"}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· model lideri</small>" : ""}<br><small>${horse.signal}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
+    return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>${Number.isSafeInteger(horse.number) && horse.number > 0 ? `#${horse.number}` : "No belirtilmemiş"}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· model lideri</small>" : ""}<br><small>${horse.signal}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
 function buildCoupon(races, budget, unit) {
@@ -704,6 +715,7 @@ function buildCoupon(races, budget, unit) {
     return {
       no: race.no,
       ranked,
+      externalSignals: race.externalSignals || null,
       count: 1,
       singleEligible: isValidatedSingle(ranked)
     };
@@ -803,6 +815,8 @@ async function analyze() {
   if (!parsed.races.length) { showMessage(warning, parsed.warnings.join(" "), "error"); return; }
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
   const couponCity = $("couponCityInput")?.value.trim().slice(0, 80) || "";
+  const externalSignals = window.TipSignals.parseAnalystSignals($("analystSignalInput")?.value || "");
+  parsed.races.forEach((race) => { race.externalSignals = externalSignals[race.no] || null; });
   scoreCache = new WeakMap();
   const openRaces = parsed.races.filter((race) => !race.finished);
   const results = openRaces.length ? await analyzeRaces(openRaces) : [];
@@ -814,6 +828,7 @@ async function analyze() {
     type: race.type,
     distance: race.distance,
     modelVersion: MODEL_VERSION,
+    externalSignals: parsed.races.find((race) => race.no === openRaces[index].no)?.externalSignals || null,
     horses: results[index].map((horse) => ({ number: horse.number, name: horse.name, score: horse.score, modelShare: horse.modelShare, features: horse.features, performanceScore: horse.performanceScore, marketScore: horse.marketScore, coverage: horse.coverage, independentCoverage: horse.independentCoverage, signal: horse.signal }))
   }));
   state.predictions = mergePredictionHistory(state.predictions, lastAnalysis);
@@ -1157,7 +1172,8 @@ function saveGeneratedCoupon(poolKey) {
     id: createCouponId(), date, city, poolType: poolKey, cost: coupon.total, payout: null, status: "pending",
     source: "Yarış Robotu", columns: coupon.columns, unit: parseNumber($("birimInput")?.value),
     modelVersion: MODEL_VERSION,
-    legs: coupon.picks.map((pick) => ({ raceNo: pick.no, horses: pick.ranked.slice(0, pick.count).map((horse) => ({ number: horse.number, name: horse.name, modelShare: horse.modelShare })) })),
+    legs: coupon.picks.map((pick) => ({ raceNo: pick.no, externalSignals: pick.externalSignals || null, horses: pick.ranked.slice(0, pick.count).map((horse) => ({ number: horse.number, name: horse.name, modelShare: horse.modelShare })) })),
+    legResults: [],
     finishedNos: coupon.finishedNos || [],
     createdAt: new Date().toISOString()
   };
@@ -1205,11 +1221,24 @@ function updateCouponResult(id, card) {
     showMessage($("ogrenmeLogAlani"), "Sonucu bekleyen olarak bırakın veya geçerli bir ödeme tutarı girin.", "error");
     return;
   }
+  const legResults = new Map((record.legResults || []).map((result) => [Number(result.raceNo), Number(result.winnerNumber)]));
+  for (const input of card.querySelectorAll("[data-leg-result]")) {
+    if (!input.value.trim()) continue;
+    const raceNo = Number(input.dataset.legResult);
+    const winnerNumber = Number(input.value);
+    if (!Number.isSafeInteger(winnerNumber) || winnerNumber < 1) {
+      showMessage($("ogrenmeLogAlani"), "Ayak kazananı için 1 veya daha büyük geçerli at numarası girin.", "error");
+      return;
+    }
+    legResults.set(raceNo, winnerNumber);
+  }
+  record.legResults = [...legResults].map(([raceNo, winnerNumber]) => ({ raceNo, winnerNumber }));
   record.status = status;
   record.payout = status === "pending" ? null : payout;
   record.resolvedAt = status === "pending" ? null : new Date().toISOString();
   saveState();
-  showMessage($("ogrenmeLogAlani"), "Kupon sonucu kaydedildi. Bu kayıt model ağırlıklarını değiştirmez.", "success");
+  renderCouponHistory();
+  showMessage($("ogrenmeLogAlani"), "Kupon ve ayak sonuçları kaydedildi. Bu kayıt model ağırlıklarını değiştirmez.", "success");
 }
 function renderCouponHistory() {
   const target = $("couponHistoryArea");
@@ -1262,8 +1291,12 @@ function renderCouponHistory() {
     const netValue = Number(record.payout) - Number(record.cost);
     const netText = record.status !== "pending" ? `<p>Net: <span class="coupon-net${netValue < 0 ? " negative" : ""}">${money(netValue)}</span></p>` : "";
     const legs = Array.isArray(record.legs) && record.legs.length ? `<p>Seçimler: ${record.legs.map((leg) => `${leg.raceNo}. ayak #${leg.horses.map((horse) => horse.number).join(", #")}`).join(" · ")}</p>` : "";
+    const legEvaluation = window.CouponResults.evaluateCouponLegs(record.legs, record.legResults);
+    const legSummary = legEvaluation.total ? `<p class="coupon-leg-summary">${legEvaluation.completed === legEvaluation.total ? `${legEvaluation.hits}/${legEvaluation.total} ayak tuttu` : `${legEvaluation.hits} isabet · ${legEvaluation.completed}/${legEvaluation.total} ayak sonucu girildi`}${legEvaluation.missedRaceNos.length ? ` · kaçan ayak: ${legEvaluation.missedRaceNos.join(", ")}` : ""}</p>` : "";
+    const existingLegResults = new Map((record.legResults || []).map((result) => [Number(result.raceNo), result.winnerNumber]));
+    const legResultEditor = legEvaluation.total ? `<fieldset class="leg-result-grid"><legend class="sr-only">Her ayaktaki gerçek kazanan at numarası</legend>${record.legs.map((leg) => `<label>${leg.raceNo}. ayak kazananı<input data-leg-result="${Number(leg.raceNo)}" type="number" min="1" step="1" value="${existingLegResults.get(Number(leg.raceNo)) ?? ""}" aria-label="${Number(leg.raceNo)}. ayak kazanan at numarası"></label>`).join("")}</fieldset>` : "";
     const finished = Array.isArray(record.finishedNos) && record.finishedNos.length ? `<p>Sonucu alınmış ayaklar: ${record.finishedNos.join(", ")}. Kupon anlık olarak açık ayaklar üzerinden oluşturulmuş; önceki kuponun geriye dönük kopyası değildir.</p>` : "";
-    return `<article class="coupon-record" data-coupon-card="${escapeHtml(record.id)}"><h3>${pool} · ${date}${venue}</h3><p>${escapeHtml(record.source || "Kupon")} · ${ticket}</p>${legs}${finished}<p>Durum: ${escapeHtml(COUPON_STATUS_LABELS[record.status] || "Sonuç bekleniyor")} · Ödeme: ${paid}</p>${netText}<div class="controls"><label class="control"><small>Sonuç durumu</small><select data-coupon-status aria-label="${pool} ${date} sonuç durumu">${Object.entries(COUPON_STATUS_LABELS).map(([value, label]) => `<option value="${value}"${record.status === value ? " selected" : ""}>${label}</option>`).join("")}</select></label><label class="control"><small>Alınan ödeme (TL)</small><input data-coupon-payout type="number" min="0" step="0.01" value="${record.payout ?? ""}" placeholder="Sonuç bekleniyorsa boş bırakın" aria-label="${pool} ${date} alınan ödeme"></label><button class="btn secondary" type="button" data-update-coupon="${escapeHtml(record.id)}">Sonucu kaydet</button></div></article>`;
+    return `<article class="coupon-record" data-coupon-card="${escapeHtml(record.id)}"><h3>${pool} · ${date}${venue}</h3><p>${escapeHtml(record.source || "Kupon")} · ${ticket}</p>${legs}${legSummary}${legResultEditor}${finished}<p>Durum: ${escapeHtml(COUPON_STATUS_LABELS[record.status] || "Sonuç bekleniyor")} · Ödeme: ${paid}</p>${netText}<div class="controls"><label class="control"><small>Sonuç durumu</small><select data-coupon-status aria-label="${pool} ${date} sonuç durumu">${Object.entries(COUPON_STATUS_LABELS).map(([value, label]) => `<option value="${value}"${record.status === value ? " selected" : ""}>${label}</option>`).join("")}</select></label><label class="control"><small>Alınan ödeme (TL)</small><input data-coupon-payout type="number" min="0" step="0.01" value="${record.payout ?? ""}" placeholder="Sonuç bekleniyorsa boş bırakın" aria-label="${pool} ${date} alınan ödeme"></label><button class="btn secondary" type="button" data-update-coupon="${escapeHtml(record.id)}">Sonucu kaydet</button></div></article>`;
   }).join("");
 }
 function exportBackup() {
