@@ -283,7 +283,7 @@ function normalizeState(saved) {
     ...DEFAULT_STATE,
     ...(saved && typeof saved === "object" ? saved : {}),
     version: 3,
-    profiles: { ...DEFAULT_PROFILES, ...(saved?.profiles || {}) },
+    profiles: { ...DEFAULT_PROFILES },
     predictions: Array.isArray(saved?.predictions) ? saved.predictions : [],
     outcomes: Array.isArray(saved?.outcomes) ? saved.outcomes : [],
   coupons: Array.isArray(saved?.coupons) ? saved.coupons : [],
@@ -359,8 +359,6 @@ let firebaseSyncReady = false;
   let firebaseSaveTimer = null;
   let bulletinSaveTimer = null;
   let firebaseSyncChain = Promise.resolve();
-let driveConnected = false;
-let driveBusy = false;
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 function persistStateLocally() {
@@ -380,124 +378,6 @@ function setFirebaseStatus(message, isError = false) {
   if (!status) return;
   status.textContent = message;
   status.classList.toggle("error", isError);
-}
-function setDriveStatus(message, isError = false) {
-  const status = $("driveBackupStatus");
-  if (!status) return;
-  status.textContent = message;
-  status.classList.toggle("error", isError);
-}
-function updateDriveButtons() {
-  const signedIn = Boolean(firebaseAccount && firebaseSyncReady);
-  $("driveConnectButton").disabled = !signedIn || driveBusy;
-  $("driveBackupButton").disabled = !signedIn || !driveConnected || driveBusy;
-  $("driveRestoreButton").disabled = !signedIn || !driveConnected || driveBusy;
-}
-async function requestDriveAction(action, backup) {
-  const idToken = await firebaseSdk?.getIdToken();
-  if (!idToken) throw new Error("Google Drive yedeği için Firebase hesabınızla giriş yapın.");
-  const response = await fetch("/api/google-drive-backup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ action, ...(backup ? { backup } : {}) })
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || "Google Drive isteği başarısız oldu.");
-  return result;
-}
-async function refreshDriveStatus() {
-  if (!firebaseAccount || !firebaseSyncReady) return;
-  try {
-    const result = await requestDriveAction("status");
-    driveConnected = Boolean(result.connected);
-    if (driveConnected) setDriveStatus("Google Drive bağlı. Yedeği istediğiniz zaman oluşturabilir veya geri yükleyebilirsiniz.");
-    else if (new URLSearchParams(location.search).get("drive") === "connected") setDriveStatus("Google Drive izni alındı. Bağlantıyı denetleyin veya yeniden bağlayın.", true);
-    else setDriveStatus("Kişisel yedekleme için Google Drive’ı bağlayın.");
-  } catch {
-    driveConnected = false;
-    setDriveStatus("Google Drive bağlantı durumu denetlenemedi. Yeniden deneyin.", true);
-  }
-  updateDriveButtons();
-}
-async function connectGoogleDrive() {
-  if (!firebaseAccount || !firebaseSyncReady) return;
-  const framed = window.self !== window.top;
-  const authorizationWindow = framed ? window.open("about:blank", "_blank") : null;
-  if (authorizationWindow) authorizationWindow.opener = null;
-  driveBusy = true;
-  updateDriveButtons();
-  setDriveStatus("Google Drive bağlantısı hazırlanıyor…");
-  try {
-    const result = await requestDriveAction("connect");
-    if (result.authorizationUrl) {
-      setDriveStatus("Google izin sayfası açılıyor. İzin verdikten sonra bu uygulamaya geri dönün.");
-      if (framed) {
-        if (authorizationWindow) authorizationWindow.location.replace(result.authorizationUrl);
-        else setDriveStatus("Yeni sekme açılamadı. Tarayıcıda açılır pencerelere izin verip yeniden deneyin.", true);
-      } else {
-        location.href = result.authorizationUrl;
-        return;
-      }
-    } else {
-      authorizationWindow?.close();
-      driveConnected = true;
-      setDriveStatus("Google Drive başarıyla bağlandı.");
-    }
-  } catch (error) {
-    authorizationWindow?.close();
-    setDriveStatus(error.message || "Google Drive bağlanamadı.", true);
-  } finally {
-    driveBusy = false;
-    updateDriveButtons();
-  }
-}
-function createDriveBackup() {
-  const backupState = JSON.parse(JSON.stringify(state));
-  delete backupState.firebaseOwnerUid;
-  backupState.outcomes = (backupState.outcomes || []).filter((item) => !String(item.sourceKey || "").startsWith("tjk:"));
-  return { app: "yar-robotu", version: 1, createdAt: new Date().toISOString(), state: backupState };
-}
-async function backupToGoogleDrive() {
-  if (!firebaseAccount || !firebaseSyncReady || !driveConnected) return;
-  driveBusy = true;
-  updateDriveButtons();
-  setDriveStatus("Hafıza eşitleniyor ve Drive yedeği hazırlanıyor…");
-  try {
-    await firebaseSyncChain;
-    const snapshot = JSON.parse(JSON.stringify(state));
-    await firebaseSdk.saveMemory(firebaseAccount, snapshot);
-    const result = await requestDriveAction("backup", createDriveBackup());
-    if (result.authorizationUrl) throw new Error("Drive bağlantısı yenilenmeli. Google Drive’ı yeniden bağlayın.");
-    setDriveStatus(`Yedek Google Drive’a kaydedildi: ${new Date(result.modifiedTime).toLocaleString("tr-TR")}.`);
-  } catch (error) {
-    setDriveStatus(error.message || "Google Drive yedeği oluşturulamadı.", true);
-  } finally {
-    driveBusy = false;
-    updateDriveButtons();
-  }
-}
-async function restoreFromGoogleDrive() {
-  if (!firebaseAccount || !firebaseSyncReady || !driveConnected) return;
-  if (!window.confirm("Google Drive’daki yedek mevcut hafızanızla birleştirilecek. Devam edilsin mi?")) return;
-  driveBusy = true;
-  updateDriveButtons();
-  setDriveStatus("Google Drive yedeği okunuyor…");
-  try {
-    const result = await requestDriveAction("restore");
-    if (result.authorizationUrl) throw new Error("Drive bağlantısı yenilenmeli. Google Drive’ı yeniden bağlayın.");
-    state = mergeFirebaseMemory(state, result.backup.state);
-    state.firebaseOwnerUid = firebaseAccount.uid;
-    state.localUpdatedAt = new Date().toISOString();
-    persistStateLocally();
-    updateMemory();
-    await firebaseSdk.saveMemory(firebaseAccount, JSON.parse(JSON.stringify(state)));
-    setDriveStatus(`Yedek hafızayla birleştirildi ve Firebase’e eşitlendi${result.modifiedTime ? ` (${new Date(result.modifiedTime).toLocaleString("tr-TR")})` : ""}.`);
-  } catch (error) {
-    setDriveStatus(error.message || "Google Drive yedeği geri yüklenemedi.", true);
-  } finally {
-    driveBusy = false;
-    updateDriveButtons();
-  }
 }
 function mergeMemoryRecords(remoteRecords, localRecords, keyOf) {
   const merged = new Map();
@@ -519,12 +399,8 @@ function mergeFirebaseMemory(localState, remoteState) {
   const localTime = Date.parse(localState.localUpdatedAt || "") || 0;
   const remoteTime = Date.parse(remoteState.localUpdatedAt || "") || 0;
   const latest = remoteTime > localTime ? remoteState : localState;
-  const profiles = remoteTime > localTime
-    ? { ...(localState.profiles || {}), ...(remoteState.profiles || {}) }
-    : { ...(remoteState.profiles || {}), ...(localState.profiles || {}) };
   return normalizeState({
     ...latest,
-    profiles,
     predictions: mergePredictionHistory(remoteState.predictions, localState.predictions),
   outcomes: mergeMemoryRecords(remoteState.outcomes, localState.outcomes, (item) => item.sourceKey || `${String(item.at || "").slice(0, 10)}:${item.city || ""}:${item.raceNo}:${item.winner}`),
   coupons: mergeMemoryRecords(remoteState.coupons, localState.coupons, (item) => item.id || JSON.stringify(item)),
@@ -539,8 +415,12 @@ function queueFirebaseMemorySync() {
   firebaseSaveTimer = window.setTimeout(() => {
     firebaseSyncChain = firebaseSyncChain.then(async () => {
       if (!firebaseSyncReady || firebaseAccount?.uid !== account.uid || snapshot.localUpdatedAt !== state.localUpdatedAt) return;
-      await firebaseSdk.saveMemory(account, snapshot);
-      setFirebaseStatus(`Hafıza Firebase hesabınızla eşitlendi: ${account.email || account.uid}`);
+      const cloudSnapshot = await prepareMemoryImagesForFirebase(snapshot, account);
+      if (firebaseAccount?.uid !== account.uid || snapshot.localUpdatedAt !== state.localUpdatedAt) return;
+      state = { ...state, bulletins: cloudSnapshot.bulletins, profiles: { ...DEFAULT_PROFILES } };
+      persistStateLocally();
+      await firebaseSdk.saveMemory(account, cloudSnapshot);
+      setFirebaseStatus(`Hafıza Firebase ve Blob hesabınızla eşitlendi: ${account.email || account.uid}`);
     }).catch(() => {
       setFirebaseStatus("Firebase eşitlemesi başarısız. Yerel kayıtlar korunuyor; Firestore kurallarını ve bağlantıyı kontrol edin.", true);
     });
@@ -590,8 +470,6 @@ async function initializeFirebaseMemory() {
   api.onAuthStateChanged(async (user) => {
     firebaseAccount = user || null;
     firebaseSyncReady = false;
-    driveConnected = false;
-    updateDriveButtons();
     $("firebaseSignOutButton").hidden = !user;
     $("firebaseAuthForm").hidden = Boolean(user);
     $("firebaseCreateAccountButton").hidden = Boolean(user);
@@ -612,9 +490,12 @@ async function initializeFirebaseMemory() {
       persistStateLocally();
       updateMemory();
       firebaseSyncReady = true;
-      await api.saveMemory(user, JSON.parse(JSON.stringify(state)));
-      setFirebaseStatus(`Hafıza Firebase hesabınızla eşitlendi: ${user.email || user.uid}`);
-      await refreshDriveStatus();
+      const cloudMemory = await prepareMemoryImagesForFirebase(JSON.parse(JSON.stringify(state)), user);
+      state = { ...state, bulletins: cloudMemory.bulletins, profiles: { ...DEFAULT_PROFILES } };
+      persistStateLocally();
+      await api.saveMemory(user, cloudMemory);
+      applySavedResultDraftImage();
+      setFirebaseStatus(`Hafıza Firebase ve Blob hesabınızla eşitlendi: ${user.email || user.uid}`);
     } catch {
       firebaseSyncReady = false;
       setFirebaseStatus("Firebase verisi okunamadı. Yerel kayıtlar korundu; Firestore kurallarına users/{uid} için yalnızca aynı kullanıcı erişimini ekleyin.", true);
@@ -628,6 +509,69 @@ function saveState() {
   updateMemory();
   queueFirebaseMemorySync();
 }
+function imageForMemory(image) {
+  if (!image) return image;
+  const { dataUrl, ...metadata } = image;
+  return metadata.pathname ? metadata : image;
+}
+async function uploadResultImage(image, user = firebaseAccount) {
+  if (!image?.dataUrl || !user || !firebaseSdk) return image;
+  const idToken = await firebaseSdk.getIdToken();
+  if (!idToken) throw new Error("Firebase oturumu doğrulanamadı.");
+  const response = await fetch("/api/result-image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify({ image: image.dataUrl })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.pathname) throw new Error(result.error || "Görsel Blob hafızasına yüklenemedi.");
+  return { name: image.name || "sonuc.jpg", type: "image/jpeg", savedAt: image.savedAt || new Date().toISOString(), pathname: result.pathname };
+}
+async function prepareMemoryImagesForFirebase(memory, user) {
+  const bulletins = [];
+  for (const bulletin of memory.bulletins || []) {
+    if (!bulletin.image?.dataUrl) {
+      bulletins.push(bulletin);
+      continue;
+    }
+    try {
+      bulletins.push({ ...bulletin, image: await uploadResultImage(bulletin.image, user) });
+    } catch {
+      bulletins.push(bulletin);
+    }
+  }
+  return { ...memory, profiles: { ...DEFAULT_PROFILES }, bulletins };
+}
+async function loadResultImageData(image) {
+  if (image?.dataUrl) return image.dataUrl;
+  if (!image?.pathname || !firebaseSdk) return "";
+  const idToken = await firebaseSdk.getIdToken();
+  if (!idToken) return "";
+  const response = await fetch(`/api/result-image?pathname=${encodeURIComponent(image.pathname)}`, { headers: { Authorization: `Bearer ${idToken}` } });
+  if (!response.ok) throw new Error("Kaydedilmiş görsele erişilemedi.");
+  const blob = await response.blob();
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Kaydedilmiş görsel okunamadı."));
+    reader.readAsDataURL(blob);
+  });
+}
+async function applySavedResultDraftImage() {
+  const savedImage = state.bulletins.find((item) => item.id === "draft-result")?.image;
+  if (!savedImage) return;
+  try {
+    const dataUrl = await loadResultImageData(savedImage);
+    if (!dataUrl) return;
+    storedResultImage = { ...savedImage, dataUrl };
+    $("resultsImagePreview").src = dataUrl;
+    $("resultsImagePreview").hidden = false;
+    $("readResultsImageButton").disabled = false;
+    setResultImageStatus("Kaydedilmiş fotoğraf hafızadan yüklendi; OCR’ı yeniden çalıştırabilirsiniz.");
+  } catch (error) {
+    setResultImageStatus(error.message || "Kaydedilmiş fotoğraf yüklenemedi.", true);
+  }
+}
 function saveBulletinDraft(kind, details = {}) {
   const id = `draft-${kind}`;
   const existing = state.bulletins.find((item) => item.id === id) || {};
@@ -640,7 +584,7 @@ function saveBulletinDraft(kind, details = {}) {
     date: String(details.date ?? existing.date ?? ""),
     city: String(details.city ?? existing.city ?? ""),
     updatedAt: new Date().toISOString(),
-    ...(details.image ? { image: details.image } : existing.image ? { image: existing.image } : {})
+    ...(details.image ? { image: imageForMemory(details.image) } : existing.image ? { image: imageForMemory(existing.image) } : {})
   };
   state.bulletins = [...state.bulletins.filter((item) => item.id !== id), draft];
   clearTimeout(bulletinSaveTimer);
@@ -653,6 +597,7 @@ function archiveBulletin(kind, details = {}) {
   const record = {
     ...(draft || {}),
     ...details,
+    ...(details.image ? { image: imageForMemory(details.image) } : {}),
     id: window.crypto?.randomUUID?.() || `bulletin-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     kind,
     status: "saved",
@@ -1685,27 +1630,13 @@ function updateMemory() {
   $("statsArea").innerHTML = n
     ? `<div class="stats"><div class="stat"><b>${n}</b><span>ölçülen koşu</span></div><div class="stat"><b>%${Math.round(top3 / n * 100)}</b><span>ilk 3 içi isabet oranı</span></div><div class="stat"><b>%${Math.round(top1 / n * 100)}</b><span>model lideri isabeti</span></div></div><div class="meter" aria-label="İlk üç isabet oranı"><span style="width:${Math.round(top3 / n * 100)}%"></span></div><p class="hint">Kişisel karşılaştırmalar (girişte Firebase hesabıyla eşitlenir) ve Neon resmi yarış arşivi birlikte değerlendirilir. ${trainable < MODEL_MIN_RACES ? `Ağırlık kalibrasyonu için ${MODEL_MIN_RACES} uygun yarış gerekir; şu an ${trainable} var.` : !report?.validatedAt ? "En az 5 ayrı tarihli eğitim/doğrulama ayrımı henüz oluşmadı; başlangıç ağırlıkları kullanılıyor." : report.updated ? `Ağırlıklar zamana göre ayrılmış doğrulama diliminde iyileşti (Brier ${report.baselineBrier.toFixed(3)} → ${report.validationBrier.toFixed(3)}; doğrulama ${report.validationRaces} koşu).` : "Ayrılmış tarih doğrulamasında en az %2 iyileşme görülmedi; başlangıç ağırlıkları korundu."} Tek seçim eşiği geçmişi: ${singleHits}/${singleResults.length}${singleResults.length < 30 ? " (örnek yetersiz: 30’dan az aday)" : ""}; doğrulanmış pist/koşu türü ağırlığı: ${contextCount}. Yüzdeler geçmiş isabet ölçümüdür, gelecekte kazanma olasılığı değildir.</p>`
     : `<p class="muted">Henüz ölçülmüş sonuç yok. Yüzde hesaplamak için tahminleri gerçek sonuçlarla karşılaştırın.</p>`;
-  const profileNames = Object.keys(state.profiles).sort();
-  $("aygirListeAlani").textContent = `${profileNames.length} pedigri profili: ${profileNames.slice(0, 12).join(", ")}${profileNames.length > 12 ? "…" : ""}`;
   $("historyArea").innerHTML = n ? `<table class="table"><thead><tr><th>Hipodrom / koşu</th><th>Kazanan</th><th>İlk üç</th><th>Lider</th><th>Tarih</th></tr></thead><tbody>${state.outcomes.slice(-30).reverse().map((item) => `<tr><td>${escapeHtml(item.city || "Manuel")} · ${item.raceNo}</td><td>#${item.winner} ${escapeHtml(item.winnerName)}</td><td>${item.top3Hit ? "Evet" : "Hayır"}</td><td>${item.top1Hit ? "Evet" : "Hayır"}</td><td>${new Date(item.at).toLocaleDateString("tr-TR")}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Karşılaştırma geçmişi henüz yok.</p>`;
   renderCouponHistory();
 }
-function addProfile() {
-  const name = normalize($("aygirAdInput").value).replace(/[^A-Z0-9]/g, "");
-  const values = $("dpValues")
-    ? $("dpValues").value.split(/[;,\s]+/).filter(Boolean).map(parseNumber)
-    : ["dpB", "dpI", "dpC", "dpS", "dpP"].map((id) => parseNumber($(id)?.value ?? "0"));
-  if (!name || values.length !== 5 || values.some((value) => value === null || value < 0)) { showMessage($("aygirListeAlani"), "Aygır adı ve sıfır veya daha büyük 5 sayısal profil değeri girin. Örnek: 6, 6, 4, 0, 0", "error"); return; }
-  state.profiles[name] = values;
-  saveState();
-  $("aygirAdInput").value = "";
-  if ($("dpValues")) $("dpValues").value = "";
-  else ["dpB", "dpI", "dpC", "dpS", "dpP"].forEach((id) => { if ($(id)) $(id).value = ""; });
-  showMessage($("aygirListeAlani"), `${name} profili kaydedildi.`, "success");
-}
+
 function resetHistory() {
   const scope = firebaseAccount ? "Bu cihazdaki ve Firebase hesabınızdaki" : "Bu tarayıcıdaki";
-  if (!window.confirm(`${scope} bülten arşivi, fotoğraflar, yarış sonuçları, kupon sonuç kayıtları ve eklenen profiller silinsin mi?`)) return;
+  if (!window.confirm(`${scope} bülten arşivi, fotoğraflar, yarış sonuçları ve kupon sonuç kayıtları silinsin mi?`)) return;
   state = { ...DEFAULT_STATE, profiles: { ...DEFAULT_PROFILES }, coupons: [] };
   lastAnalysis = [];
   lastCoupons = {};
@@ -1716,13 +1647,6 @@ function resetHistory() {
 document.addEventListener("DOMContentLoaded", async () => {
   state = await restoreState();
   initializeFirebaseMemory().catch(() => setFirebaseStatus("Firebase bağlantısı başlatılamadı; yerel hafıza korunuyor.", true));
-  $("driveConnectButton")?.addEventListener("click", connectGoogleDrive);
-  $("driveBackupButton")?.addEventListener("click", backupToGoogleDrive);
-  $("driveRestoreButton")?.addEventListener("click", restoreFromGoogleDrive);
-  if (new URLSearchParams(location.search).get("drive") === "connected") {
-    setDriveStatus("Google Drive izni alındı; Firebase hesabınızı denetliyoruz…");
-    history.replaceState({}, "", `${location.pathname}${location.hash}`);
-  }
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;
@@ -1752,13 +1676,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     $("sonucluBultenInput").value = savedResultDraft.text || "";
     if (savedResultDraft.date) $("resultsDateInput").value = savedResultDraft.date;
     if (savedResultDraft.city) $("resultsCityInput").value = savedResultDraft.city;
-    if (savedResultDraft.image?.dataUrl) {
-      storedResultImage = savedResultDraft.image;
-      $("resultsImagePreview").src = storedResultImage.dataUrl;
-      $("resultsImagePreview").hidden = false;
-      $("readResultsImageButton").disabled = false;
-      setResultImageStatus("Kaydedilmiş fotoğraf hafızadan yüklendi; OCR’ı yeniden çalıştırabilirsiniz.");
-    }
+    applySavedResultDraftImage();
   }
   $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
@@ -1803,9 +1721,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       const dataUrl = await readImageAsJpeg(file, { maxDimension: 1200, quality: 0.68, maxBytes: 450 * 1024 });
       storedResultImage = { name: file.name, type: "image/jpeg", dataUrl, savedAt: new Date().toISOString() };
+      let blobSaved = false;
+      if (firebaseAccount && firebaseSyncReady) {
+        try {
+          storedResultImage = { ...storedResultImage, ...await uploadResultImage(storedResultImage, firebaseAccount), dataUrl };
+          blobSaved = true;
+        } catch { /* The local and Firebase copies remain available for a later Blob retry. */ }
+      }
       saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), image: storedResultImage });
       $("readResultsImageButton").disabled = false;
-      setResultImageStatus(`${file.name} fotoğrafı hafızaya kaydedildi. İsterseniz metni de otomatik okuyabilirsiniz.`);
+      setResultImageStatus(blobSaved ? `${file.name} fotoğrafı özel Blob hafızasına kaydedildi.` : `${file.name} fotoğrafı bu cihazın hafızasına kaydedildi; giriş yaptığınızda Firebase ve Blob ile eşitlenir.`);
     } catch (error) {
       selectedResultImage = null;
       storedResultImage = null;
@@ -1815,8 +1740,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("readResultsImageButton")?.addEventListener("click", extractResultsFromImage);
   $("learnBtn")?.addEventListener("click", handleCompareResults);
   $("learnButton")?.addEventListener("click", handleCompareResults);
-  $("saveHorseBtn")?.addEventListener("click", addProfile);
-  $("saveSireButton")?.addEventListener("click", addProfile);
   $("exportBackupBtn").addEventListener("click", exportBackup);
   $("refreshArchiveBtn")?.addEventListener("click", syncHistoricalArchive);
   $("importBackupInput").addEventListener("change", (event) => {
