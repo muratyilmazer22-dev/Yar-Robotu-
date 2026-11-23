@@ -1,7 +1,8 @@
 const { desc, eq, sql } = require('drizzle-orm');
 const { db, pool } = require('../lib/db');
-const { raceHistory } = require('../lib/db/schema');
+const { raceHistory, raceHistoryAudit } = require('../lib/db/schema');
 const { pruneExpiredArchive } = require('../lib/archive-retention');
+const { assessRaceQuality, createQualityAuditRows } = require('../lib/archive-quality');
 const { importTjkDay } = require('../lib/tjk');
 const { createHistoryRateLimiter, getClientIp, verifyFirebaseIdToken } = require('../lib/history-import-security');
 
@@ -44,7 +45,16 @@ function createHistoryHandler({ database = db, importDay = importTjkDay, verifyT
           .from(raceHistory)
           .orderBy(desc(raceHistory.raceDate), desc(raceHistory.raceNo))
           .limit(5);
-        return res.status(200).json({ ...summary, recent });
+        const recentQuality = await database.select({ raceDate: raceHistoryAudit.raceDate, city: raceHistoryAudit.city, raceNo: raceHistoryAudit.raceNo, details: raceHistoryAudit.details, recordedAt: raceHistoryAudit.recordedAt })
+          .from(raceHistoryAudit)
+          .where(eq(raceHistoryAudit.eventType, 'import_quality'))
+          .orderBy(desc(raceHistoryAudit.recordedAt))
+          .limit(5);
+        const [qualitySummary] = await database.select({
+          auditedCount: sql`count(*)::int`,
+          needsReview: sql`count(*) FILTER (WHERE ${raceHistoryAudit.details}->'quality'->>'status' = 'needs_review')::int`
+        }).from(raceHistoryAudit).where(eq(raceHistoryAudit.eventType, 'import_quality'));
+        return res.status(200).json({ ...summary, recent, recentQuality, qualitySummary });
       }
 
       if (req.method !== 'POST') {
@@ -119,13 +129,20 @@ function createHistoryHandler({ database = db, importDay = importTjkDay, verifyT
             importedAt: new Date()
           }
         });
-        const retention = await pruneExpiredArchive(database);
-        prunedRecords = retention.removed;
+        await database.insert(raceHistoryAudit).values(createQualityAuditRows(date, values, imported.errors, 'manual_import'));
       }
+      const retention = await pruneExpiredArchive(database);
+      prunedRecords = retention.removed;
 
       return res.status(200).json({
         date,
         savedRaces: values.length,
+        qualityAuditedRaces: values.length,
+        quality: values.reduce((report, row) => {
+          const quality = assessRaceQuality(row);
+          report[quality.status] = (report[quality.status] || 0) + 1;
+          return report;
+        }, {}),
         prunedRecords,
         programRaces: values.filter((row) => row.program.runners.length > 0).length,
         resultRaces: values.filter((row) => row.results.runners.length > 0).length,

@@ -13,13 +13,13 @@
   if (!startInput || !endInput || !importButton) return;
 
   const today = new Date();
-  const twoYearsAgo = new Date(today);
-  twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+  const archiveWindowStart = new Date(today);
+  archiveWindowStart.setDate(archiveWindowStart.getDate() - 365);
   const toIsoDate = (date) => {
     const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
     return localDate.toISOString().slice(0, 10);
   };
-  const earliestDate = toIsoDate(twoYearsAgo);
+  const earliestDate = toIsoDate(archiveWindowStart);
   startInput.min = earliestDate;
   endInput.min = earliestDate;
   startInput.value = earliestDate;
@@ -57,12 +57,15 @@
       const response = await fetch('/api/history/', { headers: { Accept: 'application/json' } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Arşiv bilgisi alınamadı.');
+      const auditedCount = Number(data.qualitySummary?.auditedCount || 0);
+      const needsReview = Number(data.qualitySummary?.needsReview || 0);
       summary.replaceChildren(
         renderMetric('Neon kayıtlı koşu', Number(data.raceCount || 0).toLocaleString('tr-TR')),
         renderMetric('İlk kayıt', data.firstDate || '—'),
-        renderMetric('Son kayıt', data.lastDate || '—')
+        renderMetric('Son kayıt', data.lastDate || '—'),
+        renderMetric('Arşiv kalite kayıtları', auditedCount ? `${needsReview} inceleme / ${auditedCount} denetim` : 'Henüz denetim yok')
       );
-      setStatus(Number(data.raceCount || 0) && data.lastDate ? `TJK arşivindeki son kayıt: ${data.lastDate}. Daha yeni günler için tarih aralığını içe aktarın.` : 'Neon arşivi boş; TJK’den tarih aralığı seçerek içe aktarın.');
+      setStatus(Number(data.raceCount || 0) && data.lastDate ? `TJK arşivindeki son kayıt: ${data.lastDate}. Son içe aktarma kalite bilgisi kalıcı denetim kaydında tutulur.` : 'Neon arşivi boş; TJK’den tarih aralığı seçerek içe aktarın.');
       return true;
     } catch (error) {
       setStatus(error.message || 'Neon arşivi yüklenemedi.', true);
@@ -84,8 +87,8 @@
   importButton.addEventListener('click', async () => {
     if (importing) return;
     const dates = eachDate(startInput.value, endInput.value);
-    if (!dates.length || dates.length > 732) {
-      setStatus('Başlangıç ve bitiş tarihlerini kontrol edin; aralık iki yılı aşamaz.', true);
+    if (!dates.length || dates.length > 366) {
+      setStatus('Başlangıç ve bitiş tarihlerini kontrol edin; aralık bir yılı aşamaz.', true);
       return;
     }
 
@@ -173,6 +176,10 @@
         renderMetric('Kazanan ilk 3 sıramızda', data.winnerTopThreeRankRate == null ? '—' : `${data.winnerTopThreeRankRate}%`),
         renderMetric('Kazananın ortalama sırası', data.averageWinnerRank == null ? '—' : String(data.averageWinnerRank)),
         renderMetric('Piyasa favorisi birinci', data.marketFavoriteHitRate == null ? '—' : `${data.marketFavoriteHitRate}%`),
+        renderMetric('Sabit model ROI', data.returnMetrics?.fixed?.roi == null ? 'Ölçülemedi' : `${data.returnMetrics.fixed.roi}%`),
+        renderMetric('Piyasa favorisi ROI', data.returnMetrics?.favorite?.roi == null ? 'Ölçülemedi' : `${data.returnMetrics.favorite.roi}%`),
+        renderMetric('Öğrenilmiş model ROI', data.returnMetrics?.automatic?.roi == null ? 'Ölçülemedi' : `${data.returnMetrics.automatic.roi}%`),
+        renderMetric('ROI fiyatı olan koşu', `${data.returnMetrics?.fixed?.pricedRaces || 0} / ${data.returnMetrics?.fixed?.races || 0}`),
         renderMetric('Sürpriz adayları kazananı yakaladı', data.surpriseCandidateHitRate == null ? '—' : `${data.surpriseCandidateHitRate}%`)
       );
       const validation = data.validation || {};
@@ -198,18 +205,22 @@
       const validationBlock = document.createElement('section');
       validationBlock.append(validationTitle, validationNote, thresholdList);
       const automaticValidation = data.automaticModelValidation || {};
+      const holdout = automaticValidation.finalHoldout;
+      const formatHoldout = (metric) => metric
+        ? `isabet %${metric.hitRate == null ? '—' : (metric.hitRate * 100).toFixed(1)} · ROI ${metric.roi == null ? 'ölçülemedi' : `${metric.roi.toFixed(1)}%`} (${metric.pricedRaces || 0} oranlı koşu)`
+        : 'ölçülemedi';
       const automaticValidationBlock = document.createElement('section');
       const automaticValidationTitle = document.createElement('h3');
       automaticValidationTitle.textContent = 'Doğrulanmış otomatik model — ileri tarih karşılaştırması';
       const automaticValidationNote = document.createElement('p');
       automaticValidationNote.className = 'sub';
       automaticValidationNote.textContent = automaticValidation.available
-        ? `${automaticValidation.from} – ${automaticValidation.to || '—'} arasında ${Number(automaticValidation.races || 0).toLocaleString('tr-TR')} koşu. Otomatik model lider isabeti: ${automaticValidation.modelTop1HitRate ?? '—'}%; piyasa favorisi: ${automaticValidation.marketFavoriteHitRate ?? '—'}%. Aynı koşulardaki Brier skoru: temel ${automaticValidation.baselineBrier?.toFixed(3) ?? '—'}, öğrenilmiş ${automaticValidation.learnedBrier?.toFixed(3) ?? '—'}; düşük değer daha iyi olasılık kalibrasyonu demektir. Eğitim raporu: ${automaticValidation.trainingReport?.trainingRaces ?? '—'} eğitim / ${automaticValidation.trainingReport?.validationRaces ?? '—'} doğrulama koşusu, ${automaticValidation.contextModelCount || 0} bağlam modeli. Bu doğrulama dilimi model ağırlıklarının eğitiminde kullanılmadı.`
+        ? `${automaticValidation.from} – ${automaticValidation.to || '—'} arasında ${Number(automaticValidation.races || 0).toLocaleString('tr-TR')} koşu. Otomatik model lider isabeti: ${automaticValidation.modelTop1HitRate ?? '—'}%; piyasa favorisi: ${automaticValidation.marketFavoriteHitRate ?? '—'}%. Aynı koşulardaki Brier skoru: temel ${automaticValidation.baselineBrier?.toFixed(3) ?? '—'}, öğrenilmiş ${automaticValidation.learnedBrier?.toFixed(3) ?? '—'}; düşük değer daha iyi olasılık kalibrasyonu demektir. Eğitim raporu: ${automaticValidation.trainingReport?.trainingRaces ?? '—'} eğitim / ${automaticValidation.trainingReport?.validationRaces ?? '—'} doğrulama koşusu, ${automaticValidation.contextModelCount || 0} bağlam modeli. Bu doğrulama dilimi model ağırlıklarının eğitiminde kullanılmadı. Bağımsız son holdout (${automaticValidation.holdoutFrom || '—'} – ${automaticValidation.holdoutTo || '—'}): öğrenilmiş ${formatHoldout(holdout?.learned)}, sabit ${formatHoldout(holdout?.fixed)}, piyasa favorisi ${formatHoldout(holdout?.favorite)}.`
         : automaticValidation.reason || 'Henüz ileri tarih diliminde doğrulanmış otomatik model bulunmuyor.';
       automaticValidationBlock.append(automaticValidationTitle, automaticValidationNote);
       const note = document.createElement('p');
       note.className = 'sub';
-      note.textContent = `Tek günlük veya küçük örnek sonuçları genellemez. Kaydedilmiş ${Number(data.storedRaces || 0).toLocaleString('tr-TR')} koşudan ${Number(data.omittedRaces || 0).toLocaleString('tr-TR')} tanesi gerekli program/sonuç eşleşmesi olmadığı için test dışı kaldı. Ana metrikler sabit başlangıç modeline aittir; doğrulanmış otomatik model, ağırlıkların eğitiminde kullanılmamış ayrı tarih diliminde yukarıda ayrıca karşılaştırılır. ${data.method}`;
+      note.textContent = `Tek günlük veya küçük örnek sonuçları genellemez. Kaydedilmiş ${Number(data.storedRaces || 0).toLocaleString('tr-TR')} koşudan ${Number(data.omittedRaces || 0).toLocaleString('tr-TR')} tanesi gerekli program/sonuç eşleşmesi olmadığı için test dışı kaldı. Ana metrikler sabit başlangıç modeline aittir; doğrulanmış otomatik model, ağırlıkların eğitiminde kullanılmamış ayrı tarih diliminde yukarıda ayrıca karşılaştırılır. ${data.method} ${data.returnMetrics?.basis || ''}`;
       const rankBreakdown = document.createElement('section');
       const rankTitle = document.createElement('h3');
       rankTitle.textContent = 'Kazananın model sıralamasındaki yeri';

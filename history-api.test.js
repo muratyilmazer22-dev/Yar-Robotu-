@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const historyApi = require('./api/history');
+const { raceHistoryAudit } = require('./lib/db/schema');
 const { verifyFirebaseIdToken } = require('./lib/history-import-security');
 
 function createResponse() {
@@ -28,8 +29,8 @@ function createDatabase({ existing = [] } = {}) {
   return {
     get inserted() { return inserted; },
     get operations() { return operations; },
-    delete() {
-      return { where() { return { returning: async () => { operations.push('prune'); return []; } }; } };
+    delete(table) {
+      return { where() { return { returning: async () => { operations.push(table === raceHistoryAudit ? 'prune-quality' : 'prune'); return []; } }; } };
     },
     select() {
       return {
@@ -41,9 +42,13 @@ function createDatabase({ existing = [] } = {}) {
         }
       };
     },
-    insert() {
+    insert(table) {
       return {
         values(values) {
+          if (table === raceHistoryAudit) {
+            operations.push('audit');
+            return Promise.resolve();
+          }
           inserted = values;
           return { onConflictDoUpdate: async () => { operations.push('insert'); } };
         }
@@ -173,8 +178,10 @@ test('POST imports a valid date only after verified auth and rate checks', async
   assert.equal(response.statusCode, 200);
   assert.equal(importedDate, date);
   assert.equal(database.inserted.length, 1);
-  assert.deepEqual(database.operations, ['insert', 'prune']);
+  assert.deepEqual(database.operations, ['insert', 'audit', 'prune', 'prune-quality']);
   assert.equal(response.body.prunedRecords, 0);
+  assert.equal(response.body.qualityAuditedRaces, 1);
+  assert.deepEqual(response.body.quality, { needs_review: 1 });
   assert.deepEqual(limiterCalls.map(([subject]) => subject), ['ip:203.0.113.10', 'user:firebase-user', 'global']);
 });
 

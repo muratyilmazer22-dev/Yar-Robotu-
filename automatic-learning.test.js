@@ -73,6 +73,39 @@ test('archive training examples include prior venue, weather, and track performa
   assert.equal(example.horses[1].features.weatherFit, null);
 });
 
+test('historical training uses result odds only for returns, never program odds as prediction inputs', () => {
+  const example = raceToTrainingExample({
+    raceDate: '2026-11-20',
+    program: { runners: [{ no: 1, name: 'A', odds: 1.2 }, { no: 2, name: 'B', odds: 18 }] },
+    results: { runners: [{ no: 1, finishPosition: 1, odds: 2.5 }, { no: 2, finishPosition: 2, odds: 10 }] }
+  });
+  assert.equal(example.horses.find((horse) => horse.number === 1).odds, 2.5);
+  assert.equal(example.horses.find((horse) => horse.number === 1).marketScore, null);
+});
+
+test('model fitter reserves the final chronological 20 percent as an untouched holdout', () => {
+  const dates = Array.from({ length: 20 }, (_, index) => `2026-01-${String(index + 1).padStart(2, '0')}`);
+  const races = dates.flatMap((date) => Array.from({ length: 3 }, (_, index) => ({
+    date,
+    winner: 1,
+    horses: [
+      { number: 1, features: Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, 90])), marketScore: 90, odds: 2.5 },
+      { number: 2, features: Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, 20])), marketScore: 20, odds: 4 }
+    ],
+    id: index
+  })));
+  const report = fitModel(races);
+
+  assert.equal(report.verified, true);
+  assert.equal(report.trainingRaces, 36);
+  assert.equal(report.validationRaces, 12);
+  assert.equal(report.holdoutRaces, 12);
+  assert.equal(report.validationStartDate, '2026-01-13');
+  assert.equal(report.holdoutStartDate, '2026-01-17');
+  assert.equal(report.holdoutEvaluation.learned.pricedRaces, 12);
+  assert.equal(report.holdoutEvaluation.learned.roi, 150);
+});
+
 test('model fitter preserves trusted weights until it has a forward validation sample', () => {
   const protectedWeights = { ...BASE_WEIGHTS, market: 0.4 };
   const report = fitModel([], protectedWeights);
