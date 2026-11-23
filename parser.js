@@ -76,8 +76,8 @@
           const index = indexOf(fragment);
           return index >= 0 ? cells[index] || '' : '';
         };
-        const numberIndex = headers.findIndex((header) => header === 'no' || header.includes('at no') || header.includes('horse no') || header.includes('horse number') || header.includes('program no'));
-        horseNumber = horseMatch ? Number(horseMatch[1]) : numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null;
+        const numberIndex = headers.findIndex((header) => header === 'n' || header === 'no' || header.includes('at no') || header.includes('horse no') || header.includes('horse number') || header.includes('program no'));
+        horseNumber = numberIndex >= 0 ? parseNumber(cells[numberIndex]) : horseMatch ? Number(horseMatch[1]) : null;
         const rankIndex = headers.findIndex((header) => header === 's' || header.includes('sira') || header.includes('sonuc') || header.includes('result') || header.includes('rank') || header.includes('placing') || header.includes('position'));
         assumedRank = rankIndex >= 0 ? parseNumber(cells[rankIndex]) : null;
         const origin = column('orijin');

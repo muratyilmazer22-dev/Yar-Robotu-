@@ -41,6 +41,22 @@ test('uses a compact At header as the horse name instead of the AGF column', () 
   ]);
 });
 
+test('reads the official compact N column as the horse number', () => {
+  const bulletin = [
+    '1. Koşu 13:30 Handikap 17 2100 Kum',
+    'N\tAt İsmi\tSıra\tDerece',
+    '1\tMY CHAKRA (10) KG DB SK\t1\t1.23.45',
+    '2\tAK RÜZGAR (3) KG\t2\t1.24.10'
+  ].join('\n');
+
+  const [race] = parseRaces(bulletin);
+
+  assert.deepEqual(race.horses.map((horse) => [horse.horseNumber, horse.name, horse.rank]), [
+    [1, 'MY CHAKRA', 1],
+    [2, 'AK RÜZGAR', 2]
+  ]);
+});
+
 test('keeps the program horse number separate from the starting stall', () => {
   const bulletin = [
     '1. Koşu 13:30 Handikap 17 2100 Kum',

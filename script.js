@@ -62,7 +62,7 @@
         renderMetric('İlk kayıt', data.firstDate || '—'),
         renderMetric('Son kayıt', data.lastDate || '—')
       );
-      setStatus(Number(data.raceCount || 0) ? 'TJK arşivi Neon veritabanında hazır.' : 'Neon arşivi boş; TJK’den tarih aralığı seçerek içe aktarın.');
+      setStatus(Number(data.raceCount || 0) && data.lastDate ? `TJK arşivindeki son kayıt: ${data.lastDate}. Daha yeni günler için tarih aralığını içe aktarın.` : 'Neon arşivi boş; TJK’den tarih aralığı seçerek içe aktarın.');
       return true;
     } catch (error) {
       setStatus(error.message || 'Neon arşivi yüklenemedi.', true);
@@ -851,6 +851,7 @@ async function analyze() {
   $("resultsDateInput").value = couponDate;
   $("resultsCityInput").value = couponCity;
   saveState();
+  $("analysisEmptyState")?.remove();
   renderAnalysis(parsed.races);
   const completedCount = parsed.races.filter((race) => race.finished).length;
   const statusMessage = openRaces.length
@@ -1202,7 +1203,41 @@ async function extractResultsFromImage() {
     button.textContent = "Görselden metni oku";
   }
 }
-function compareResults() {
+function requestMissingWinners(races, target) {
+  const unresolved = races.filter((race) => !race.horses.some((horse) => horse.place === 1));
+  if (!unresolved.length) return false;
+  const rows = unresolved.map((race) => {
+    const options = race.horses
+      .filter((horse) => Number.isSafeInteger(Number(horse.number)) && Number(horse.number) > 0)
+      .map((horse) => `<option value="${Number(horse.number)}">#${Number(horse.number)} ${escapeHtml(horse.name)}</option>`)
+      .join("");
+    return `<label class="control">${race.no}. koşu kazananı<select data-result-winner="${race.no}" required><option value="">Kazanan atı seçin</option>${options}</select></label>`;
+  }).join("");
+  if (unresolved.some((race) => !race.horses.some((horse) => Number.isSafeInteger(Number(horse.number)) && Number(horse.number) > 0))) {
+    showMessage(target, "Bazı sonuç satırlarında at numarası okunamadı. At numaralarını içeren sonuç tablosunu yeniden yapıştırın.", "error");
+    return true;
+  }
+  target.setAttribute("role", "status");
+  target.setAttribute("aria-live", "polite");
+  target.innerHTML = `<div class="card"><h3>Sonuç sırası bulunamadı</h3><p class="sub">Metinde koşu ve atlar bulundu, ancak birinci sırası okunamadı. Sonuç tablosunda sıra sütunu yoksa her koşunun kazananını aşağıdan seçin. Seçiminiz kaydedilmeden önce ayrıca onaylanır.</p><div class="controls">${rows}</div><div class="actions"><button class="btn" id="matchManualWinnersButton" type="button">Kazananları eşleştir</button></div></div>`;
+  $("matchManualWinnersButton").addEventListener("click", () => {
+    const overrides = new Map();
+    for (const select of target.querySelectorAll("[data-result-winner]")) {
+      const race = unresolved.find((item) => item.no === Number(select.dataset.resultWinner));
+      const winner = race?.horses.find((horse) => Number(horse.number) === Number(select.value));
+      if (!winner) {
+        select.focus();
+        showMessage(target, "Devam etmek için her koşunun kazanan atını seçin.", "error");
+        return;
+      }
+      overrides.set(race.no, winner);
+    }
+    compareResults(overrides);
+  });
+  target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  return true;
+}
+function compareResults(winnerOverrides = null) {
   pendingResultImport = null;
   const target = $("ogrenmeLogAlani");
   const parsed = parseRaces($("sonucluBultenInput").value.trim());
@@ -1231,7 +1266,7 @@ function compareResults() {
   let racesWithoutWinner = 0;
   let racesWithoutPrediction = 0;
   for (const race of parsed.races) {
-    const winner = race.horses.find((horse) => horse.place === 1);
+    const winner = race.horses.find((horse) => horse.place === 1) || winnerOverrides?.get(race.no);
     const prediction = matchingPredictions.find((item) => item.no === race.no);
     if (!winner || !Number.isSafeInteger(Number(winner.number)) || Number(winner.number) < 1) { racesWithoutWinner += 1; continue; }
     if (!prediction) { racesWithoutPrediction += 1; continue; }
@@ -1261,11 +1296,9 @@ function compareResults() {
       at: `${prediction.date || timestamp.slice(0, 10)}T12:00:00.000Z`
     });
   }
+  if (racesWithoutWinner > 0 && !winnerOverrides && requestMissingWinners(parsed.races, target)) return;
   if (!outcomes.length) {
-    const reason = racesWithoutWinner === parsed.races.length
-      ? "Sonuç bülteninde birinci sırası okunamadı. Sıra/Rank/Position sütununu ve at numaralarını içeren tabloyu kopyalayın."
-      : "Sonuçlarda birinci bilgisi bulundu ancak bu tarih ve hipodromda aynı numaralı kayıtlı tahmin bulunamadı.";
-    showMessage(target, reason, "error");
+    showMessage(target, "Sonuçlarda kazanan bulunamadı veya bu tarih ve hipodrom için eşleşen kayıtlı tahmin yok.", "error");
     return;
   }
   pendingResultImport = { outcomes, resultDate, resultCity, racesWithoutWinner, racesWithoutPrediction };
@@ -1275,7 +1308,7 @@ function compareResults() {
   const skipped = racesWithoutWinner + racesWithoutPrediction;
   target.setAttribute("role", "status");
   target.setAttribute("aria-live", "polite");
-  target.innerHTML = `<div class="alert"><b>Kaydetmeden önce kontrol edin · ${escapeHtml(resultDate)} · ${escapeHtml(resultCity)}</b><br>${outcomes.length} eşleşen koşu · ${newCount} yeni sonuç · ${corrections} düzeltme adayı · ${skipped} atlanan koşu (birincisi okunamadı: ${racesWithoutWinner}, tahmini eşleşmedi: ${racesWithoutPrediction}). Görselden/metinden okunan kazanan numarası ve at adlarını doğrulayın.</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · model lideri ${item.top1Hit ? "isabet" : "isabet değil"}</div>`).join("")}<div class="actions"><button class="btn green" id="confirmResultsButton" type="button">Bu sonuçları onayla ve kaydet</button><button class="btn secondary" id="cancelResultsButton" type="button">İptal</button></div>`;
+  target.innerHTML = `<div class="alert"><b>Kaydetmeden önce kontrol edin · ${escapeHtml(resultDate)} · ${escapeHtml(resultCity)}</b><br>${outcomes.length} eşleşen koşu · ${newCount} yeni sonuç · ${corrections} düzeltme adayı · ${skipped} atlanan koşu (birincisi okunamadı: ${racesWithoutWinner}, tahmini eşleşmedi: ${racesWithoutPrediction}). ${winnerOverrides?.size ? `${winnerOverrides.size} kazananı elle seçtiniz; kaydetmeden önce doğrulayın.` : "Görselden/metinden okunan kazanan numarası ve at adlarını doğrulayın."}</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · model lideri ${item.top1Hit ? "isabet" : "isabet değil"}</div>`).join("")}<div class="actions"><button class="btn green" id="confirmResultsButton" type="button">Bu sonuçları onayla ve kaydet</button><button class="btn secondary" id="cancelResultsButton" type="button">İptal</button></div>`;
   $("confirmResultsButton").addEventListener("click", () => {
     if (!pendingResultImport) return;
     let added = 0;
@@ -1579,6 +1612,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   window.addEventListener("appinstalled", () => { $("installAppBtn").hidden = true; });
   document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => setTab(button.dataset.tab || button.dataset.panel)));
+  $("goToBulletinButton")?.addEventListener("click", () => setTab("bulten"));
   const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   $("couponDateInput").value = todayLocal;
   $("resultsDateInput").value = todayLocal;
