@@ -73,6 +73,20 @@ test('keeps the program horse number separate from the starting stall', () => {
   ]);
 });
 
+test('reads explicit eküri group codes from the bulletin', () => {
+  const bulletin = [
+    '1. Koşu 14:00 Maiden 1400 Kum',
+    'At No\tAt İsmi\tEküri\tAGF',
+    '1\tKIR AT\tA\t%24',
+    '2\tAK AT\tA\t%10',
+    '3\tYEL AT\tB\t%8'
+  ].join('\n');
+
+  const [race] = parseRaces(bulletin);
+
+  assert.deepEqual(race.horses.map((horse) => horse.couplingGroup), ['A', 'A', 'B']);
+});
+
 test('does not substitute starting stall for an unknown horse number', () => {
   const bulletin = [
     '1. Koşu 13:30 Handikap 17 2100 Kum',
