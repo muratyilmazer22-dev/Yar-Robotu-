@@ -1114,6 +1114,67 @@ async function syncHistoricalArchive() {
     if (status) status.textContent = "Neon yarış arşivine şu an ulaşılamadı. Bu cihazdaki kayıtlar korunuyor; bağlantı kurulduğunda arşiv yeniden kontrol edilir.";
   }
 }
+let selectedResultImage = null;
+let resultImagePreviewUrl = null;
+function setResultImageStatus(message, isError = false) {
+  const status = $("resultsImageStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle("error", isError);
+}
+function readImageAsJpeg(file) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const sourceUrl = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(sourceUrl);
+      const scale = Math.min(1, 1800 / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext("2d");
+      if (!context) return reject(new Error("Görsel dönüştürülemedi."));
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) return reject(new Error("Görsel küçültülemedi."));
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Görsel okunamadı."));
+        reader.readAsDataURL(blob);
+      }, "image/jpeg", 0.82);
+    };
+    image.onerror = () => { URL.revokeObjectURL(sourceUrl); reject(new Error("Bu görsel açılamadı.")); };
+    image.src = sourceUrl;
+  });
+}
+async function extractResultsFromImage() {
+  if (!selectedResultImage) return;
+  const button = $("readResultsImageButton");
+  button.disabled = true;
+  button.textContent = "Görsel okunuyor…";
+  setResultImageStatus("Görsel küçültülüyor ve sonuç tablosu okunuyor…");
+  try {
+    const image = await readImageAsJpeg(selectedResultImage);
+    const response = await fetch("/api/result-image-ocr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Görsel okunamadı. Daha net bir görüntü seçip tekrar deneyin.");
+    const recognizedText = String(payload.text || "").trim();
+    if (!recognizedText) throw new Error("Görselde okunabilir sonuç metni bulunamadı.");
+    const textarea = $("sonucluBultenInput");
+    textarea.value = [textarea.value.trim(), recognizedText].filter(Boolean).join("\n\n");
+    textarea.focus();
+    setResultImageStatus("Metin taslağı eklendi. Koşu ve sıra bilgilerini kontrol edin; ardından sonuçları eşleştirip önizleyin.");
+  } catch (error) {
+    setResultImageStatus(error instanceof Error ? error.message : "Görsel işlenemedi. Lütfen yeniden deneyin.", true);
+  } finally {
+    button.disabled = !selectedResultImage;
+    button.textContent = "Görselden metni oku";
+  }
+}
 function compareResults() {
   pendingResultImport = null;
   const target = $("ogrenmeLogAlani");
@@ -1508,6 +1569,28 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("analyzeButton")?.addEventListener("click", analyze);
   $("clearBtn")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
   $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
+  $("chooseResultsImageButton")?.addEventListener("click", () => $("resultsImageInput")?.click());
+  $("resultsImageInput")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.type) || file.size > 15 * 1024 * 1024) {
+      selectedResultImage = null;
+      $("readResultsImageButton").disabled = true;
+      $("resultsImagePreview").hidden = true;
+      setResultImageStatus("JPG, PNG veya WebP biçiminde ve 15 MB’tan küçük bir görsel seçin.", true);
+      return;
+    }
+    selectedResultImage = file;
+    const preview = $("resultsImagePreview");
+    if (resultImagePreviewUrl) URL.revokeObjectURL(resultImagePreviewUrl);
+    resultImagePreviewUrl = URL.createObjectURL(file);
+    preview.src = resultImagePreviewUrl;
+    preview.hidden = false;
+    $("readResultsImageButton").disabled = false;
+    setResultImageStatus(`${file.name} seçildi. Metni okumak için düğmeye basın.`);
+  });
+  $("readResultsImageButton")?.addEventListener("click", extractResultsFromImage);
   $("learnBtn")?.addEventListener("click", handleCompareResults);
   $("learnButton")?.addEventListener("click", handleCompareResults);
   $("saveHorseBtn")?.addEventListener("click", addProfile);
