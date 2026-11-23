@@ -1,4 +1,4 @@
-const { sql } = require('drizzle-orm');
+const { eq, sql } = require('drizzle-orm');
 const { db } = require('../lib/db');
 const { raceHistory, robotMemory } = require('../lib/db/schema');
 
@@ -17,6 +17,7 @@ module.exports = async function handler(req, res) {
       firstDate: sql`min(${raceHistory.raceDate})`,
       lastDate: sql`max(${raceHistory.raceDate})`
     }).from(raceHistory);
+    const [automaticModel] = await db.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, 'automatic-learning-model')).limit(1);
     const value = {
       version: 1,
       source: 'official-tjk-archive',
@@ -25,6 +26,7 @@ module.exports = async function handler(req, res) {
       completedRaceCount: Number(archive.completedRaceCount || 0),
       firstDate: archive.firstDate || null,
       lastDate: archive.lastDate || null,
+      automaticModel: automaticModel?.memoryValue || null,
       refreshedAt: new Date().toISOString()
     };
 

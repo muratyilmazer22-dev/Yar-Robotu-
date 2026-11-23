@@ -1110,15 +1110,26 @@ async function refreshRemoteMemory() {
     const response = await fetch("/api/model-memory", { headers: { Accept: "application/json" } });
     const memory = await response.json();
     if (!response.ok) throw new Error(memory.error || "Neon hafızası alınamadı.");
-    target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu TJK koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}. Bu resmi arşiv tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi bu cihazda kalır.`;
+    const automated = memory.automaticModel;
+    const automatedStatus = automated?.report?.verified
+      ? ` · otomatik model ${automated.report.updated ? "doğrulamayı geçti ve etkin" : "doğrulamayı geçmedi; son iyi ağırlıklar korundu"}`
+      : " · otomatik model için henüz yeterli ileri tarih doğrulaması yok";
+    target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu TJK koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Bu resmi arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi bu cihazda kalır.`;
+    return memory;
   } catch {
     target.textContent = "Neon kalıcı hafızasına şu an ulaşılamıyor; bu cihazdaki kayıtlar korunuyor.";
+    return null;
   }
 }
 async function syncHistoricalArchive() {
   const status = $("archiveStatus");
   if (status) status.textContent = "TJK geçmiş arşivi kontrol ediliyor…";
-  refreshRemoteMemory();
+  const remoteMemory = await refreshRemoteMemory();
+  const sharedWeights = remoteMemory?.automaticModel?.weights;
+  if (sharedWeights && Object.keys(BASE_WEIGHTS).every((key) => Number.isFinite(Number(sharedWeights[key])))) {
+    state.modelWeights = { ...BASE_WEIGHTS, ...sharedWeights };
+    state.lastGoodModelWeights = { ...state.modelWeights };
+  }
   try {
     const archive = [];
     const pageSize = 5000;
