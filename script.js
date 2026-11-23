@@ -935,13 +935,14 @@ function renderTrainingReport() {
     target.textContent = `Öğrenme raporu: ${state.outcomes.length.toLocaleString("tr-TR")} kayıtlı sonuç · ileri tarih kıyaslaması için en az 5 ayrı yarış tarihi gerekir.`;
     return;
   }
-  const modelStatus = report.updated ? "Yeni ağırlıklar ileri tarih doğrulamasını geçti ve etkinleştirildi." : report.verified ? "Yeni ağırlıklar doğrulama eşiğini geçmedi; son iyi ağırlıklar korundu." : `Doğrulama için yeterli veri yok (en az ${MODEL_MIN_RACES} yarış).`;
+  const currentValidation = report.validationMethod === "fixed-forward-v1";
+  const modelStatus = currentValidation ? report.updated ? "Yeni ağırlıklar sabit temel modele karşı ileri tarih doğrulamasını geçti ve etkinleştirildi." : report.verified ? "Yeni ağırlıklar doğrulama eşiğini geçmedi; son iyi ağırlıklar korundu." : `Doğrulama için yeterli veri yok (en az ${MODEL_MIN_RACES} yarış).` : "Kayıtlı model eski doğrulama yöntemiyle eğitilmiş; sonraki yeni sonuçlarda sabit temel ve son iyi modelle yeniden doğrulanacak.";
   const metrics = comparison.validated ? ["learned", "favorite", "fixed"].map((key) => {
     const item = comparison.byModel[key];
     return `${key === "learned" ? "tahmin anındaki model" : key === "favorite" ? "piyasa favorisi" : "sabit temel model"}: ${item.races ? `${item.wins}/${item.races} (%${(item.hitRate * 100).toFixed(1)})` : "ölçülemedi"}`;
   }).join(" · ") : "İleri tarih karşılaştırması için henüz yeterli tarih yok.";
   const segments = comparison.byContext.filter((item) => item.eligible).map((item) => `${item.name} (${item.kind === "surface" ? "zemin" : "yarış türü"}, n=${item.races})`).join(", ");
-  target.textContent = `Öğrenme raporu: ${report.sampleSize || state.outcomes.length} uygun yarış · eğitim ${report.trainingRaces || 0} · doğrulama ${report.validationRaces || 0}${report.validationStartDate ? ` (${report.validationStartDate} sonrası)` : ""}. ${modelStatus} Brier temel: ${Number.isFinite(report.baselineBrier) ? report.baselineBrier.toFixed(4) : "—"} · doğrulama: ${Number.isFinite(report.validationBrier) ? report.validationBrier.toFixed(4) : "—"}. ${comparison.validated ? `Aynı son tarih dilimi (${comparison.startDate}–${comparison.endDate}, n=${comparison.races}): ${metrics}` : "İleri tarih kıyaslaması için beş ayrı tarihe yayılmış, yarış öncesinde kaydedilmiş sonuç bulunamadı"}. Yeterli örnekli zemin/tür: ${segments || `henüz yok (eşik ${comparison.minimumContextSample})`}. Sızıntıyı önlemek için TJK arşivinden sonradan puanlanan kayıtlar bu kıyasa dahil edilmez; yalnız yarış öncesi saklanan tahminler kullanılır. Ağırlık sürümü: ${(state.modelWeightVersions || []).at(-1)?.version || 0}.`;
+  target.textContent = `Öğrenme raporu: ${report.sampleSize || state.outcomes.length} uygun yarış · eğitim ${report.trainingRaces || 0} · doğrulama ${report.validationRaces || 0}${report.validationStartDate ? ` (${report.validationStartDate} sonrası)` : ""}. ${modelStatus} Brier temel: ${currentValidation && Number.isFinite(report.baselineBrier) ? report.baselineBrier.toFixed(4) : "—"} · doğrulama: ${currentValidation && Number.isFinite(report.validationBrier) ? report.validationBrier.toFixed(4) : "—"}. ${comparison.validated ? `Aynı son tarih dilimi (${comparison.startDate}–${comparison.endDate}, n=${comparison.races}): ${metrics}` : "İleri tarih kıyaslaması için beş ayrı tarihe yayılmış, yarış öncesinde kaydedilmiş sonuç bulunamadı"}. Yeterli örnekli zemin/tür: ${segments || `henüz yok (eşik ${comparison.minimumContextSample})`}. Sızıntıyı önlemek için TJK arşivinden sonradan puanlanan kayıtlar bu kıyasa dahil edilmez; yalnız yarış öncesi saklanan tahminler kullanılır. Ağırlık sürümü: ${(state.modelWeightVersions || []).at(-1)?.version || 0}.`;
 }
 function trainModel() {
   const races = state.outcomes.filter((item) => Array.isArray(item.horses) && item.horses.length > 1 && item.horses.some((horse) => horse.number === item.winner)).sort((a, b) => String(a.at || "").localeCompare(String(b.at || ""))).slice(-TRAINING_WINDOW_RACES);
@@ -963,6 +964,7 @@ function trainModel() {
     validationBrier: globalFit?.validationBrier ?? null,
     updated: Boolean(globalFit?.updated),
     verified: Boolean(globalFit),
+    validationMethod: "fixed-forward-v1",
     validatedAt: globalFit ? validatedAt : null
   };
   const contexts = new Map();
