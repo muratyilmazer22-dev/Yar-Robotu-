@@ -743,11 +743,15 @@ function singleSelectionEvidence() {
   };
   return singleEvidenceCache;
 }
+function getRequiredSingleGap(leader) {
+  const coverage = Math.max(0, Math.min(100, Number(leader?.independentCoverage) || 0));
+  return SINGLE_GAP_THRESHOLD + (100 - coverage) * 0.05;
+}
 function isValidatedSingle(ranked) {
   if (ranked.length === 1) return true;
   if (ranked.length < 2 || ranked[0]?.isCoupled) return false;
   const gap = ranked[0].score - ranked[1].score;
-  return gap >= SINGLE_GAP_THRESHOLD && ranked[0].independentCoverage >= MIN_SINGLE_COVERAGE && singleSelectionEvidence().validated;
+  return gap >= getRequiredSingleGap(ranked[0]) && ranked[0].independentCoverage >= MIN_SINGLE_COVERAGE && singleSelectionEvidence().validated;
 }
 async function analyzeRaces(races) {
   const results = [];
@@ -786,8 +790,9 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     const evidenceDetail = evidence.candidates < 30
       ? `doğrulamada ${evidence.candidates}/30 aday`
       : `aday isabeti %${(evidence.hitRate * 100).toFixed(1)} · genel lider isabeti %${(evidence.baselineHitRate * 100).toFixed(1)}`;
+    const requiredGap = getRequiredSingleGap(ranked[0]);
     const singleNote = ranked.length > 1
-      ? `Lider farkı ${leaderGap} puan · bağımsız veri kapsamı %${ranked[0].independentCoverage} · ${singleEligible ? "tek seçim eşiği geçmiş doğrulamada desteklendi" : `tek seçim önerilmiyor: ${SINGLE_GAP_THRESHOLD} puan fark, %${MIN_SINGLE_COVERAGE} kapsam ve doğrulamada genel liderden iyi sonuç gerekir (${evidenceDetail})`}. Puan farkı olasılık değildir.`
+      ? `Lider farkı ${leaderGap} puan · bağımsız veri kapsamı %${ranked[0].independentCoverage} · bu koşuda tek seçim için gereken fark ${requiredGap.toFixed(1)} puan (12,5 başlangıç eşiği, veri kapsamına göre ayarlanır); ayrıca %${MIN_SINGLE_COVERAGE} kapsam ve doğrulamada genel liderden iyi sonuç gerekir (${evidenceDetail}). ${singleEligible ? "Tek seçim doğrulama ölçütlerini geçti." : "Tek seçim doğrulama ölçütlerini geçmedi."} Puan farkı olasılık değildir.`
       : "Tek koşabilir at var; bu bir tahmin üstünlüğü anlamına gelmez.";
     const repeatedJockeyCount = window.RaceRelations.repeatedJockeysAcrossLegs(races);
     const ekuriCounts = new Map();
@@ -865,6 +870,7 @@ function buildCoupon(races, budget, unit) {
   for (const pick of picks) {
     pick.budgetForcedSingle = budgetForcedSingle && pick.count === 1 && !pick.singleEligible && pick.ranked.length > 1;
     pick.budgetNarrowed = pick.count < pick.ranked.length && columns / pick.count * (pick.count + 1) > maxColumns;
+    pick.excludedHorses = pick.ranked.slice(pick.count).flatMap((unit) => unit.members || [unit]);
   }
   const forcedSingleCount = picks.filter((pick) => pick.budgetForcedSingle).length;
   return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed), budgetForcedSingle: forcedSingleCount > 0, budgetForcedMultipleSingles: budgetForcedMultipleSingles && forcedSingleCount > 1, forcedSingleCount, finishedNos };
@@ -874,18 +880,23 @@ function formatCoupon(coupon, poolTitle, poolKey) {
   if (coupon.completedOnly) return `<article class="card coupon-detail"><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Koşular tamamlandı; kupon oluşturulmadı.</p></article>`;
 
   const warning = coupon.budgetForcedMultipleSingles
-    ? `<div class="alert">Bütçe nedeniyle ${coupon.forcedSingleCount} ayakta doğrulanmamış tek seçim var.</div>`
+    ? `<div class="alert">Bütçe nedeniyle ${coupon.forcedSingleCount} ayakta doğrulanmamış tek seçim kullanıldı.</div>`
     : coupon.budgetForcedSingle
-      ? `<div class="alert">Bütçe nedeniyle bir ayakta doğrulanmamış tek seçim var.</div>`
+      ? `<div class="alert">Bütçe nedeniyle bir ayakta doğrulanmamış tek seçim kullanıldı.</div>`
       : coupon.budgetNarrowed
         ? `<div class="alert">Bütçe bazı ayaklardaki at sayısını sınırladı.</div>`
         : "";
   const completed = coupon.finishedNos?.length ? `<p class="coupon-intro">Koşulan ayaklar: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}</p>` : "";
+  const excludedPicks = coupon.picks.filter((pick) => pick.excludedHorses.length);
+  const excludedNote = excludedPicks.length
+    ? `<p class="coupon-intro">Bütçe nedeniyle alınmayan seçimler: ${excludedPicks.map((pick) => `${pick.no}. koşu: ${pick.excludedHorses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)}`).join(", ")}`).join(" · ")}</p>`
+    : "";
+  const unusedBudget = Math.max(0, coupon.budget - coupon.total);
   const legs = coupon.picks.map((pick) => {
     const labels = pick.ranked.slice(0, pick.count).flatMap((unit) => unit.members || [unit]).map((horse) => `<span class="coupon-horse">${Number.isSafeInteger(horse.number) && horse.number > 0 ? `#${horse.number}` : "No belirtilmemiş"} ${escapeHtml(horse.name)}</span>`).join("");
     return `<li class="coupon-leg"><strong>${pick.no}. Koşu</strong><div class="coupon-horses">${labels}</div></li>`;
   }).join("");
-  return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Model kuponu</p></header>${warning}${completed}<ol class="coupon-legs">${legs}</ol><div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Üst bütçe ${coupon.budget.toFixed(2)} TL</span></div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">Kuponu kaydet</button></article>`;
+  return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Model kuponu · bütçe sınırı aşılmaz</p></header>${warning}${completed}<ol class="coupon-legs">${legs}</ol>${excludedNote}<div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Üst bütçe ${coupon.budget.toFixed(2)} TL · Kullanılmayan ${unusedBudget.toFixed(2)} TL</span></div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">Kuponu kaydet</button></article>`;
 }
 const POOL_KEYS = ["first", "second", "third", "fourth", "fifth", "sixth"];
 const POOL_ORDINALS = ["Birinci", "İkinci", "Üçüncü", "Dördüncü", "Beşinci", "Altıncı"];
