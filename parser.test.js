@@ -25,6 +25,22 @@ test('parses tabular race bulletins by their column headers', () => {
   assert.equal(race.horses[0].rank, 0);
 });
 
+test('uses a compact At header as the horse name instead of the AGF column', () => {
+  const bulletin = [
+    '4. Koşu 13:30 Handikap 17 2100 Kum',
+    'At No\tAt\tAGF\tGNY',
+    '8\tKARA AT\t%5\t3,20',
+    '7\tAK RÜZGAR\t%8\t4,10'
+  ].join('\n');
+
+  const [race] = parseRaces(bulletin);
+
+  assert.deepEqual(race.horses.map((horse) => ({ number: horse.horseNumber, name: horse.name, agf: horse.agf })), [
+    { number: 8, name: 'KARA AT', agf: 5 },
+    { number: 7, name: 'AK RÜZGAR', agf: 8 }
+  ]);
+});
+
 test('keeps the program horse number separate from the starting stall', () => {
   const bulletin = [
     '1. Koşu 13:30 Handikap 17 2100 Kum',

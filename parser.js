@@ -56,7 +56,7 @@
       const cells = splitCells(raw);
       if (!cells) continue;
       const normalizedHeaders = cells.map(fold);
-      const nameIndex = normalizedHeaders.findIndex((cell) => cell.includes('at ismi') || cell === 'at adi' || cell.includes('horse name') || cell === 'horse');
+      const nameIndex = normalizedHeaders.findIndex((cell) => cell.includes('at ismi') || cell === 'at adi' || cell === 'at' || cell.includes('horse name') || cell === 'horse' || cell === 'runner');
       if (nameIndex >= 0) {
         headers = normalizedHeaders;
         continue;
@@ -69,7 +69,7 @@
       let legacyNo = null;
       if (headers) {
         const indexOf = (fragment) => headers.findIndex((header) => header === fragment || header.includes(fragment));
-        const horseCellIndex = headers.findIndex((header) => header.includes('at ismi') || header === 'at adi' || header.includes('horse name') || header === 'horse');
+        const horseCellIndex = headers.findIndex((header) => header.includes('at ismi') || header === 'at adi' || header === 'at' || header.includes('horse name') || header === 'horse' || header === 'runner');
         rowName = cells[horseCellIndex] || '';
         const horseMatch = rowName.match(/\((\d{1,2})\)/) || rowName.match(/^\s*(\d{1,2})\s*[-–.)]\s*/);
         const column = (fragment) => {

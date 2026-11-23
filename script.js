@@ -785,7 +785,7 @@ function buildCombinedCoupon(races, budget, unit, mainCoupon, criterionCoupon) {
 }
 function formatCoupon(coupon, title, poolKey, options = {}) {
   const kind = options.kind || "main";
-  const optionTitle = kind === "combined" ? "Birleşik kupon" : kind === "criteria" ? "20 kriter kuponu" : "Ana sistem kuponu";
+  const optionTitle = kind === "combined" ? "Birleşik kupon" : kind === "criteria" ? "20 parametre kuponu" : "Ana sistem kuponu";
   if (coupon.error) return `<article class="card coupon-detail"><h3>${optionTitle}</h3><p class="coupon-intro">${escapeHtml(coupon.error)}</p></article>`;
   if (coupon.completedOnly) return `<article class="card coupon-detail"><h3>${optionTitle}</h3><p class="coupon-intro">Koşular tamamlandı; kupon oluşturulmadı.</p></article>`;
 
@@ -796,8 +796,8 @@ function formatCoupon(coupon, title, poolKey, options = {}) {
       : coupon.budgetNarrowed
         ? `<div class="alert">Bütçe bazı ayaklardaki at sayısını sınırladı.</div>`
         : "";
-  const intro = kind === "combined" ? "Ana model + 20 kriter"
-    : kind === "criteria" ? "20 kriter robotu"
+  const intro = kind === "combined" ? "Ana sistem + 20 parametre"
+    : kind === "criteria" ? "20 parametre robotu"
       : "Ana sistem";
   const completed = coupon.finishedNos?.length ? `<p class="coupon-intro">Koşulan ayaklar: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}</p>` : "";
   const legs = coupon.picks.map((pick) => {
@@ -805,8 +805,8 @@ function formatCoupon(coupon, title, poolKey, options = {}) {
     const labels = horses.map((horse) => `<span class="coupon-horse">#${horse.number} ${escapeHtml(horse.name)}</span>`).join("");
     return `<li class="coupon-leg"><strong>${pick.no}. Koşu</strong><div class="coupon-horses">${labels}</div></li>`;
   }).join("");
-  const saveLabel = kind === "combined" ? "Birleşik kuponu kaydet" : kind === "criteria" ? "20 kriter kuponunu kaydet" : "Ana sistem kuponunu kaydet";
-  return `<article class="card coupon-detail"><header><h3>${optionTitle}</h3><p class="coupon-intro">${intro}</p></header>${warning}${completed}<ol class="coupon-legs">${legs}</ol><div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Bütçe ${coupon.budget.toFixed(2)} TL</span></div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">${saveLabel}</button></article>`;
+  const saveLabel = kind === "combined" ? "Birleşik kuponu kaydet" : kind === "criteria" ? "20 parametre kuponunu kaydet" : "Ana sistem kuponunu kaydet";
+  return `<article class="card coupon-detail"><header><h3>${optionTitle}</h3><p class="coupon-intro">${intro}</p></header>${warning}${completed}<ol class="coupon-legs">${legs}</ol><div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Üst bütçe ${coupon.budget.toFixed(2)} TL</span></div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">${saveLabel}</button></article>`;
 }
 function couponChoiceSummary(coupon) {
   if (coupon.error) return "Bu bütçeyle oluşmadı";
@@ -817,7 +817,7 @@ function formatCouponChoices(poolTitle, poolKey, coupons) {
   const choices = [
     { id: "combined", label: "Birleşik", coupon: coupons.combined },
     { id: "main", label: "Ana sistem", coupon: coupons.main },
-    { id: "criteria", label: "20 kriter", coupon: coupons.criteria }
+    { id: "criteria", label: "20 parametre", coupon: coupons.criteria }
   ];
   const controls = choices.map((choice, index) => {
     const panelId = `coupon-panel-${poolKey}-${choice.id}`;
@@ -829,7 +829,7 @@ function formatCouponChoices(poolTitle, poolKey, coupons) {
     const content = formatCoupon(choice.coupon, poolTitle, couponKey, { kind: choice.id === "main" ? "main" : choice.id });
     return `<div class="coupon-option-panel" id="${panelId}" data-coupon-panel="${choice.id}" role="region" aria-label="${choice.label} kuponu"${index === 0 ? "" : " hidden"}>${content}</div>`;
   }).join("");
-  return `<section class="coupon-options"><header><h2>${escapeHtml(poolTitle)} · Kupon seçenekleri</h2><p class="sub">Üç seçeneği karşılaştır. Her kupon aynı bütçeyle ayrı hesaplanır; hepsini oynarsan tutarlar toplanır.</p></header><div class="coupon-selector" role="group" aria-label="${escapeHtml(poolTitle)} kupon seçimi">${controls}</div>${panels}<p class="coupon-options-footnote">Kuponlar tahmindir; kazanç garantisi yoktur.</p></section>`;
+  return `<section class="coupon-options"><header><h2>${escapeHtml(poolTitle)} · Kupon seçenekleri</h2><p class="sub">Birleşik, Ana sistem ve 20 parametre kuponları girilen bütçeye göre ayrı hesaplanır. Hepsini oynarsan tutarlar toplanır.</p></header><div class="coupon-selector" role="group" aria-label="${escapeHtml(poolTitle)} kupon seçimi">${controls}</div>${panels}<p class="coupon-options-footnote">Kuponlar tahmindir; kazanç garantisi yoktur.</p></section>`;
 }
 const POOL_KEYS = ["first", "second", "third", "fourth", "fifth", "sixth"];
 const POOL_ORDINALS = ["Birinci", "İkinci", "Üçüncü", "Dördüncü", "Beşinci", "Altıncı"];
