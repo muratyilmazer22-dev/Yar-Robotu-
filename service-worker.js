@@ -1,5 +1,5 @@
-const CACHE_NAME = "race-analysis-shell-v8";
-const APP_FILES = ["./", "./index.html", "./script.js", "./firebase-memory-loader.js", "./parser.js", "./scoring.js", "./manifest.webmanifest", "./horse-icon-192.png", "./horse-icon-512.png"];
+const CACHE_NAME = "race-analysis-shell-v9";
+const APP_FILES = ["./", "./index.html", "./script.js", "./firebase-memory-loader.js", "./parser.js", "./scoring.js", "./lib/coupon-learning.js", "./manifest.webmanifest", "./horse-icon-192.png", "./horse-icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_FILES)).then(() => self.skipWaiting()));
@@ -17,7 +17,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(fetch(request).catch(() => caches.match("./index.html")));
     return;
   }
-  if (["/script.js", "/parser.js", "/scoring.js"].includes(requestUrl.pathname)) {
+  if (["/script.js", "/parser.js", "/scoring.js", "/lib/coupon-learning.js"].includes(requestUrl.pathname)) {
     event.respondWith(fetch(request).then((response) => {
       if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
       return response;

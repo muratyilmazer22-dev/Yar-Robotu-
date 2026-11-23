@@ -1212,6 +1212,9 @@ function addManualCoupon(event) {
   $("manualCouponDate").value = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
   $("manualCouponPayout").value = "0";
 }
+function findSavedPrediction(date, city, raceNo) {
+  return state.predictions.find((prediction) => prediction.date === date && normalize(prediction.city || "") === normalize(city || "") && Number(prediction.no) === Number(raceNo));
+}
 function updateCouponResult(id, card) {
   const record = state.coupons.find((coupon) => coupon.id === id);
   const status = card.querySelector("[data-coupon-status]")?.value;
@@ -1236,9 +1239,30 @@ function updateCouponResult(id, card) {
   record.status = status;
   record.payout = status === "pending" ? null : payout;
   record.resolvedAt = status === "pending" ? null : new Date().toISOString();
+  let learnedLegs = 0;
+  let correctedLegs = 0;
+  for (const result of record.legResults) {
+    const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
+    const outcome = prediction && window.CouponLearning.outcomeFromPrediction(prediction, result.winnerNumber);
+    if (!outcome) continue;
+    const identity = window.CouponLearning.raceIdentity(outcome);
+    const existingIndex = state.outcomes.findIndex((item) => window.CouponLearning.raceIdentity(item) === identity);
+    if (existingIndex < 0) {
+      state.outcomes.push(outcome);
+      learnedLegs += 1;
+    } else if (Number(state.outcomes[existingIndex].winner) !== Number(outcome.winner)) {
+      state.outcomes[existingIndex] = outcome;
+      learnedLegs += 1;
+      correctedLegs += 1;
+    }
+  }
+  if (learnedLegs) trainModel();
   saveState();
   renderCouponHistory();
-  showMessage($("ogrenmeLogAlani"), "Kupon ve ayak sonuçları kaydedildi. Bu kayıt model ağırlıklarını değiştirmez.", "success");
+  const learningNote = learnedLegs
+    ? ` ${learnedLegs} ayak tam tahmin kaydıyla eşleşip öğrenme hafızasına alındı${correctedLegs ? `; ${correctedLegs} eski sonuç düzeltildi` : ""}. ${state.trainingReport?.updated ? "Ayrılmış doğrulama iyileşti; güncellenmiş ağırlıklar etkin." : "Ağırlıklar yalnızca yeterli veri ve ileri tarihli doğrulama iyileşmesiyle güncellenir."}`
+    : " Eşleşen yeni tam tahmin bulunmadığından model eğitimi için yeni yarış eklenmedi; kupon/ödeme kaydı saklandı.";
+  showMessage($("ogrenmeLogAlani"), `Kupon ve ayak sonuçları kaydedildi.${learningNote}`, "success");
 }
 function renderCouponHistory() {
   const target = $("couponHistoryArea");
@@ -1256,6 +1280,11 @@ function renderCouponHistory() {
   const baselineCost = baselineResolved.reduce((sum, record) => sum + Number(record.cost || 0), 0);
   const baselineNet = baselineResolved.reduce((sum, record) => sum + Number(record.payout || 0) - Number(record.cost || 0), 0);
   const baselineRoi = baselineCost > 0 ? (baselineNet / baselineCost) * 100 : null;
+  const legDiagnostics = records.flatMap((record) => (record.legResults || []).map((result) => {
+    const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
+    return window.CouponLearning.analyzePredictionResult(prediction, result.winnerNumber, record.legs?.find((leg) => Number(leg.raceNo) === Number(result.raceNo))?.horses?.map((horse) => horse.number) || []);
+  }));
+  const matchedLegDiagnostics = legDiagnostics.filter((item) => item.matched);
   const money = (value) => `${Number(value).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`;
   const metric = (label, value) => {
     const item = document.createElement("div");
@@ -1276,7 +1305,9 @@ function renderCouponHistory() {
     metric("Devreden kupon", carryovers.length.toLocaleString("tr-TR")),
     metric("Ana model kuponu / sonuçlanan", `${baselineRecords.length} / ${baselineResolved.length}`),
     metric("Ana model net ödeme farkı", baselineResolved.length ? money(baselineNet) : "—"),
-    metric("Ana model net getiri / maliyet", baselineRoi === null ? "—" : `${baselineRoi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`)
+    metric("Ana model net getiri / maliyet", baselineRoi === null ? "—" : `${baselineRoi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
+    metric("Tahminle eşleşen ayak sonucu", `${matchedLegDiagnostics.length} / ${legDiagnostics.length}`),
+    metric("Model ilk 3 içinde · kupon isabeti", `${matchedLegDiagnostics.filter((item) => item.top3Hit).length} / ${matchedLegDiagnostics.length}`)
   );
   if (!records.length) {
     target.innerHTML = '<p class="muted">Henüz kupon kaydı yok. Analizden üretilen kuponu kaydedin veya harici kuponun sonucunu ekleyin.</p>';
@@ -1293,10 +1324,18 @@ function renderCouponHistory() {
     const legs = Array.isArray(record.legs) && record.legs.length ? `<p>Seçimler: ${record.legs.map((leg) => `${leg.raceNo}. ayak #${leg.horses.map((horse) => horse.number).join(", #")}`).join(" · ")}</p>` : "";
     const legEvaluation = window.CouponResults.evaluateCouponLegs(record.legs, record.legResults);
     const legSummary = legEvaluation.total ? `<p class="coupon-leg-summary">${legEvaluation.completed === legEvaluation.total ? `${legEvaluation.hits}/${legEvaluation.total} ayak tuttu` : `${legEvaluation.hits} isabet · ${legEvaluation.completed}/${legEvaluation.total} ayak sonucu girildi`}${legEvaluation.missedRaceNos.length ? ` · kaçan ayak: ${legEvaluation.missedRaceNos.join(", ")}` : ""}</p>` : "";
+    const legLearningReport = (record.legResults || []).map((result) => {
+      const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
+      const selected = record.legs?.find((leg) => Number(leg.raceNo) === Number(result.raceNo))?.horses?.map((horse) => horse.number) || [];
+      const insight = window.CouponLearning.analyzePredictionResult(prediction, result.winnerNumber, selected);
+      const categoryLabel = { "kupon-isabeti": "kupon isabeti", "model-top3-kupon-dışı": "model ilk 3\u2019te, kupona alınmamış", "model-sıralaması-geride": "model sıralaması geride", "tahmin-eşleşmedi": "kayıtlı tahmin eşleşmedi" }[insight.category];
+      const context = insight.matched ? ` · ${escapeHtml(insight.surface)} / ${escapeHtml(insight.type)}${insight.distance ? ` / ${insight.distance} m` : ""}` : "";
+      return `<p class="coupon-leg-learning">${Number(result.raceNo)}. ayak · kazanan #${Number(result.winnerNumber)} · ${insight.winnerRank ? `model sırası #${insight.winnerRank}` : "sıra yok"} · ${categoryLabel}${context}</p>`;
+    }).join("");
     const existingLegResults = new Map((record.legResults || []).map((result) => [Number(result.raceNo), result.winnerNumber]));
     const legResultEditor = legEvaluation.total ? `<fieldset class="leg-result-grid"><legend class="sr-only">Her ayaktaki gerçek kazanan at numarası</legend>${record.legs.map((leg) => `<label>${leg.raceNo}. ayak kazananı<input data-leg-result="${Number(leg.raceNo)}" type="number" min="1" step="1" value="${existingLegResults.get(Number(leg.raceNo)) ?? ""}" aria-label="${Number(leg.raceNo)}. ayak kazanan at numarası"></label>`).join("")}</fieldset>` : "";
     const finished = Array.isArray(record.finishedNos) && record.finishedNos.length ? `<p>Sonucu alınmış ayaklar: ${record.finishedNos.join(", ")}. Kupon anlık olarak açık ayaklar üzerinden oluşturulmuş; önceki kuponun geriye dönük kopyası değildir.</p>` : "";
-    return `<article class="coupon-record" data-coupon-card="${escapeHtml(record.id)}"><h3>${pool} · ${date}${venue}</h3><p>${escapeHtml(record.source || "Kupon")} · ${ticket}</p>${legs}${legSummary}${legResultEditor}${finished}<p>Durum: ${escapeHtml(COUPON_STATUS_LABELS[record.status] || "Sonuç bekleniyor")} · Ödeme: ${paid}</p>${netText}<div class="controls"><label class="control"><small>Sonuç durumu</small><select data-coupon-status aria-label="${pool} ${date} sonuç durumu">${Object.entries(COUPON_STATUS_LABELS).map(([value, label]) => `<option value="${value}"${record.status === value ? " selected" : ""}>${label}</option>`).join("")}</select></label><label class="control"><small>Alınan ödeme (TL)</small><input data-coupon-payout type="number" min="0" step="0.01" value="${record.payout ?? ""}" placeholder="Sonuç bekleniyorsa boş bırakın" aria-label="${pool} ${date} alınan ödeme"></label><button class="btn secondary" type="button" data-update-coupon="${escapeHtml(record.id)}">Sonucu kaydet</button></div></article>`;
+    return `<article class="coupon-record" data-coupon-card="${escapeHtml(record.id)}"><h3>${pool} · ${date}${venue}</h3><p>${escapeHtml(record.source || "Kupon")} · ${ticket}</p>${legs}${legSummary}${legLearningReport}${legResultEditor}${finished}<p>Durum: ${escapeHtml(COUPON_STATUS_LABELS[record.status] || "Sonuç bekleniyor")} · Ödeme: ${paid}</p>${netText}<div class="controls"><label class="control"><small>Sonuç durumu</small><select data-coupon-status aria-label="${pool} ${date} sonuç durumu">${Object.entries(COUPON_STATUS_LABELS).map(([value, label]) => `<option value="${value}"${record.status === value ? " selected" : ""}>${label}</option>`).join("")}</select></label><label class="control"><small>Alınan ödeme (TL)</small><input data-coupon-payout type="number" min="0" step="0.01" value="${record.payout ?? ""}" placeholder="Sonuç bekleniyorsa boş bırakın" aria-label="${pool} ${date} alınan ödeme"></label><button class="btn secondary" type="button" data-update-coupon="${escapeHtml(record.id)}">Sonucu kaydet</button></div></article>`;
   }).join("");
 }
 function exportBackup() {
