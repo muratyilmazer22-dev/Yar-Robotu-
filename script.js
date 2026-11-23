@@ -363,14 +363,27 @@ const $ = (id) => document.getElementById(id);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 function persistStateLocally() {
   if (stateDb) {
-    try {
-      const transaction = stateDb.transaction("app", "readwrite");
-      transaction.objectStore("app").put({ id: "current", value: JSON.parse(JSON.stringify(state)) });
-      transaction.onabort = transaction.onerror = () => showMessage($("ogrenmeLogAlani"), "Tarayıcı hafızasına yazılamadı. Yedeği indirip saklayın.", "error");
-    } catch { showMessage($("ogrenmeLogAlani"), "Tarayıcı hafızasına erişilemiyor. Yedeği indirip saklayın.", "error"); }
-  } else {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-    catch { showMessage($("ogrenmeLogAlani"), "Tarayıcı depolaması dolu veya kullanılamıyor. Yedeği indirip saklayın.", "error"); }
+    return new Promise((resolve) => {
+      try {
+        const transaction = stateDb.transaction("app", "readwrite");
+        transaction.objectStore("app").put({ id: "current", value: JSON.parse(JSON.stringify(state)) });
+        transaction.oncomplete = () => resolve(true);
+        transaction.onabort = transaction.onerror = () => {
+          showMessage($("ogrenmeLogAlani"), "Tarayıcı hafızasına yazılamadı. Yedeği indirip saklayın.", "error");
+          resolve(false);
+        };
+      } catch {
+        showMessage($("ogrenmeLogAlani"), "Tarayıcı hafızasına erişilemiyor. Yedeği indirip saklayın.", "error");
+        resolve(false);
+      }
+    });
+  }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    return Promise.resolve(true);
+  } catch {
+    showMessage($("ogrenmeLogAlani"), "Tarayıcı depolaması dolu veya kullanılamıyor. Yedeği indirip saklayın.", "error");
+    return Promise.resolve(false);
   }
 }
 function setFirebaseStatus(message, isError = false) {
@@ -407,24 +420,32 @@ function mergeFirebaseMemory(localState, remoteState) {
   bulletins: mergeMemoryRecords(remoteState.bulletins, localState.bulletins, (item) => item.id || JSON.stringify(item))
   });
 }
-function queueFirebaseMemorySync() {
-  if (!firebaseAccount || !firebaseSyncReady || !firebaseSdk) return;
+function queueFirebaseMemorySync(immediate = false) {
+  if (!firebaseAccount || !firebaseSyncReady || !firebaseSdk) return Promise.resolve(null);
   clearTimeout(firebaseSaveTimer);
   const account = firebaseAccount;
   const snapshot = JSON.parse(JSON.stringify(state));
-  firebaseSaveTimer = window.setTimeout(() => {
+  let resolveSync;
+  const completion = new Promise((resolve) => { resolveSync = resolve; });
+  const sync = () => {
     firebaseSyncChain = firebaseSyncChain.then(async () => {
-      if (!firebaseSyncReady || firebaseAccount?.uid !== account.uid || snapshot.localUpdatedAt !== state.localUpdatedAt) return;
+      if (!firebaseSyncReady || firebaseAccount?.uid !== account.uid || snapshot.localUpdatedAt !== state.localUpdatedAt) return false;
       const cloudSnapshot = await prepareMemoryImagesForFirebase(snapshot, account);
-      if (firebaseAccount?.uid !== account.uid || snapshot.localUpdatedAt !== state.localUpdatedAt) return;
+      if (firebaseAccount?.uid !== account.uid || snapshot.localUpdatedAt !== state.localUpdatedAt) return false;
       state = { ...state, bulletins: cloudSnapshot.bulletins, profiles: { ...DEFAULT_PROFILES } };
-      persistStateLocally();
+      await persistStateLocally();
       await firebaseSdk.saveMemory(account, cloudSnapshot);
       setFirebaseStatus(`Hafıza Firebase ve Blob hesabınızla eşitlendi: ${account.email || account.uid}`);
+      return true;
     }).catch(() => {
       setFirebaseStatus("Firebase eşitlemesi başarısız. Yerel kayıtlar korunuyor; Firestore kurallarını ve bağlantıyı kontrol edin.", true);
+      return false;
     });
-  }, 900);
+    firebaseSyncChain.then(resolveSync);
+  };
+  if (immediate) sync();
+  else firebaseSaveTimer = window.setTimeout(sync, 900);
+  return completion;
 }
 async function initializeFirebaseMemory() {
   const api = await window.RaceRobotFirebaseReady;
@@ -487,6 +508,7 @@ async function initializeFirebaseMemory() {
       state.firebaseOwnerUid = user.uid;
       state.localUpdatedAt = new Date().toISOString();
       if (state.predictions?.length) lastAnalysis = state.predictions;
+      restoreLatestPredictionTarget();
       persistStateLocally();
       updateMemory();
       firebaseSyncReady = true;
@@ -505,9 +527,10 @@ async function initializeFirebaseMemory() {
 function saveState() {
   singleEvidenceCache = null;
   state.localUpdatedAt = new Date().toISOString();
-  persistStateLocally();
+  const localSave = persistStateLocally();
   updateMemory();
   queueFirebaseMemorySync();
+  return localSave;
 }
 function imageForMemory(image) {
   if (!image) return image;
@@ -571,6 +594,14 @@ async function applySavedResultDraftImage() {
   } catch (error) {
     setResultImageStatus(error.message || "Kaydedilmiş fotoğraf yüklenemedi.", true);
   }
+}
+function restoreLatestPredictionTarget() {
+  const latestPrediction = state.predictions.at(-1);
+  if (!latestPrediction?.date || state.bulletins.find((item) => item.id === "draft-result")?.text) return;
+  const resultDraft = state.bulletins.find((item) => item.id === "draft-result");
+  if (resultDraft?.date && resultDraft.date >= latestPrediction.date) return;
+  $("resultsDateInput").value = latestPrediction.date;
+  $("resultsCityInput").value = latestPrediction.city || "";
 }
 function saveBulletinDraft(kind, details = {}) {
   const id = `draft-${kind}`;
@@ -881,9 +912,14 @@ async function analyze() {
   $("kuponAlani").innerHTML = "";
   $("kosuSonucAlani").innerHTML = "";
   if (!input) { showMessage(warning, "Önce TJK bülten metnini yapıştırın.", "error"); return; }
-  archiveBulletin("program", { text: input, date: $("couponDateInput")?.value || new Date().toISOString().slice(0, 10), city: $("couponCityInput")?.value.trim().slice(0, 80) || "" });
+  const archivedBulletin = archiveBulletin("program", { text: input, date: $("couponDateInput")?.value || new Date().toISOString().slice(0, 10), city: $("couponCityInput")?.value.trim().slice(0, 80) || "" });
   const parsed = parseRaces(input);
-  if (!parsed.races.length) { showMessage(warning, parsed.warnings.join(" "), "error"); return; }
+  if (!parsed.races.length) {
+    state.bulletins = state.bulletins.map((item) => item.id === archivedBulletin.id ? { ...item, analysisStatus: "parse-failed", analyzedAt: new Date().toISOString() } : item);
+    const saved = await saveState();
+    showMessage(warning, `${parsed.warnings.join(" ")}${saved ? " Bülten metni hafızaya kaydedildi; tahmin üretilemedi." : " Bülten hafızasına yazma başarısız oldu; yedeği indirin."}`, "error");
+    return;
+  }
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
   const couponCity = $("couponCityInput")?.value.trim().slice(0, 80) || "";
   const externalSignals = window.TipSignals.parseAnalystSignals($("analystSignalInput")?.value || "");
@@ -903,17 +939,35 @@ async function analyze() {
     horses: results[index].map((horse) => ({ number: horse.number, name: horse.name, couplingGroup: horse.couplingGroup || "", score: horse.score, modelShare: horse.modelShare, features: horse.features, performanceScore: horse.performanceScore, marketScore: horse.marketScore, coverage: horse.coverage, independentCoverage: horse.independentCoverage, signal: horse.signal }))
   }));
   state.predictions = mergePredictionHistory(state.predictions, lastAnalysis);
+  state.bulletins = state.bulletins.map((item) => item.id === archivedBulletin.id ? {
+    ...item,
+    analysisStatus: "complete",
+    analyzedAt: new Date().toISOString(),
+    analyzedRaceCount: parsed.races.length,
+    predictionRaceCount: lastAnalysis.length
+  } : item);
   $("resultsDateInput").value = couponDate;
   $("resultsCityInput").value = couponCity;
-  saveState();
+  saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: couponDate, city: couponCity });
+  clearTimeout(bulletinSaveTimer);
+  const locallySaved = await saveState();
+  const cloudSaved = locallySaved && firebaseAccount && firebaseSyncReady ? await queueFirebaseMemorySync(true) : null;
   $("analysisEmptyState")?.remove();
   renderAnalysis(parsed.races);
   const completedCount = parsed.races.filter((race) => race.finished).length;
+  const memoryStatus = !locallySaved
+    ? "HATA: Analiz üretildi ancak tarayıcı hafızasına yazma doğrulanamadı; yedeği hemen indirin."
+    : firebaseAccount && firebaseSyncReady
+      ? cloudSaved
+        ? "Bülten ve tahminler tarayıcıya ve Firebase hesabınıza kalıcı olarak kaydedildi."
+        : "Bülten ve tahminler bu tarayıcıya kaydedildi; Firebase eşitlemesi başarısız, hesap yedeği doğrulanamadı."
+      : "Bülten ve tahminler bu tarayıcının kalıcı hafızasına kaydedildi. Cihazlar arası yedek için Hesap bölümünde oturum açın.";
   const statusMessage = openRaces.length
-    ? `${openRaces.length} açık koşu ortak modelle analiz edildi ve tahminler tarih/hipodrom bilgisiyle kişisel hafızaya kaydedildi; ${completedCount} koşulmuş ayak tahmin dışında bırakıldı.`
-    : `${completedCount} koşunun tamamı koşulmuş; tahmin üretilmedi.`;
-  if (parsed.warnings.length) showMessage(warning, `${statusMessage} ${parsed.warnings.join(" ")}`, "");
-  else showMessage(warning, `${statusMessage} Açık ayaklarda AGF/oran piyasa sinyaliyle HP/form/pedigri bağımsız performans sinyalleri ayrıştırılır.`, "success");
+    ? `${openRaces.length} açık koşu analiz edildi; ${completedCount} koşulmuş ayak tahmin dışında bırakıldı. ${memoryStatus}`
+    : `${completedCount} koşunun tamamı koşulmuş; tahmin üretilmedi. ${memoryStatus}`;
+  const persistenceFailed = !locallySaved || Boolean(firebaseAccount && firebaseSyncReady && !cloudSaved);
+  if (parsed.warnings.length) showMessage(warning, `${statusMessage} ${parsed.warnings.join(" ")}`, persistenceFailed ? "error" : "");
+  else showMessage(warning, `${statusMessage} Açık ayaklarda AGF/oran piyasa sinyaliyle HP/form/pedigri bağımsız performans sinyalleri ayrıştırılır.`, persistenceFailed ? "error" : "success");
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
@@ -1344,7 +1398,12 @@ function compareResults() {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(resultDate) || Number.isNaN(Date.parse(`${resultDate}T00:00:00Z`)) || new Date(`${resultDate}T00:00:00Z`).toISOString().slice(0, 10) !== resultDate) { showMessage(target, "Sonuç bülteninin geçerli tarihini seçin.", "error"); return; }
   if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) { showMessage(target, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu kaldırıp yeniden deneyin.", "error"); return; }
   const datePredictions = state.predictions.filter((item) => item.date === resultDate);
-  if (!datePredictions.length) { showMessage(target, `${resultDate} tarihi için kaydedilmiş tahmin bulunamadı. Önce o günün bültenini analiz edin.`, "error"); return; }
+  if (!datePredictions.length) {
+    const savedDates = [...new Set(state.predictions.map((item) => item.date).filter(Boolean))].sort().reverse().slice(0, 5);
+    const dateHint = savedDates.length ? ` Hafızadaki son tahmin tarihleri: ${savedDates.join(", ")}.` : " Bu tarayıcı hafızasında henüz tahmin kaydı yok.";
+    showMessage(target, `${resultDate} tarihi için kaydedilmiş tahmin bulunamadı. Sonuç tarihiyle bülten analiz tarihi aynı olmalı; ${resultDate} gününü analiz edin.${dateHint}`, "error");
+    return;
+  }
   const matchingCities = [...new Set(datePredictions.map((item) => normalize(item.city || "")))];
   let resultCity = normalize($("resultsCityInput").value.trim());
   if (!resultCity && matchingCities.length > 1) { showMessage(target, "Aynı tarihte birden fazla hipodromun tahmini kayıtlı. Eşleştirmek için hipodrom adını girin.", "error"); return; }
@@ -1701,6 +1760,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (savedResultDraft.city) $("resultsCityInput").value = savedResultDraft.city;
     applySavedResultDraftImage();
   }
+  restoreLatestPredictionTarget();
   $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("couponCityInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
