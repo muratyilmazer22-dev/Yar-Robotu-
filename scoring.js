@@ -139,113 +139,38 @@
     return ranked.map((horse, index) => ({ ...horse, modelShare: shares[index] })).sort((a, b) => b.modelShare - a.modelShare);
   }
 
-  const AHP_CRITERIA = [
-    { id: "son6YarisFormu", label: "Son 6 yarış formu", feature: "form" },
-    { id: "pistYatkinligi", label: "Pist yatkınlığı", feature: null },
-    { id: "mesafeYatkinligi", label: "Mesafe yatkınlığı", feature: null },
-    { id: "kiloAvantaji", label: "Sıklet / kilo avantajı", feature: "weight" },
-    { id: "kiloDegisimi", label: "Kilo değişimi", feature: null },
-    { id: "orijinDna", label: "Orijin ve pedigri DNA", feature: "pedigree" },
-    { id: "galopIdman", label: "Galop ve idman", feature: null },
-    { id: "ilkKezKosanPotansiyeli", label: "İlk kez koşan tay potansiyeli", feature: null },
-    { id: "jokeyIstatistigi", label: "Jokey istatistikleri", feature: null },
-    { id: "antrenorIstatistigi", label: "Antrenör istatistikleri", feature: null },
-    { id: "jokeyAntrenorSinerjisi", label: "Jokey–antrenör sinerjisi", feature: null },
-    { id: "handikapPuani", label: "Handikap puanı ve sınıf gücü", feature: "rating" },
-    { id: "tempoUyumu", label: "Tempo ve koşu stili uyumu", feature: null },
-    { id: "ahirNiyeti", label: "Ahır niyeti", feature: null },
-    { id: "akrabalikIliskisi", label: "Akraba jokey / eküri ilişkisi", feature: null },
-    { id: "takiDegisikligi", label: "Takı değişikliği", feature: null },
-    { id: "kulvarAvantaji", label: "Kulvar ve pist eğilimi", feature: null },
-    { id: "agfPiyasaDengesi", label: "AGF ve piyasa dengesi", feature: "market" },
-    { id: "sonDuzlukSprint", label: "Son düzlük sprinti ve derece", feature: null },
-    { id: "dinlenmeTazelik", label: "Dinlenme ve tazelik", feature: null }
-  ];
-
-  function analyzeAHPShadow(race, options = {}) {
-    const baseline = analyzeEnsemble(race, { profileScore: options.profileScore });
-    const validWeights = (race?.horses || []).filter((horse) => !horse.scratched).map((horse) => Number(horse.weight)).filter((weight) => Number.isFinite(weight) && weight > 0);
-    const minimumWeight = validWeights.length ? Math.min(...validWeights) : null;
-    const maximumWeight = validWeights.length ? Math.max(...validWeights) : null;
-    const weightRange = minimumWeight === null ? 0 : maximumWeight - minimumWeight;
-    const criteria = AHP_CRITERIA.map((criterion) => ({ ...criterion, available: false }));
-    const scored = baseline.map((horse) => {
-      const values = criteria.map((criterion) => {
-        if (criterion.feature === "weight") {
-          const weight = Number(horse.weight);
-          return Number.isFinite(weight) && weight > 0
-            ? weightRange === 0 ? 50 : 100 - ((weight - minimumWeight) / weightRange) * 100
-            : null;
-        }
-        return criterion.feature ? horse.features?.[criterion.feature] ?? null : null;
-      });
-      values.forEach((value, index) => {
-        if (Number.isFinite(value)) criteria[index].available = true;
-      });
-      const available = values.filter(Number.isFinite);
-      const score = available.length ? available.reduce((sum, value) => sum + value, 0) / available.length : null;
-      return {
-        ...horse,
-        score: score === null ? null : Math.round(score * 10) / 10,
-        modelShare: 0,
-        criteriaCoverage: Math.round((available.length / AHP_CRITERIA.length) * 100),
-        availableCriteria: available.length
-      };
-    });
-    const ranked = scored.filter((horse) => horse.score !== null).sort((a, b) => b.score - a.score || Number(a.number) - Number(b.number));
-    if (ranked.length) {
-      const maximum = ranked[0].score / 12.5;
-      const shares = ranked.map((horse) => Math.exp(horse.score / 12.5 - maximum));
-      const total = shares.reduce((sum, value) => sum + value, 0) || 1;
-      ranked.forEach((horse, index) => { horse.modelShare = shares[index] / total; });
-    }
-    return {
-      robotName: "20 Kriter Deterministik Robot",
-      robotType: "Gölge deney · ana kupondan bağımsız",
-      ranked,
-      criteria: criteria.map(({ id, label, available }) => ({ id, label, available })),
-      availableCriteria: criteria.filter((criterion) => criterion.available).length,
-      totalCriteria: AHP_CRITERIA.length,
-      weighting: "Eşit ağırlık; yalnızca at için verisi bulunan kriterler arasında normalize edilir."
-    };
-  }
-
   function analyzeEnsemble(race, options = {}) {
     const contextKeys = raceContextKeys(race);
     const contextualWeights = contextKeys.map((key) => options.contextWeights?.[key]).find(Boolean) || {};
     const adaptiveWeights = { ...BASE_WEIGHTS, ...(options.modelWeights || {}), ...contextualWeights };
     const adaptiveWeight = Math.max(1, Number(options.adaptiveWeight) || 1);
     const rankings = ROBOT_STRATEGIES.map((robot) => ({
-      name: robot.name,
       weight: robot.weights ? 1 : adaptiveWeight,
       ranked: scoreRaceWithWeights(race, robot.weights ? { ...BASE_WEIGHTS, ...robot.weights } : adaptiveWeights, options.profileScore)
     }));
     const totalRankWeight = rankings.reduce((sum, robot) => sum + robot.weight, 0);
     const stats = new Map();
-    for (const { name, ranked, weight } of rankings) {
+    for (const { ranked, weight } of rankings) {
       ranked.forEach((horse, index) => {
         const horseKey = Number.isSafeInteger(horse.number) && horse.number > 0
           ? `number:${horse.number}`
           : `name:${normalizeName(horse.name)}`;
-        const item = stats.get(horseKey) || { horse, rankTotal: 0, scoreTotal: 0, shareTotal: 0, topThreeCount: 0, firstChoiceCount: 0, firstChoiceRobots: [] };
+        const item = stats.get(horseKey) || { horse, rankTotal: 0, scoreTotal: 0, shareTotal: 0, firstChoiceCount: 0 };
         item.rankTotal += (index + 1) * weight;
         item.scoreTotal += horse.score * weight;
         item.shareTotal += horse.modelShare * weight;
-        if (index < 3) item.topThreeCount += 1;
-        if (index === 0) {
-          item.firstChoiceCount += 1;
-          item.firstChoiceRobots.push(name);
-        }
+        if (index === 0) item.firstChoiceCount += 1;
+
         stats.set(horseKey, item);
       });
     }
     const fieldSize = Math.max(1, stats.size);
-    return [...stats.values()].map(({ horse, rankTotal, scoreTotal, shareTotal, topThreeCount, firstChoiceCount, firstChoiceRobots }) => {
+    return [...stats.values()].map(({ horse, rankTotal, scoreTotal, shareTotal, firstChoiceCount }) => {
       const averageRank = rankTotal / totalRankWeight;
       const consensusScore = (fieldSize === 1 ? 100 : (fieldSize - averageRank) / (fieldSize - 1) * 100) * 0.8 + scoreTotal / totalRankWeight * 0.2;
-      return { ...horse, score: Math.round(consensusScore * 10) / 10, averageRank: Math.round(averageRank * 100) / 100, modelShare: shareTotal / totalRankWeight, robotTopThreeCount: topThreeCount, robotFirstChoiceCount: firstChoiceCount, robotFirstChoices: firstChoiceRobots };
+      return { ...horse, score: Math.round(consensusScore * 10) / 10, averageRank: Math.round(averageRank * 100) / 100, modelShare: shareTotal / totalRankWeight, robotFirstChoiceCount: firstChoiceCount };
     }).sort((a, b) => b.score - a.score || b.modelShare - a.modelShare || Number(a.number) - Number(b.number));
   }
 
-  return { DEFAULT_DNA, BASE_WEIGHTS, ROBOT_STRATEGIES, AHP_CRITERIA, normalizeName, distanceBand, raceContextKeys, softmaxScores, analyzeEnsemble, analyzeAHPShadow };
+  return { DEFAULT_DNA, BASE_WEIGHTS, normalizeName, distanceBand, raceContextKeys, softmaxScores, analyzeEnsemble };
 });
