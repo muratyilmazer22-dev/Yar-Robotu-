@@ -1140,6 +1140,20 @@ function archiveRowToOutcome(row) {
     at: `${String(row.race_date || "").slice(0, 10)}T12:00:00.000Z`
   };
 }
+function applyVerifiedSharedModel(model) {
+  const sharedWeights = model?.weights;
+  if (!isVerifiedSharedModel(model) || !sharedWeights) return;
+  const sharedContexts = model.contextWeights && typeof model.contextWeights === "object" && !Array.isArray(model.contextWeights)
+    ? Object.fromEntries(Object.entries(model.contextWeights).filter(([, weights]) => hasCompleteModelWeights(weights)))
+    : {};
+  if (JSON.stringify(state.modelWeights) === JSON.stringify(sharedWeights)
+    && JSON.stringify(state.contextWeights) === JSON.stringify(sharedContexts)) return;
+  state.modelWeights = { ...sharedWeights };
+  state.lastGoodModelWeights = { ...sharedWeights };
+  state.contextWeights = sharedContexts;
+  scoreCache = new WeakMap();
+  saveState();
+}
 async function refreshRemoteMemory() {
   const target = $("cloudMemoryArea");
   if (!target) return;
@@ -1148,6 +1162,7 @@ async function refreshRemoteMemory() {
     const memory = await response.json();
     if (!response.ok) throw new Error(memory.error || "Neon hafızası alınamadı.");
     sharedAutomaticModel = memory.automaticModel && typeof memory.automaticModel === "object" ? memory.automaticModel : null;
+    applyVerifiedSharedModel(sharedAutomaticModel);
     renderTrainingReport();
     const automated = sharedAutomaticModel;
     const automatedStatus = automated?.report?.updated
@@ -1165,24 +1180,19 @@ async function refreshRemoteMemory() {
     return null;
   }
 }
+let archiveSyncInProgress = false;
 async function syncHistoricalArchive() {
+  if (archiveSyncInProgress) return;
+  archiveSyncInProgress = true;
   const status = $("archiveStatus");
-  if (status) status.textContent = "TJK geçmiş arşivi kontrol ediliyor…";
-  const remoteMemory = await refreshRemoteMemory();
-  const sharedModel = remoteMemory?.automaticModel;
-  const sharedWeights = sharedModel?.weights;
-  if (isVerifiedSharedModel(sharedModel) && sharedWeights) {
-    state.modelWeights = { ...sharedWeights };
-    state.lastGoodModelWeights = { ...sharedWeights };
-    const sharedContexts = sharedModel.contextWeights && typeof sharedModel.contextWeights === "object" && !Array.isArray(sharedModel.contextWeights)
-      ? Object.fromEntries(Object.entries(sharedModel.contextWeights).filter(([, weights]) => hasCompleteModelWeights(weights)))
-      : {};
-    state.contextWeights = sharedContexts;
-    scoreCache = new WeakMap();
-    saveState();
-    renderTrainingReport();
+  const refreshButton = $("refreshArchiveBtn");
+  if (refreshButton) {
+    refreshButton.disabled = true;
+    refreshButton.textContent = "Eşitleniyor…";
   }
+  if (status) status.textContent = "TJK geçmiş arşivi kontrol ediliyor…";
   try {
+    await refreshRemoteMemory();
     const archive = [];
     const pageSize = 5000;
     for (let offset = 0; offset < 100000; offset += pageSize) {
@@ -1202,24 +1212,36 @@ async function syncHistoricalArchive() {
     let freshCount = 0;
     let correctedCount = 0;
     let refreshedClassHistoryCount = 0;
+    const mergedOutcomes = [...state.outcomes];
+    const outcomeIndexes = new Map();
+    mergedOutcomes.forEach((outcome, index) => {
+      const key = outcomeKey(outcome);
+      if (!outcomeIndexes.has(key)) outcomeIndexes.set(key, index);
+    });
     for (const item of converted) {
-      const existingIndex = state.outcomes.findIndex((outcome) => outcomeKey(outcome) === outcomeKey(item));
-      const existing = existingIndex >= 0 ? state.outcomes[existingIndex] : null;
+      const key = outcomeKey(item);
+      const existingIndex = outcomeIndexes.get(key);
+      if (existingIndex === undefined) {
+        outcomeIndexes.set(key, mergedOutcomes.length);
+        mergedOutcomes.push(item);
+        freshCount += 1;
+        continue;
+      }
+      const existing = mergedOutcomes[existingIndex];
       const existingHorses = new Map((existing?.horses || []).map((horse) => [Number(horse.number), horse]));
       const learnedSignalsChanged = existing?.sourceKey?.startsWith("tjk:") && item.horses.some((horse) => {
         const previousFeatures = existingHorses.get(Number(horse.number))?.features || {};
         return ["classHistory", "groupFit", "pedigree"].some((key) => Number.isFinite(horse.features?.[key]) && previousFeatures[key] !== horse.features[key]);
       });
       if (learnedSignalsChanged) {
-        state.outcomes[existingIndex] = item;
+        mergedOutcomes[existingIndex] = item;
         refreshedClassHistoryCount += 1;
-        continue;
+      } else if (Number(existing.winner) !== Number(item.winner)) {
+        mergedOutcomes[existingIndex] = item;
+        correctedCount += 1;
       }
-      const merged = window.RaceLearningEvaluation.mergeOutcome(state.outcomes, item);
-      state.outcomes = merged.outcomes;
-      freshCount += Number(merged.added);
-      correctedCount += Number(merged.corrected);
     }
+    state.outcomes = mergedOutcomes;
     if (freshCount || correctedCount || refreshedClassHistoryCount) trainModel();
     state.archiveRaceCount = converted.length;
     state.archiveLatestDate = archive.map((row) => String(row.race_date || "").slice(0, 10)).sort().at(-1) || "";
@@ -1229,6 +1251,12 @@ async function syncHistoricalArchive() {
     if (status) status.textContent = `Neon arşivinden ${converted.length.toLocaleString("tr-TR")} sonuçlu koşu alındı; ${freshCount.toLocaleString("tr-TR")} yeni koşu eklendi; ${correctedCount.toLocaleString("tr-TR")} eski sonuç düzeltildi. Son arşiv tarihi: ${state.archiveLatestDate || "bilinmiyor"}. ${state.trainingReport?.updated ? "Ayrılmış doğrulamada iyileşme görüldü; öğrenilmiş ağırlıklar etkin." : `Ağırlıklar ${MODEL_MIN_RACES} yarış ve ayrılmış doğrulama iyileşmesi şartıyla güncellenir.`}`;
   } catch {
     if (status) status.textContent = "Neon yarış arşivine şu an ulaşılamadı. Bu cihazdaki kayıtlar korunuyor; bağlantı kurulduğunda arşiv yeniden kontrol edilir.";
+  } finally {
+    archiveSyncInProgress = false;
+    if (refreshButton) {
+      refreshButton.disabled = false;
+      refreshButton.textContent = "Yarış arşivini eşitle";
+    }
   }
 }
 let selectedResultImage = null;
@@ -1380,16 +1408,11 @@ function compareResults() {
   target.innerHTML = `<div class="alert"><b>Kaydetmeden önce kontrol edin · ${escapeHtml(resultDate)} · ${escapeHtml(resultCity)}</b><br>${outcomes.length} eşleşen koşu · ${newCount} yeni sonuç · ${corrections} düzeltme adayı · ${skipped} atlanan koşu (birincisi okunamadı: ${racesWithoutWinner}, tahmini eşleşmedi: ${racesWithoutPrediction}). ${racesWithoutWinner ? `${racesWithoutWinner} koşuda bitiriş sırası okunamadı; bu koşular öğrenmeden otomatik atlandı.` : "Görselden/metinden okunan kazanan numarası ve at adlarını doğrulayın."}</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · model lideri ${item.top1Hit ? "isabet" : "isabet değil"}</div>`).join("")}<div class="actions"><button class="btn green" id="confirmResultsButton" type="button">Bu sonuçları onayla ve kaydet</button><button class="btn secondary" id="cancelResultsButton" type="button">İptal</button></div>`;
   $("confirmResultsButton").addEventListener("click", () => {
     if (!pendingResultImport) return;
-    let added = 0;
-    let corrected = 0;
-    let duplicates = 0;
-    for (const item of pendingResultImport.outcomes) {
-      const result = window.RaceLearningEvaluation.mergeOutcome(state.outcomes, item);
-      state.outcomes = result.outcomes;
-      added += Number(result.added);
-      corrected += Number(result.corrected);
-      duplicates += Number(!result.added && !result.corrected);
-    }
+  const merged = window.RaceLearningEvaluation.mergeOutcomes(state.outcomes, pendingResultImport.outcomes);
+  state.outcomes = merged.outcomes;
+  const added = merged.added;
+  const corrected = merged.corrected;
+  const duplicates = pendingResultImport.outcomes.length - added - corrected;
     if (added || corrected) trainModel();
     saveState();
     const imported = pendingResultImport;
@@ -1758,5 +1781,5 @@ document.addEventListener("DOMContentLoaded", async () => {
   updateMemory();
   renderTrainingReport();
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js").catch(() => {});
-  syncHistoricalArchive();
+  refreshRemoteMemory();
 });
