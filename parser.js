@@ -71,7 +71,7 @@
         const indexOf = (fragment) => headers.findIndex((header) => header === fragment || header.includes(fragment));
         const horseCellIndex = headers.findIndex((header) => header.includes('at ismi') || header === 'at adi' || header.includes('horse name') || header === 'horse');
         rowName = cells[horseCellIndex] || '';
-        const horseMatch = rowName.match(/\((\d{1,2})\)/);
+        const horseMatch = rowName.match(/\((\d{1,2})\)/) || rowName.match(/^\s*(\d{1,2})\s*[-–.)]\s*/);
         const column = (fragment) => {
           const index = indexOf(fragment);
           return index >= 0 ? cells[index] || '' : '';
@@ -92,10 +92,10 @@
         const programStartNumber = parseNumber(column('st'));
         const odds = parseNumber(column('gny'));
         const weight = parseNumber(weightText);
-        const name = rowName.replace(/\s*\(\d{1,2}\).*$/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
+        const name = rowName.replace(/\s*\(\d{1,2}\).*$/, '').replace(/^\s*\d{1,2}\s*[-–.)]\s*/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
         if (!name) continue;
         current.horses.push({
-          no: horseNumber || programStartNumber,
+          no: horseNumber,
           horseNumber,
           name,
           sire: pedigree.sire,
