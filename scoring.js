@@ -181,6 +181,8 @@
       ranked.forEach((horse, index) => { horse.modelShare = shares[index] / total; });
     }
     return {
+      robotName: "20 Kriter Deterministik Robot",
+      robotType: "Gölge deney · ana kupondan bağımsız",
       ranked,
       criteria: criteria.map(({ id, label, available }) => ({ id, label, available })),
       availableCriteria: criteria.filter((criterion) => criterion.available).length,
