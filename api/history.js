@@ -1,6 +1,7 @@
 const { desc, eq, sql } = require('drizzle-orm');
 const { db, pool } = require('../lib/db');
 const { raceHistory } = require('../lib/db/schema');
+const { pruneExpiredArchive } = require('../lib/archive-retention');
 const { importTjkDay } = require('../lib/tjk');
 const { createHistoryRateLimiter, getClientIp, verifyFirebaseIdToken } = require('../lib/history-import-security');
 
@@ -16,8 +17,7 @@ function isIsoDate(value) {
 
 function dateBounds() {
   const today = new Date();
-  const earliest = new Date(today);
-  earliest.setUTCFullYear(earliest.getUTCFullYear() - 2);
+  const earliest = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000);
   return { today: today.toISOString().slice(0, 10), earliest: earliest.toISOString().slice(0, 10) };
 }
 
@@ -108,6 +108,7 @@ function createHistoryHandler({ database = db, importDay = importTjkDay, verifyT
         };
       });
 
+      let prunedRecords = 0;
       if (values.length) {
         await database.insert(raceHistory).values(values).onConflictDoUpdate({
           target: [raceHistory.raceDate, raceHistory.city, raceHistory.raceNo],
@@ -118,11 +119,14 @@ function createHistoryHandler({ database = db, importDay = importTjkDay, verifyT
             importedAt: new Date()
           }
         });
+        const retention = await pruneExpiredArchive(database);
+        prunedRecords = retention.removed;
       }
 
       return res.status(200).json({
         date,
         savedRaces: values.length,
+        prunedRecords,
         programRaces: values.filter((row) => row.program.runners.length > 0).length,
         resultRaces: values.filter((row) => row.results.runners.length > 0).length,
         cities: imported.cities,
