@@ -37,6 +37,9 @@ test('20-criterion shadow scoring reports missing data and normalizes only obser
   const experiment = analyzeAHPShadow(race);
 
   assert.equal(AHP_CRITERIA.length, 20);
+  assert.equal(experiment.robotName, '20 Kriter Deterministik Robot');
+  assert.match(experiment.robotType, /ana kupondan bağımsız/);
+  assert.deepEqual(analyzeAHPShadow(race).ranked, experiment.ranked);
   assert.equal(experiment.totalCriteria, 20);
   assert.equal(experiment.availableCriteria, 5);
   assert.ok(experiment.ranked.every((horse) => horse.criteriaCoverage === 25));
