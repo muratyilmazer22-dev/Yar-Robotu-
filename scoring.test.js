@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { analyzeEnsemble } = require('./scoring');
+const { analyzeRace } = require('./scoring');
 
 test('race context selects a distance-specific model before the legacy surface/type fallback', () => {
   const { raceContextKeys } = require('./scoring');
@@ -11,7 +11,7 @@ test('race context selects a distance-specific model before the legacy surface/t
   assert.deepEqual(raceContextKeys({ ...race, distance: 2000 }), ['Kum|HANDİKAP|uzun', 'Kum|HANDİKAP']);
 });
 
-test('ensemble uses the exact distance context when both exact and broad models exist', () => {
+test('the model prefers an exact distance context over a broader one', () => {
   const race = {
     distance: 1200,
     surface: 'Kum',
@@ -21,23 +21,21 @@ test('ensemble uses the exact distance context when both exact and broad models 
       { number: 2, hp: 45, agf: 15, odds: 5, last6: '111111' }
     ]
   };
-  const broadOnly = analyzeEnsemble(race, {
+  const broadOnly = analyzeRace(race, {
     contextWeights: { 'Kum|HANDİKAP': { rating: 0.8, form: 0.05, market: 0.1, pedigree: 0.05 } },
-    adaptiveWeight: 5
   });
-  const exactAndBroad = analyzeEnsemble(race, {
+  const exactAndBroad = analyzeRace(race, {
     contextWeights: {
       'Kum|HANDİKAP': { rating: 0.8, form: 0.05, market: 0.1, pedigree: 0.05 },
       'Kum|HANDİKAP|kisa': { rating: 0.05, form: 0.8, market: 0.1, pedigree: 0.05 }
     },
-    adaptiveWeight: 5
   });
 
   assert.equal(broadOnly[0].number, 1);
   assert.equal(exactAndBroad[0].number, 2);
 });
 
-test('ensemble exposes average rank without changing consensus score ordering', () => {
+test('the single model ranks by the active weighted signals', () => {
   const race = {
     distance: 1400,
     surface: 'Kum',
@@ -48,13 +46,12 @@ test('ensemble exposes average rank without changing consensus score ordering', 
     ]
   };
 
-  const ranked = analyzeEnsemble(race, { profileScore: () => 80 });
+  const ranked = analyzeRace(race, { profileScore: () => 80 });
 
   assert.equal(ranked.length, 2);
-  assert.ok(ranked.every((horse) => Number.isFinite(horse.averageRank)));
-  assert.deepEqual(ranked.map((horse) => horse.averageRank), [1, 2]);
+  assert.equal(ranked[0].number, 1);
   assert.ok(ranked[0].score > ranked[1].score);
-  assert.ok(ranked.every((horse) => horse.averageRank >= 1 && horse.averageRank <= 2));
+  assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
 });
 
 test('missing horse numbers do not collapse distinct runners in the main ranking', () => {
@@ -68,7 +65,7 @@ test('missing horse numbers do not collapse distinct runners in the main ranking
     ]
   };
 
-  const ranked = analyzeEnsemble(race);
+  const ranked = analyzeRace(race);
 
   assert.equal(ranked.length, 2);
   assert.ok(ranked.every((horse) => horse.number === null));

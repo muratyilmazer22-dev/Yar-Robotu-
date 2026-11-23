@@ -235,6 +235,7 @@
 })();
 const STORAGE_KEY = "race-analysis-v1";
 const BASE_WEIGHTS = window.RaceScoring.BASE_WEIGHTS;
+const MODEL_VERSION = "single-weighted-v1";
 const MODEL_MIN_RACES = 30;
 const TRAINING_WINDOW_RACES = 2000;
 const SINGLE_GAP_THRESHOLD = 12.5;
@@ -622,18 +623,17 @@ function profileScore(name, distance) {
 function scoreRace(race) {
   const cached = scoreCache.get(race);
   if (cached) return cached;
-  const combined = window.RaceScoring.analyzeEnsemble(race, {
+  const ranked = window.RaceScoring.analyzeRace(race, {
     modelWeights: state.modelWeights,
     contextWeights: state.contextWeights,
-    adaptiveWeight: state.trainingReport?.updated ? 3 : 1,
     profileScore
   });
-  scoreCache.set(race, combined);
-  return combined;
+  scoreCache.set(race, ranked);
+  return ranked;
 }
 function singleSelectionEvidence() {
   if (singleEvidenceCache) return singleEvidenceCache;
-  const outcomes = state.outcomes.filter((item) => Array.isArray(item.horses) && item.horses.length > 1 && String(item.at || "").slice(0, 10));
+  const outcomes = state.outcomes.filter((item) => item.modelVersion === MODEL_VERSION && !String(item.sourceKey || "").startsWith("tjk:") && Array.isArray(item.horses) && item.horses.length > 1 && String(item.at || "").slice(0, 10));
   const dates = [...new Set(outcomes.map((item) => String(item.at).slice(0, 10)))].sort();
   if (dates.length < 5) {
     singleEvidenceCache = { validated: false, candidates: 0, wins: 0, hitRate: null, baselineHitRate: null, validationStartDate: null };
@@ -813,6 +813,7 @@ async function analyze() {
     surface: race.surface,
     type: race.type,
     distance: race.distance,
+    modelVersion: MODEL_VERSION,
     horses: results[index].map((horse) => ({ number: horse.number, name: horse.name, score: horse.score, modelShare: horse.modelShare, features: horse.features, performanceScore: horse.performanceScore, marketScore: horse.marketScore, coverage: horse.coverage, independentCoverage: horse.independentCoverage, signal: horse.signal }))
   }));
   state.predictions = mergePredictionHistory(state.predictions, lastAnalysis);
@@ -1089,6 +1090,7 @@ function compareResults() {
       raceNo: race.no,
       winner: winner.number,
       winnerName: winner.name,
+      modelVersion: prediction.modelVersion === MODEL_VERSION ? MODEL_VERSION : "legacy-ensemble-v0",
       top3Hit: top3.some((horse) => horse.number === winner.number),
       top1Hit: top3[0]?.number === winner.number,
       favoriteMiss: marketFavorite ? marketFavorite.number !== winner.number : null,
@@ -1154,7 +1156,7 @@ function saveGeneratedCoupon(poolKey) {
   const record = {
     id: createCouponId(), date, city, poolType: poolKey, cost: coupon.total, payout: null, status: "pending",
     source: "Yarış Robotu", columns: coupon.columns, unit: parseNumber($("birimInput")?.value),
-    modelVersion: "adaptive-consensus-v1",
+    modelVersion: MODEL_VERSION,
     legs: coupon.picks.map((pick) => ({ raceNo: pick.no, horses: pick.ranked.slice(0, pick.count).map((horse) => ({ number: horse.number, name: horse.name, modelShare: horse.modelShare })) })),
     finishedNos: coupon.finishedNos || [],
     createdAt: new Date().toISOString()

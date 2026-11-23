@@ -51,17 +51,6 @@
   }
 
   const BASE_WEIGHTS = { rating: 0.3, form: 0.3, market: 0.25, pedigree: 0.15 };
-  const ROBOT_STRATEGIES = [
-    { name: "Öğrenen denge", weights: null },
-    { name: "Form", weights: { rating: 0.18, form: 0.46, market: 0.21, pedigree: 0.15 } },
-    { name: "Piyasa", weights: { rating: 0.18, form: 0.16, market: 0.52, pedigree: 0.14 } },
-    { name: "Handikap", weights: { rating: 0.5, form: 0.18, market: 0.2, pedigree: 0.12 } },
-    { name: "Pedigri", weights: { rating: 0.18, form: 0.18, market: 0.18, pedigree: 0.46 } },
-    { name: "Eşit ağırlık", weights: { rating: 0.25, form: 0.25, market: 0.25, pedigree: 0.25 } },
-    { name: "Piyasa dışı", weights: { rating: 0.38, form: 0.38, market: 0, pedigree: 0.24 } },
-    { name: "Temkinli", weights: { rating: 0.28, form: 0.24, market: 0.34, pedigree: 0.14 } }
-  ];
-
   function softmaxScores(horses, weights) {
     const scores = horses.map((horse) => {
       const available = Object.entries(horse.features || {}).filter(([key, value]) => Number.isFinite(value) && weights[key] !== 0);
@@ -139,38 +128,12 @@
     return ranked.map((horse, index) => ({ ...horse, modelShare: shares[index] })).sort((a, b) => b.modelShare - a.modelShare);
   }
 
-  function analyzeEnsemble(race, options = {}) {
+  function analyzeRace(race, options = {}) {
     const contextKeys = raceContextKeys(race);
     const contextualWeights = contextKeys.map((key) => options.contextWeights?.[key]).find(Boolean) || {};
-    const adaptiveWeights = { ...BASE_WEIGHTS, ...(options.modelWeights || {}), ...contextualWeights };
-    const adaptiveWeight = Math.max(1, Number(options.adaptiveWeight) || 1);
-    const rankings = ROBOT_STRATEGIES.map((robot) => ({
-      weight: robot.weights ? 1 : adaptiveWeight,
-      ranked: scoreRaceWithWeights(race, robot.weights ? { ...BASE_WEIGHTS, ...robot.weights } : adaptiveWeights, options.profileScore)
-    }));
-    const totalRankWeight = rankings.reduce((sum, robot) => sum + robot.weight, 0);
-    const stats = new Map();
-    for (const { ranked, weight } of rankings) {
-      ranked.forEach((horse, index) => {
-        const horseKey = Number.isSafeInteger(horse.number) && horse.number > 0
-          ? `number:${horse.number}`
-          : `name:${normalizeName(horse.name)}`;
-        const item = stats.get(horseKey) || { horse, rankTotal: 0, scoreTotal: 0, shareTotal: 0, firstChoiceCount: 0 };
-        item.rankTotal += (index + 1) * weight;
-        item.scoreTotal += horse.score * weight;
-        item.shareTotal += horse.modelShare * weight;
-        if (index === 0) item.firstChoiceCount += 1;
-
-        stats.set(horseKey, item);
-      });
-    }
-    const fieldSize = Math.max(1, stats.size);
-    return [...stats.values()].map(({ horse, rankTotal, scoreTotal, shareTotal, firstChoiceCount }) => {
-      const averageRank = rankTotal / totalRankWeight;
-      const consensusScore = (fieldSize === 1 ? 100 : (fieldSize - averageRank) / (fieldSize - 1) * 100) * 0.8 + scoreTotal / totalRankWeight * 0.2;
-      return { ...horse, score: Math.round(consensusScore * 10) / 10, averageRank: Math.round(averageRank * 100) / 100, modelShare: shareTotal / totalRankWeight, robotFirstChoiceCount: firstChoiceCount };
-    }).sort((a, b) => b.score - a.score || b.modelShare - a.modelShare || Number(a.number) - Number(b.number));
+    const weights = { ...BASE_WEIGHTS, ...(options.modelWeights || {}), ...contextualWeights };
+    return scoreRaceWithWeights(race, weights, options.profileScore);
   }
 
-  return { DEFAULT_DNA, BASE_WEIGHTS, normalizeName, distanceBand, raceContextKeys, softmaxScores, analyzeEnsemble };
+  return { DEFAULT_DNA, BASE_WEIGHTS, normalizeName, distanceBand, raceContextKeys, softmaxScores, analyzeRace };
 });
