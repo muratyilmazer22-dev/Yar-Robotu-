@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluateForwardComparison, mergeOutcome } = require('./lib/learning-evaluation');
+const { evaluateForwardComparison, mergeOutcome, mergeOutcomes } = require('./lib/learning-evaluation');
 
 function outcome(date, winner = 1) {
   return {
@@ -49,4 +49,16 @@ test('uses race identity for deduplication and replaces a corrected winner', () 
   assert.equal(archiveCorrection.corrected, true);
   assert.equal(archiveCorrection.outcomes.length, 1);
   assert.equal(correction.outcomes[0].winner, 2);
+});
+
+test('merges a batch in one pass while preserving duplicate and correction counts', () => {
+  const existing = outcome('2026-01-01', 1);
+  const corrected = outcome('2026-01-01', 2);
+  const added = outcome('2026-01-02', 1);
+  const result = mergeOutcomes([existing], [existing, corrected, added, added]);
+
+  assert.equal(result.added, 1);
+  assert.equal(result.corrected, 1);
+  assert.equal(result.outcomes.length, 2);
+  assert.equal(result.outcomes[0].winner, 2);
 });
