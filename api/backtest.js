@@ -160,7 +160,15 @@ module.exports = async function handler(req, res) {
       }
 
       if (hasValidatedAutomaticModel && raceDate >= acceptedValidation.from) {
-        const learnedScores = analyzeRace(scoringRace, { modelWeights: automaticWeights });
+        const eligibleContextWeights = Object.fromEntries(Object.entries(automaticModel.contextWeights || {}).filter(([key, weights]) => {
+          const contextReport = automaticModel.contextReports?.[key];
+          return contextReport?.updated && contextReport.validationStartDate && raceDate >= contextReport.validationStartDate
+            && Object.keys(BASE_WEIGHTS).every((name) => Number.isFinite(Number(weights?.[name])));
+        }));
+        const learnedScores = analyzeRace(scoringRace, {
+          modelWeights: automaticWeights,
+          contextWeights: eligibleContextWeights
+        });
         const learnedWinnerRank = getWinnerRank(learnedScores, winnerEntry.horse.number);
         const learnedFavorite = learnedScores.filter((horse) => horse.marketScore !== null).sort((a, b) => b.marketScore - a.marketScore)[0];
         if (learnedWinnerRank === 1) automaticModelTop1Hits += 1;
@@ -235,7 +243,10 @@ module.exports = async function handler(req, res) {
         modelTop1HitRate: rate(automaticModelTop1Hits, automaticValidationRaces),
         marketFavoriteHitRate: rate(automaticMarketFavoriteHits, automaticValidationRaces),
         baselineBrier: automaticValidationRaces ? Number((automaticBaselineBrierTotal / automaticValidationRaces).toFixed(4)) : null,
-        learnedBrier: automaticValidationRaces ? Number((automaticLearnedBrierTotal / automaticValidationRaces).toFixed(4)) : null
+        learnedBrier: automaticValidationRaces ? Number((automaticLearnedBrierTotal / automaticValidationRaces).toFixed(4)) : null,
+        trainingReport: automaticModel?.report || null,
+        contextModelCount: Object.keys(automaticModel?.contextWeights || {}).length,
+        refreshedAt: automaticModel?.refreshedAt || null
       },
       bySurface: Array.from(bySurface, ([surface, group]) => ({
         surface,

@@ -21,7 +21,7 @@ module.exports = async function handler(req, res) {
     const value = {
       version: 1,
       source: 'official-tjk-archive',
-      model: automaticModel?.memoryValue?.model || 'deterministic-analysis-v3',
+      model: automaticModel?.memoryValue?.model || 'deterministic-analysis-v4-contextual',
       raceCount: Number(archive.raceCount || 0),
       completedRaceCount: Number(archive.completedRaceCount || 0),
       firstDate: archive.firstDate || null,

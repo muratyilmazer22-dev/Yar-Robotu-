@@ -204,7 +204,7 @@
       const automaticValidationNote = document.createElement('p');
       automaticValidationNote.className = 'sub';
       automaticValidationNote.textContent = automaticValidation.available
-        ? `${automaticValidation.from} – ${automaticValidation.to || '—'} arasında ${Number(automaticValidation.races || 0).toLocaleString('tr-TR')} koşu. Otomatik model lider isabeti: ${automaticValidation.modelTop1HitRate ?? '—'}%; piyasa favorisi: ${automaticValidation.marketFavoriteHitRate ?? '—'}%. Aynı koşulardaki Brier skoru: temel ${automaticValidation.baselineBrier?.toFixed(3) ?? '—'}, öğrenilmiş ${automaticValidation.learnedBrier?.toFixed(3) ?? '—'}; düşük değer daha iyi olasılık kalibrasyonu demektir. Bu doğrulama dilimi model ağırlıklarının eğitiminde kullanılmadı.`
+        ? `${automaticValidation.from} – ${automaticValidation.to || '—'} arasında ${Number(automaticValidation.races || 0).toLocaleString('tr-TR')} koşu. Otomatik model lider isabeti: ${automaticValidation.modelTop1HitRate ?? '—'}%; piyasa favorisi: ${automaticValidation.marketFavoriteHitRate ?? '—'}%. Aynı koşulardaki Brier skoru: temel ${automaticValidation.baselineBrier?.toFixed(3) ?? '—'}, öğrenilmiş ${automaticValidation.learnedBrier?.toFixed(3) ?? '—'}; düşük değer daha iyi olasılık kalibrasyonu demektir. Eğitim raporu: ${automaticValidation.trainingReport?.trainingRaces ?? '—'} eğitim / ${automaticValidation.trainingReport?.validationRaces ?? '—'} doğrulama koşusu, ${automaticValidation.contextModelCount || 0} bağlam modeli. Bu doğrulama dilimi model ağırlıklarının eğitiminde kullanılmadı.`
         : automaticValidation.reason || 'Henüz ileri tarih diliminde doğrulanmış otomatik model bulunmuyor.';
       automaticValidationBlock.append(automaticValidationTitle, automaticValidationNote);
       const note = document.createElement('p');
@@ -324,6 +324,29 @@ async function restoreState() {
 }
 let state = normalizeState(null);
 let stateDb = null;
+let sharedAutomaticModel = null;
+function hasCompleteModelWeights(weights) {
+  if (!weights || typeof weights !== "object" || Array.isArray(weights) || Object.keys(weights).length !== Object.keys(BASE_WEIGHTS).length) return false;
+  const values = Object.keys(BASE_WEIGHTS).map((key) => Number(weights[key]));
+  return values.every((value) => Number.isFinite(value) && value >= 0) && Math.abs(values.reduce((sum, value) => sum + value, 0) - 1) < 0.01;
+}
+function isVerifiedSharedModel(model) {
+  return Boolean(model?.lastAcceptedValidation?.from && hasCompleteModelWeights(model.weights));
+}
+function sharedModelReportText() {
+  const model = sharedAutomaticModel;
+  if (!model) return "Ortak otomatik model raporu henüz alınmadı.";
+  const report = model.report || {};
+  const validation = model.lastAcceptedValidation;
+  const status = validation
+    ? `etkin doğrulanmış model (${validation.from}–${validation.to || "—"})`
+    : "henüz kabul edilmiş ileri-tarih doğrulaması yok; temel model kullanılıyor";
+  const scores = typeof report.baselineBrier === "number" && Number.isFinite(report.baselineBrier)
+    && typeof report.validationBrier === "number" && Number.isFinite(report.validationBrier)
+    ? `Brier temel ${report.baselineBrier.toFixed(4)} / rapor ${report.validationBrier.toFixed(4)}`
+    : "Brier doğrulaması henüz yok";
+  return `Ortak model: ${model.model || "model adı yok"} · ${status} · ${Number(model.trainedRaceCount || 0).toLocaleString("tr-TR")} eğitim verili koşu · ${Number(report.trainingRaces || 0)} eğitim / ${Number(report.validationRaces || 0)} doğrulama · ${scores} · ${Object.keys(model.contextWeights || {}).length} bağlam modeli · son yenileme ${model.refreshedAt || "bilinmiyor"}.`;
+}
 let lastAnalysis = [];
 let lastCoupons = {};
 let pendingResultImport = null;
@@ -991,7 +1014,7 @@ function renderTrainingReport() {
   const report = state.trainingReport || {};
   const comparison = window.RaceLearningEvaluation.evaluateForwardComparison(state.outcomes, BASE_WEIGHTS);
   if (!report.sampleSize && !comparison.validated) {
-    target.textContent = `Öğrenme raporu: ${state.outcomes.length.toLocaleString("tr-TR")} kayıtlı sonuç · ileri tarih kıyaslaması için en az 5 ayrı yarış tarihi gerekir.`;
+    target.textContent = `Öğrenme raporu: ${state.outcomes.length.toLocaleString("tr-TR")} kayıtlı sonuç · ileri tarih kıyaslaması için en az 5 ayrı yarış tarihi gerekir. ${sharedModelReportText()}`;
     return;
   }
   const currentValidation = report.validationMethod === "fixed-forward-v1";
@@ -1001,7 +1024,7 @@ function renderTrainingReport() {
     return `${key === "learned" ? "tahmin anındaki model" : key === "favorite" ? "piyasa favorisi" : "sabit temel model"}: ${item.races ? `${item.wins}/${item.races} (%${(item.hitRate * 100).toFixed(1)})` : "ölçülemedi"}`;
   }).join(" · ") : "İleri tarih karşılaştırması için henüz yeterli tarih yok.";
   const segments = comparison.byContext.filter((item) => item.eligible).map((item) => `${item.name} (${item.kind === "surface" ? "zemin" : "yarış türü"}, n=${item.races})`).join(", ");
-  target.textContent = `Öğrenme raporu: ${report.sampleSize || state.outcomes.length} uygun yarış · eğitim ${report.trainingRaces || 0} · doğrulama ${report.validationRaces || 0}${report.validationStartDate ? ` (${report.validationStartDate} sonrası)` : ""}. ${modelStatus} Brier temel: ${currentValidation && Number.isFinite(report.baselineBrier) ? report.baselineBrier.toFixed(4) : "—"} · doğrulama: ${currentValidation && Number.isFinite(report.validationBrier) ? report.validationBrier.toFixed(4) : "—"}. ${comparison.validated ? `Aynı son tarih dilimi (${comparison.startDate}–${comparison.endDate}, n=${comparison.races}): ${metrics}` : "İleri tarih kıyaslaması için beş ayrı tarihe yayılmış, yarış öncesinde kaydedilmiş sonuç bulunamadı"}. Yeterli örnekli zemin/tür: ${segments || `henüz yok (eşik ${comparison.minimumContextSample})`}. Sızıntıyı önlemek için TJK arşivinden sonradan puanlanan kayıtlar bu kıyasa dahil edilmez; yalnız yarış öncesi saklanan tahminler kullanılır. Ağırlık sürümü: ${(state.modelWeightVersions || []).at(-1)?.version || 0}.`;
+  target.textContent = `Öğrenme raporu: ${report.sampleSize || state.outcomes.length} uygun yarış · eğitim ${report.trainingRaces || 0} · doğrulama ${report.validationRaces || 0}${report.validationStartDate ? ` (${report.validationStartDate} sonrası)` : ""}. ${modelStatus} Brier temel: ${currentValidation && Number.isFinite(report.baselineBrier) ? report.baselineBrier.toFixed(4) : "—"} · doğrulama: ${currentValidation && Number.isFinite(report.validationBrier) ? report.validationBrier.toFixed(4) : "—"}. ${comparison.validated ? `Aynı son tarih dilimi (${comparison.startDate}–${comparison.endDate}, n=${comparison.races}): ${metrics}` : "İleri tarih kıyaslaması için beş ayrı tarihe yayılmış, yarış öncesinde kaydedilmiş sonuç bulunamadı"}. Yeterli örnekli zemin/tür: ${segments || `henüz yok (eşik ${comparison.minimumContextSample})`}. Sızıntıyı önlemek için TJK arşivinden sonradan puanlanan kayıtlar bu kıyasa dahil edilmez; yalnız yarış öncesi saklanan tahminler kullanılır. Ağırlık sürümü: ${(state.modelWeightVersions || []).at(-1)?.version || 0}. ${sharedModelReportText()}`;
 }
 function trainModel() {
   const races = state.outcomes.filter((item) => Array.isArray(item.horses) && item.horses.length > 1 && item.horses.some((horse) => horse.number === item.winner)).sort((a, b) => String(a.at || "").localeCompare(String(b.at || ""))).slice(-TRAINING_WINDOW_RACES);
@@ -1140,7 +1163,9 @@ async function refreshRemoteMemory() {
     const response = await fetch("/api/model-memory", { headers: { Accept: "application/json" } });
     const memory = await response.json();
     if (!response.ok) throw new Error(memory.error || "Neon hafızası alınamadı.");
-    const automated = memory.automaticModel;
+    sharedAutomaticModel = memory.automaticModel && typeof memory.automaticModel === "object" ? memory.automaticModel : null;
+    renderTrainingReport();
+    const automated = sharedAutomaticModel;
     const automatedStatus = automated?.report?.updated
       ? " · yeni otomatik ağırlıklar ileri tarih doğrulamasını geçti ve etkin"
       : automated?.lastAcceptedValidation
@@ -1162,12 +1187,16 @@ async function syncHistoricalArchive() {
   const remoteMemory = await refreshRemoteMemory();
   const sharedModel = remoteMemory?.automaticModel;
   const sharedWeights = sharedModel?.weights;
-  if (sharedWeights && Object.entries(sharedWeights).every(([key, value]) => Object.hasOwn(BASE_WEIGHTS, key) && Number.isFinite(Number(value)))) {
-    state.modelWeights = { ...BASE_WEIGHTS, ...sharedWeights };
-    state.lastGoodModelWeights = { ...state.modelWeights };
-    if (sharedModel.contextWeights && typeof sharedModel.contextWeights === "object") {
-      state.contextWeights = { ...state.contextWeights, ...sharedModel.contextWeights };
-    }
+  if (isVerifiedSharedModel(sharedModel) && sharedWeights) {
+    state.modelWeights = { ...sharedWeights };
+    state.lastGoodModelWeights = { ...sharedWeights };
+    const sharedContexts = sharedModel.contextWeights && typeof sharedModel.contextWeights === "object" && !Array.isArray(sharedModel.contextWeights)
+      ? Object.fromEntries(Object.entries(sharedModel.contextWeights).filter(([, weights]) => hasCompleteModelWeights(weights)))
+      : {};
+    state.contextWeights = sharedContexts;
+    scoreCache = new WeakMap();
+    saveState();
+    renderTrainingReport();
   }
   try {
     const archive = [];
