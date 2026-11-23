@@ -263,7 +263,7 @@ let classHistoryArchive = new Map();
 let raceRelationArchive = new Map();
 let raceContextArchive = new Map();
 let pedigreeHistoryArchive = new Map();
-const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
+const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], bulletins: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
   NATIVEKHAN: [2, 4, 8, 2, 0], LUXOR: [6, 6, 4, 0, 0], KANEKO: [4, 8, 6, 0, 0],
@@ -286,8 +286,9 @@ function normalizeState(saved) {
     profiles: { ...DEFAULT_PROFILES, ...(saved?.profiles || {}) },
     predictions: Array.isArray(saved?.predictions) ? saved.predictions : [],
     outcomes: Array.isArray(saved?.outcomes) ? saved.outcomes : [],
-    coupons: Array.isArray(saved?.coupons) ? saved.coupons : [],
-    modelWeights,
+  coupons: Array.isArray(saved?.coupons) ? saved.coupons : [],
+  bulletins: Array.isArray(saved?.bulletins) ? saved.bulletins : [],
+  modelWeights,
     lastGoodModelWeights: { ...BASE_WEIGHTS, ...(saved?.lastGoodModelWeights || saved?.modelWeights || {}) },
     modelWeightVersions,
     contextWeights: saved?.contextWeights && typeof saved.contextWeights === "object" ? saved.contextWeights : {}
@@ -355,8 +356,9 @@ let singleEvidenceCache = null;
 let firebaseSdk = null;
 let firebaseAccount = null;
 let firebaseSyncReady = false;
-let firebaseSaveTimer = null;
-let firebaseSyncChain = Promise.resolve();
+  let firebaseSaveTimer = null;
+  let bulletinSaveTimer = null;
+  let firebaseSyncChain = Promise.resolve();
 let driveConnected = false;
 let driveBusy = false;
 const $ = (id) => document.getElementById(id);
@@ -524,8 +526,9 @@ function mergeFirebaseMemory(localState, remoteState) {
     ...latest,
     profiles,
     predictions: mergePredictionHistory(remoteState.predictions, localState.predictions),
-    outcomes: mergeMemoryRecords(remoteState.outcomes, localState.outcomes, (item) => item.sourceKey || `${String(item.at || "").slice(0, 10)}:${item.city || ""}:${item.raceNo}:${item.winner}`),
-    coupons: mergeMemoryRecords(remoteState.coupons, localState.coupons, (item) => item.id || JSON.stringify(item))
+  outcomes: mergeMemoryRecords(remoteState.outcomes, localState.outcomes, (item) => item.sourceKey || `${String(item.at || "").slice(0, 10)}:${item.city || ""}:${item.raceNo}:${item.winner}`),
+  coupons: mergeMemoryRecords(remoteState.coupons, localState.coupons, (item) => item.id || JSON.stringify(item)),
+  bulletins: mergeMemoryRecords(remoteState.bulletins, localState.bulletins, (item) => item.id || JSON.stringify(item))
   });
 }
 function queueFirebaseMemorySync() {
@@ -624,6 +627,41 @@ function saveState() {
   persistStateLocally();
   updateMemory();
   queueFirebaseMemorySync();
+}
+function saveBulletinDraft(kind, details = {}) {
+  const id = `draft-${kind}`;
+  const existing = state.bulletins.find((item) => item.id === id) || {};
+  const draft = {
+    ...existing,
+    id,
+    kind,
+    status: "draft",
+    text: String(details.text ?? existing.text ?? ""),
+    date: String(details.date ?? existing.date ?? ""),
+    city: String(details.city ?? existing.city ?? ""),
+    updatedAt: new Date().toISOString(),
+    ...(details.image ? { image: details.image } : existing.image ? { image: existing.image } : {})
+  };
+  state.bulletins = [...state.bulletins.filter((item) => item.id !== id), draft];
+  clearTimeout(bulletinSaveTimer);
+  bulletinSaveTimer = window.setTimeout(saveState, 250);
+  return draft;
+}
+function archiveBulletin(kind, details = {}) {
+  const draftId = `draft-${kind}`;
+  const draft = state.bulletins.find((item) => item.id === draftId);
+  const record = {
+    ...(draft || {}),
+    ...details,
+    id: window.crypto?.randomUUID?.() || `bulletin-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    kind,
+    status: "saved",
+    savedAt: new Date().toISOString()
+  };
+  state.bulletins = [...state.bulletins.filter((item) => item.id !== draftId), record];
+  clearTimeout(bulletinSaveTimer);
+  saveState();
+  return record;
 }
 function showMessage(target, text, type = "") {
   target.setAttribute("role", type === "error" ? "alert" : "status");
@@ -898,6 +936,7 @@ async function analyze() {
   $("kuponAlani").innerHTML = "";
   $("kosuSonucAlani").innerHTML = "";
   if (!input) { showMessage(warning, "Önce TJK bülten metnini yapıştırın.", "error"); return; }
+  archiveBulletin("program", { text: input, date: $("couponDateInput")?.value || new Date().toISOString().slice(0, 10), city: $("couponCityInput")?.value.trim().slice(0, 80) || "" });
   const parsed = parseRaces(input);
   if (!parsed.races.length) { showMessage(warning, parsed.warnings.join(" "), "error"); return; }
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
@@ -1248,6 +1287,7 @@ async function syncHistoricalArchive() {
   }
 }
 let selectedResultImage = null;
+let storedResultImage = null;
 let resultImagePreviewUrl = null;
 function setResultImageStatus(message, isError = false) {
   const status = $("resultsImageStatus");
@@ -1255,39 +1295,47 @@ function setResultImageStatus(message, isError = false) {
   status.textContent = message;
   status.classList.toggle("error", isError);
 }
-function readImageAsJpeg(file) {
+function readImageAsJpeg(file, { maxDimension = 1800, quality = 0.82, maxBytes = Infinity } = {}) {
   return new Promise((resolve, reject) => {
     const image = new Image();
+    image.crossOrigin = "anonymous";
     const sourceUrl = URL.createObjectURL(file);
-    image.onload = () => {
+    image.onload = async () => {
       URL.revokeObjectURL(sourceUrl);
-      const scale = Math.min(1, 1800 / Math.max(image.naturalWidth, image.naturalHeight));
+      const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+      let width = Math.max(1, Math.round(image.naturalWidth * scale));
+      let height = Math.max(1, Math.round(image.naturalHeight * scale));
       const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
       const context = canvas.getContext("2d");
       if (!context) return reject(new Error("Görsel dönüştürülemedi."));
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => {
-        if (!blob) return reject(new Error("Görsel küçültülemedi."));
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(new Error("Görsel okunamadı."));
-        reader.readAsDataURL(blob);
-      }, "image/jpeg", 0.82);
+      let blob = null;
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        canvas.width = width;
+        canvas.height = height;
+        context.drawImage(image, 0, 0, width, height);
+        blob = await new Promise((resolveBlob) => canvas.toBlob(resolveBlob, "image/jpeg", Math.max(0.38, quality - attempt * 0.035)));
+        if (blob && blob.size <= maxBytes) break;
+        width = Math.max(1, Math.round(width * 0.84));
+        height = Math.max(1, Math.round(height * 0.84));
+      }
+      if (!blob || blob.size > maxBytes) return reject(new Error("Görsel hafızaya sığacak şekilde küçültülemedi."));
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Görsel okunamadı."));
+      reader.readAsDataURL(blob);
     };
     image.onerror = () => { URL.revokeObjectURL(sourceUrl); reject(new Error("Bu görsel açılamadı.")); };
     image.src = sourceUrl;
   });
 }
 async function extractResultsFromImage() {
-  if (!selectedResultImage) return;
+  if (!selectedResultImage && !storedResultImage?.dataUrl) return;
   const button = $("readResultsImageButton");
   button.disabled = true;
   button.textContent = "Görsel okunuyor…";
   setResultImageStatus("Görsel küçültülüyor ve sonuç tablosu okunuyor…");
   try {
-    const image = await readImageAsJpeg(selectedResultImage);
+    const image = storedResultImage?.dataUrl || await readImageAsJpeg(selectedResultImage);
     const response = await fetch("/api/result-image-ocr", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1299,53 +1347,22 @@ async function extractResultsFromImage() {
     if (!recognizedText) throw new Error("Görselde okunabilir sonuç metni bulunamadı.");
     const textarea = $("sonucluBultenInput");
     textarea.value = [textarea.value.trim(), recognizedText].filter(Boolean).join("\n\n");
+    saveBulletinDraft("result", { text: textarea.value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
     textarea.focus();
-    setResultImageStatus("Metin taslağı eklendi. Koşu ve sıra bilgilerini kontrol edin; ardından sonuçları eşleştirip önizleyin.");
+    setResultImageStatus("Metin ve fotoğraf otomatik hafızaya kaydedildi. Sıra bilgileri metinde varsa sonuçlar otomatik eşleşir.");
   } catch (error) {
     setResultImageStatus(error instanceof Error ? error.message : "Görsel işlenemedi. Lütfen yeniden deneyin.", true);
   } finally {
-    button.disabled = !selectedResultImage;
+    button.disabled = !selectedResultImage && !storedResultImage?.dataUrl;
     button.textContent = "Görselden metni oku";
   }
 }
-function requestMissingWinners(races, target) {
-  const unresolved = races.filter((race) => !race.horses.some((horse) => horse.place === 1));
-  if (!unresolved.length) return false;
-  const rows = unresolved.map((race) => {
-    const options = race.horses
-      .filter((horse) => Number.isSafeInteger(Number(horse.number)) && Number(horse.number) > 0)
-      .map((horse) => `<option value="${Number(horse.number)}">#${Number(horse.number)} ${escapeHtml(horse.name)}</option>`)
-      .join("");
-    return `<label class="control">${race.no}. koşu kazananı<select data-result-winner="${race.no}" required><option value="">Kazanan atı seçin</option>${options}</select></label>`;
-  }).join("");
-  if (unresolved.some((race) => !race.horses.some((horse) => Number.isSafeInteger(Number(horse.number)) && Number(horse.number) > 0))) {
-    showMessage(target, "Bazı sonuç satırlarında at numarası okunamadı. At numaralarını içeren sonuç tablosunu yeniden yapıştırın.", "error");
-    return true;
-  }
-  target.setAttribute("role", "status");
-  target.setAttribute("aria-live", "polite");
-  target.innerHTML = `<div class="card"><h3>Sonuç sırası bulunamadı</h3><p class="sub">Metinde koşu ve atlar bulundu, ancak birinci sırası okunamadı. Sonuç tablosunda sıra sütunu yoksa her koşunun kazananını aşağıdan seçin. Seçiminiz kaydedilmeden önce ayrıca onaylanır.</p><div class="controls">${rows}</div><div class="actions"><button class="btn" id="matchManualWinnersButton" type="button">Kazananları eşleştir</button></div></div>`;
-  $("matchManualWinnersButton").addEventListener("click", () => {
-    const overrides = new Map();
-    for (const select of target.querySelectorAll("[data-result-winner]")) {
-      const race = unresolved.find((item) => item.no === Number(select.dataset.resultWinner));
-      const winner = race?.horses.find((horse) => Number(horse.number) === Number(select.value));
-      if (!winner) {
-        select.focus();
-        showMessage(target, "Devam etmek için her koşunun kazanan atını seçin.", "error");
-        return;
-      }
-      overrides.set(race.no, winner);
-    }
-    compareResults(overrides);
-  });
-  target.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  return true;
-}
-function compareResults(winnerOverrides = null) {
+function compareResults() {
   pendingResultImport = null;
   const target = $("ogrenmeLogAlani");
-  const parsed = parseRaces($("sonucluBultenInput").value.trim());
+  const resultText = $("sonucluBultenInput").value.trim();
+  if (resultText || storedResultImage) archiveBulletin("result", { text: resultText, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
+  const parsed = parseRaces(resultText);
   if (!parsed.races.length) {
     showMessage(target, "Sonuç bülteninde koşu ve at sonuç satırları bulunamadı. Ekran görüntüsündeki metin bir web menüsü/başlık içeriği; sonuç tablosunu, at numarası ve Sıra/Rank/Position bilgileriyle birlikte kopyalayın.", "error");
     return;
@@ -1371,7 +1388,7 @@ function compareResults(winnerOverrides = null) {
   let racesWithoutWinner = 0;
   let racesWithoutPrediction = 0;
   for (const race of parsed.races) {
-    const winner = race.horses.find((horse) => horse.place === 1) || winnerOverrides?.get(race.no);
+    const winner = race.horses.find((horse) => horse.place === 1);
     const prediction = matchingPredictions.find((item) => item.no === race.no);
     if (!winner || !Number.isSafeInteger(Number(winner.number)) || Number(winner.number) < 1) { racesWithoutWinner += 1; continue; }
     if (!prediction) { racesWithoutPrediction += 1; continue; }
@@ -1404,9 +1421,8 @@ function compareResults(winnerOverrides = null) {
       at: `${prediction.date || timestamp.slice(0, 10)}T12:00:00.000Z`
     });
   }
-  if (racesWithoutWinner > 0 && !winnerOverrides && requestMissingWinners(parsed.races, target)) return;
   if (!outcomes.length) {
-    showMessage(target, "Sonuçlarda kazanan bulunamadı veya bu tarih ve hipodrom için eşleşen kayıtlı tahmin yok.", "error");
+    showMessage(target, `Bülten hafızaya kaydedildi ancak otomatik bitiriş sırası bulunamadığı veya kayıtlı tahminle eşleşmediği için öğrenmeye uygun sonuç çıkarılamadı. Kazananı elle seçmeden devam edildi; ${racesWithoutWinner} koşuda sıra okunamadı, ${racesWithoutPrediction} koşu tahminle eşleşmedi.`);
     return;
   }
   pendingResultImport = { outcomes, resultDate, resultCity, racesWithoutWinner, racesWithoutPrediction };
@@ -1416,7 +1432,7 @@ function compareResults(winnerOverrides = null) {
   const skipped = racesWithoutWinner + racesWithoutPrediction;
   target.setAttribute("role", "status");
   target.setAttribute("aria-live", "polite");
-  target.innerHTML = `<div class="alert"><b>Kaydetmeden önce kontrol edin · ${escapeHtml(resultDate)} · ${escapeHtml(resultCity)}</b><br>${outcomes.length} eşleşen koşu · ${newCount} yeni sonuç · ${corrections} düzeltme adayı · ${skipped} atlanan koşu (birincisi okunamadı: ${racesWithoutWinner}, tahmini eşleşmedi: ${racesWithoutPrediction}). ${winnerOverrides?.size ? `${winnerOverrides.size} kazananı elle seçtiniz; kaydetmeden önce doğrulayın.` : "Görselden/metinden okunan kazanan numarası ve at adlarını doğrulayın."}</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · model lideri ${item.top1Hit ? "isabet" : "isabet değil"}</div>`).join("")}<div class="actions"><button class="btn green" id="confirmResultsButton" type="button">Bu sonuçları onayla ve kaydet</button><button class="btn secondary" id="cancelResultsButton" type="button">İptal</button></div>`;
+  target.innerHTML = `<div class="alert"><b>Kaydetmeden önce kontrol edin · ${escapeHtml(resultDate)} · ${escapeHtml(resultCity)}</b><br>${outcomes.length} eşleşen koşu · ${newCount} yeni sonuç · ${corrections} düzeltme adayı · ${skipped} atlanan koşu (birincisi okunamadı: ${racesWithoutWinner}, tahmini eşleşmedi: ${racesWithoutPrediction}). ${racesWithoutWinner ? `${racesWithoutWinner} koşuda bitiriş sırası okunamadı; bu koşular öğrenmeden otomatik atlandı.` : "Görselden/metinden okunan kazanan numarası ve at adlarını doğrulayın."}</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · model lideri ${item.top1Hit ? "isabet" : "isabet değil"}</div>`).join("")}<div class="actions"><button class="btn green" id="confirmResultsButton" type="button">Bu sonuçları onayla ve kaydet</button><button class="btn secondary" id="cancelResultsButton" type="button">İptal</button></div>`;
   $("confirmResultsButton").addEventListener("click", () => {
     if (!pendingResultImport) return;
     let added = 0;
@@ -1689,7 +1705,7 @@ function addProfile() {
 }
 function resetHistory() {
   const scope = firebaseAccount ? "Bu cihazdaki ve Firebase hesabınızdaki" : "Bu tarayıcıdaki";
-  if (!window.confirm(`${scope} yarış sonuçları, kupon sonuç kayıtları ve eklenen profiller silinsin mi?`)) return;
+  if (!window.confirm(`${scope} bülten arşivi, fotoğraflar, yarış sonuçları, kupon sonuç kayıtları ve eklenen profiller silinsin mi?`)) return;
   state = { ...DEFAULT_STATE, profiles: { ...DEFAULT_PROFILES }, coupons: [] };
   lastAnalysis = [];
   lastCoupons = {};
@@ -1725,6 +1741,31 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("couponDateInput").value = todayLocal;
   $("resultsDateInput").value = todayLocal;
   $("manualCouponDate").value = todayLocal;
+  const savedProgramDraft = state.bulletins.find((item) => item.id === "draft-program");
+  const savedResultDraft = state.bulletins.find((item) => item.id === "draft-result");
+  if (savedProgramDraft) {
+    $("hamBultenInput").value = savedProgramDraft.text || "";
+    if (savedProgramDraft.date) $("couponDateInput").value = savedProgramDraft.date;
+    if (savedProgramDraft.city) $("couponCityInput").value = savedProgramDraft.city;
+  }
+  if (savedResultDraft) {
+    $("sonucluBultenInput").value = savedResultDraft.text || "";
+    if (savedResultDraft.date) $("resultsDateInput").value = savedResultDraft.date;
+    if (savedResultDraft.city) $("resultsCityInput").value = savedResultDraft.city;
+    if (savedResultDraft.image?.dataUrl) {
+      storedResultImage = savedResultDraft.image;
+      $("resultsImagePreview").src = storedResultImage.dataUrl;
+      $("resultsImagePreview").hidden = false;
+      $("readResultsImageButton").disabled = false;
+      setResultImageStatus("Kaydedilmiş fotoğraf hafızadan yüklendi; OCR’ı yeniden çalıştırabilirsiniz.");
+    }
+  }
+  $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
+  $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
+  $("couponCityInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
+  $("sonucluBultenInput")?.addEventListener("input", () => saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() }));
+  $("resultsDateInput")?.addEventListener("change", () => saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() }));
+  $("resultsCityInput")?.addEventListener("input", () => saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() }));
   $("manualCouponForm")?.addEventListener("submit", addManualCoupon);
   $("couponHistoryArea")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-update-coupon]");
@@ -1736,28 +1777,40 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   $("analyzeBtn")?.addEventListener("click", analyze);
   $("analyzeButton")?.addEventListener("click", analyze);
-  $("clearBtn")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
-  $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
+  $("clearBtn")?.addEventListener("click", () => { $("hamBultenInput").value = ""; saveBulletinDraft("program", { text: "", date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }); $("bultenUyariAlani").innerHTML = ""; });
+  $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; saveBulletinDraft("program", { text: "", date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }); $("bultenUyariAlani").innerHTML = ""; });
   $("chooseResultsImageButton")?.addEventListener("click", () => $("resultsImageInput")?.click());
-  $("resultsImageInput")?.addEventListener("change", (event) => {
+  $("resultsImageInput")?.addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
     if (!/^image\/(jpeg|png|webp)$/i.test(file.type) || file.size > 15 * 1024 * 1024) {
       selectedResultImage = null;
+      storedResultImage = null;
       $("readResultsImageButton").disabled = true;
       $("resultsImagePreview").hidden = true;
       setResultImageStatus("JPG, PNG veya WebP biçiminde ve 15 MB’tan küçük bir görsel seçin.", true);
       return;
     }
     selectedResultImage = file;
+    $("readResultsImageButton").disabled = true;
     const preview = $("resultsImagePreview");
     if (resultImagePreviewUrl) URL.revokeObjectURL(resultImagePreviewUrl);
     resultImagePreviewUrl = URL.createObjectURL(file);
     preview.src = resultImagePreviewUrl;
     preview.hidden = false;
-    $("readResultsImageButton").disabled = false;
-    setResultImageStatus(`${file.name} seçildi. Metni okumak için düğmeye basın.`);
+    setResultImageStatus("Fotoğraf küçültülüyor ve hafızaya kaydediliyor…");
+    try {
+      const dataUrl = await readImageAsJpeg(file, { maxDimension: 1200, quality: 0.68, maxBytes: 450 * 1024 });
+      storedResultImage = { name: file.name, type: "image/jpeg", dataUrl, savedAt: new Date().toISOString() };
+      saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), image: storedResultImage });
+      $("readResultsImageButton").disabled = false;
+      setResultImageStatus(`${file.name} fotoğrafı hafızaya kaydedildi. İsterseniz metni de otomatik okuyabilirsiniz.`);
+    } catch (error) {
+      selectedResultImage = null;
+      storedResultImage = null;
+      setResultImageStatus(error instanceof Error ? error.message : "Fotoğraf hafızaya kaydedilemedi.", true);
+    }
   });
   $("readResultsImageButton")?.addEventListener("click", extractResultsFromImage);
   $("learnBtn")?.addEventListener("click", handleCompareResults);
