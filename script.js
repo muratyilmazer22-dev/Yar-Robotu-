@@ -241,6 +241,7 @@ const TRAINING_WINDOW_RACES = 2000;
 const SINGLE_GAP_THRESHOLD = 12.5;
 const MIN_SINGLE_COVERAGE = 50;
 let scoreCache = new WeakMap();
+let ahpShadowCache = new WeakMap();
 const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], modelWeights: { ...BASE_WEIGHTS }, contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
@@ -632,6 +633,13 @@ function scoreRace(race) {
   scoreCache.set(race, combined);
   return combined;
 }
+function scoreAHPShadow(race) {
+  const cached = ahpShadowCache.get(race);
+  if (cached) return cached;
+  const result = window.RaceScoring.analyzeAHPShadow(race, { profileScore });
+  ahpShadowCache.set(race, result);
+  return result;
+}
 function singleSelectionEvidence() {
   if (singleEvidenceCache) return singleEvidenceCache;
   const outcomes = state.outcomes.filter((item) => Array.isArray(item.horses) && item.horses.length > 1 && String(item.at || "").slice(0, 10));
@@ -677,6 +685,7 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${escapeHtml(race.distance)} m ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}</span></h3>`;
     if (race.finished) return `<article class="race">${heading}<p class="alert">Koşuldu · sonuç verisi bulundu. Bu ayak için tahmin gösterilmiyor.</p></article>`;
     const ranked = scoreRace(race);
+    const ahpShadow = scoreAHPShadow(race);
     const leaderGap = ranked.length > 1 ? Number((ranked[0].score - ranked[1].score).toFixed(1)) : 0;
     const evidence = singleSelectionEvidence();
     const singleEligible = isValidatedSingle(ranked);
@@ -687,13 +696,16 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
       ? `Lider farkı ${leaderGap} puan · bağımsız veri kapsamı %${ranked[0].independentCoverage} · ${singleEligible ? "tek seçim eşiği geçmiş doğrulamada desteklendi" : `tek seçim önerilmiyor: ${SINGLE_GAP_THRESHOLD} puan fark, %${MIN_SINGLE_COVERAGE} kapsam ve doğrulamada genel liderden iyi sonuç gerekir (${evidenceDetail})`}. Puan farkı olasılık değildir.`
       : "Tek koşabilir at var; bu bir tahmin üstünlüğü anlamına gelmez.";
     const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Genel puan; robot sıralamalarının %80 konsensüsü ve normalize puan ortalamasının %20 birleşimidir. Ortalama sıra, robot sıralamalarının ağırlıklı ortalamasıdır. Dijital pay yalnızca model içi sıralama payıdır; kazanma olasılığı değildir. Kaynakta bulunmayan metrikler gösterilmez.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Ort. sıra</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th><th scope="col">Dijital pay</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${horse.number}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.averageRank.toFixed(2)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td><td>%${Math.round(horse.modelShare * 100)}</td></tr>`).join("")}</tbody></table></div></details>` : "";
-    return `<article class="race">${heading}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· model lideri</small>" : ""}<br><small>${horse.robotTopThreeCount}/${ROBOT_STRATEGIES.length} stratejinin ilk 3’ünde · ${horse.signal}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
+    const shadowSummary = ahpShadow.ranked.length
+      ? `<div class="experiment-panel"><div class="experiment-title"><h4>20 kriterli AHP gölge deneyi</h4><span class="experiment-badge">${ahpShadow.availableCriteria}/20 kriter verisi</span></div><p class="hint">Bu deney mevcut bültendeki verilerle sınırlı. Eksik kriterler sıfır sayılmaz; at başına mevcut kriterler eşit ağırlıkla normalize edilir. Şu an gerçek AHP ikili karşılaştırma matrisi yok; form, piyasa, HP ve pedigri temel modelle örtüşebilir; kilo yalnızca aynı koşudaki taşıma değerine göre kıyaslanır. Puan/pay kazanma olasılığı değildir. Ana model ve ana kupon değişmez.</p><div>${ahpShadow.ranked.slice(0, 3).map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· deney lideri</small>" : ""}<br><small>${horse.availableCriteria}/20 kriter mevcut</small></span><span class="score">${horse.score.toFixed(1)}</span></div>`).join("")}</div><details class="analysis-details"><summary>20 kriterin veri durumu</summary><ul class="experiment-list">${ahpShadow.criteria.map((criterion) => `<li>${escapeHtml(criterion.label)}: ${criterion.available ? "en az bir atta veri var" : "veri yok; puanlamaya katılmadı"}</li>`).join("")}</ul></details></div>`
+      : `<div class="experiment-panel"><div class="experiment-title"><h4>20 kriterli AHP gölge deneyi</h4><span class="experiment-badge">0/20 kriter verisi</span></div><p class="hint">Güvenilir puan üretmek için yeterli veri bulunmadı. Deney at sıralaması ve kuponu oluşturulmadı; ana model etkilenmedi.</p></div>`;
+    return `<article class="race">${heading}<p class="hint">${singleNote}</p>${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong>#${horse.number}</strong><span>${escapeHtml(horse.name)}${index === 0 ? " <small>· model lideri</small>" : ""}<br><small>${horse.robotTopThreeCount}/${ROBOT_STRATEGIES.length} stratejinin ilk 3’ünde · ${horse.signal}</small></span><span class="score">${horse.score.toFixed(1)}</span><small>${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small></div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}${shadowSummary}</article>`;
   }).join("");
 }
-function buildCoupon(races, budget, unit) {
+function buildCoupon(races, budget, unit, ranker = scoreRace, experimental = false) {
   if (races.length !== 6) return { error: "Altılı kupon için 6 okunabilir koşu gerekir." };
   const finishedNos = races.filter((race) => race.finished).map((race) => race.no);
-  const openLegs = races.filter((race) => !race.finished).map((race) => ({ race, ranked: scoreRace(race) }));
+  const openLegs = races.filter((race) => !race.finished).map((race) => ({ race, ranked: ranker(race) }));
   if (!openLegs.length) return { completedOnly: true, finishedNos };
   if (openLegs.some(({ ranked }) => !ranked.length)) return { error: "Açık ayaklardan birinde koşabilir at bulunamadı." };
   if (!Number.isFinite(budget) || budget <= 0 || !Number.isFinite(unit) || unit <= 0) return { error: "Bütçe ve kolon fiyatı sıfırdan büyük olmalıdır." };
@@ -706,7 +718,7 @@ function buildCoupon(races, budget, unit) {
       no: race.no,
       ranked,
       count: 1,
-      singleEligible: isValidatedSingle(ranked)
+      singleEligible: !experimental && isValidatedSingle(ranked)
     };
   });
   let fullColumns = 1;
@@ -727,16 +739,17 @@ function buildCoupon(races, budget, unit) {
     columns = fullColumns;
   } else {
     let best = window.CouponOptimizer.optimizeCouponCounts(picks, maxColumns, false);
-    if (!best) {
+    if (!best && !experimental) {
       best = window.CouponOptimizer.optimizeCouponCounts(picks, maxColumns, true);
       budgetForcedSingle = true;
     }
-    if (!best) {
+    if (!best && !experimental) {
       best = window.CouponOptimizer.optimizeCouponCounts(picks, maxColumns, true, picks.length);
       budgetForcedSingle = true;
       budgetForcedMultipleSingles = Boolean(best);
     }
     if (!best) {
+      if (experimental) return { error: `Deneysel kupon, doğrulanmamış tek at kullanmadığı için bu bütçeyle oluşturulamadı (${maxColumns} kolon). Daha geniş bütçe ile tekrar deneyin.` };
       const multiHorseLegs = picks.filter((pick) => pick.ranked.length > 1).length;
       const minimumColumns = multiHorseLegs ? 2 ** Math.max(0, multiHorseLegs - picks.length) : 1;
       const minimumBudget = Math.round(minimumColumns * unit * 100) / 100;
@@ -756,32 +769,39 @@ function buildCoupon(races, budget, unit) {
     pick.budgetNarrowed = pick.count < pick.ranked.length && columns / pick.count * (pick.count + 1) > maxColumns;
   }
   const forcedSingleCount = picks.filter((pick) => pick.budgetForcedSingle).length;
-  return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed), budgetForcedSingle: forcedSingleCount > 0, budgetForcedMultipleSingles: budgetForcedMultipleSingles && forcedSingleCount > 1, forcedSingleCount, finishedNos };
+  return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed), budgetForcedSingle: forcedSingleCount > 0, budgetForcedMultipleSingles: budgetForcedMultipleSingles && forcedSingleCount > 1, forcedSingleCount, finishedNos, experimental };
 }
-function formatCoupon(coupon, title, poolKey) {
+function formatCoupon(coupon, title, poolKey, options = {}) {
   if (coupon.error) return `<div class="card"><h2>${title}</h2><div class="alert error">${escapeHtml(coupon.error)}</div></div>`;
   if (coupon.completedOnly) return `<div class="card"><h2>${title}</h2><p class="hint">Bu altılıdaki tüm ayaklar koşuldu; analiz/tahmin ve kupon hesabı gösterilmiyor.</p></div>`;
   const completed = coupon.finishedNos?.length ? `<p class="hint">Koşuldu, hesap dışında: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}.</p>` : "";
-  const warning = coupon.budgetForcedMultipleSingles
-    ? `<div class="alert">Bütçe sınırı nedeniyle ${coupon.forcedSingleCount} ayakta doğrulanmış tek seçim eşiği karşılanmadan tek at bırakıldı. Bu, birden fazla ayakta riski artırır; daha geniş kupon için bütçeyi yükseltin. Hiçbir seçim garanti değildir.</div>`
-    : coupon.budgetForcedSingle
-      ? `<div class="alert">Bütçe nedeniyle bir ayakta doğrulanmış tek seçim eşiği karşılanmadan tek at bırakıldı. Daha geniş kupon için bütçeyi yükseltin; seçim garanti değildir.</div>`
-    : coupon.budgetNarrowed
-      ? `<div class="alert">Bütçe sınırı bazı ayaklarda daha geniş seçimi engelledi. Tek seçimler yalnızca ${SINGLE_GAP_THRESHOLD} puan farkı ve en az %${MIN_SINGLE_COVERAGE} bağımsız veri kapsamı eşiği karşılanınca önerilir; bu da garanti değildir.</div>`
-      : "";
-  const trainingNote = state.trainingReport?.updated
-    ? `Zamana göre ayrılmış testte iyileşen ağırlıklar kupon sıralamasında güçlendirilerek kullanılıyor (${state.trainingReport.trainingRaces} eğitim / ${state.trainingReport.validationRaces} doğrulama koşusu; test başlangıcı ${state.trainingReport.validationStartDate}). Bu, düşük sıralı adayların geçmişte işe yarayan özelliklerle öne çıkmasına yardımcı olabilir; kesin kazanan garantisi değildir.`
-    : !state.trainingReport?.validatedAt
-      ? `Başlangıç ağırlıkları kullanılıyor. Eğitim için en az ${MODEL_MIN_RACES} uygun koşu, en az 5 ayrı tarih ve en az 5 doğrulama koşusu gerekir; mevcut uygun koşu ${state.trainingReport?.sampleSize || 0}.`
-      : `Ayrılmış tarih doğrulamasında en az %2 iyileşme görülmedi; başlangıç ağırlıkları korunuyor (${state.trainingReport.trainingRaces} eğitim / ${state.trainingReport.validationRaces} doğrulama koşusu).`;
-  return `<div class="card"><h2>${title} · öğrenen model önerisi</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p><details class="analysis-details coupon-method"><summary>Kupon nasıl oluşturuluyor?</summary><p class="hint">Her açık ayak sekiz stratejinin ortak sıralamasıyla puanlanır. Tüm atlar bütçeye sığıyorsa tamamı alınır; sığmıyorsa seçilen atların birikimli model payı, bütçenin izin verdiği kolonlar içinde optimize edilir. Bağımsız veri kapsamı düşük ve analiz robotlarının lider atta daha az uzlaştığı ayaklara, ek at kapsamı için daha yüksek öncelik verilir; bu yalnızca bütçe dağıtım sezgisidir ve kazanma olasılığı değildir. Doğrulanmış tek at koşulunu geçen bir ayak tek at kalabilir; mümkün olduğunda diğer ayaklarda en az iki at korunur. Bütçe buna yetmezse önce tek bir doğrulanmamış tek seçim denenir; hâlâ kupon çıkmazsa bütçeye uyan kurgu oluşturulur ve doğrulanmamış tek atların her biri açıkça işaretlenerek risk uyarısı gösterilir. Kolon adedi seçilen at adetlerinin çarpımıdır; toplam tutar kolon adedi × birim fiyat olarak hesaplanır.</p></details>${warning}${coupon.picks.map((pick) => {
+  const warning = options.experimental
+    ? coupon.budgetNarrowed ? `<div class="alert">Deney kuponunda bütçe bazı ayaklarda geniş kapsamı engelledi. Deneysel seçimler doğrulanmış tek atlara dayanmaz; kupon garanti değildir.</div>` : ""
+    : coupon.budgetForcedMultipleSingles
+      ? `<div class="alert">Bütçe sınırı nedeniyle ${coupon.forcedSingleCount} ayakta doğrulanmış tek seçim eşiği karşılanmadan tek at bırakıldı. Bu, birden fazla ayakta riski artırır; daha geniş kupon için bütçeyi yükseltin. Hiçbir seçim garanti değildir.</div>`
+      : coupon.budgetForcedSingle
+        ? `<div class="alert">Bütçe nedeniyle bir ayakta doğrulanmış tek seçim eşiği karşılanmadan tek at bırakıldı. Daha geniş kupon için bütçeyi yükseltin; seçim garanti değildir.</div>`
+        : coupon.budgetNarrowed
+          ? `<div class="alert">Bütçe sınırı bazı ayaklarda daha geniş seçimi engelledi. Tek seçimler yalnızca ${SINGLE_GAP_THRESHOLD} puan farkı ve en az %${MIN_SINGLE_COVERAGE} bağımsız veri kapsamı eşiği karşılanınca önerilir; bu da garanti değildir.</div>`
+          : "";
+  const trainingNote = options.experimental
+    ? "Ayrı gölge kupon: eşit ağırlıklı 20 kriter deneyi, yalnızca bültende mevcut olan verileri kullanır. Veri olmayan kriterler sıfır sayılmaz. Eşit ağırlık geçici varsayımdır; doğrulanmış AHP matrisi değildir."
+    : state.trainingReport?.updated
+      ? `Zamana göre ayrılmış testte iyileşen ağırlıklar kupon sıralamasında güçlendirilerek kullanılıyor (${state.trainingReport.trainingRaces} eğitim / ${state.trainingReport.validationRaces} doğrulama koşusu; test başlangıcı ${state.trainingReport.validationStartDate}). Bu, düşük sıralı adayların geçmişte işe yarayan özelliklerle öne çıkmasına yardımcı olabilir; kesin kazanan garantisi değildir.`
+      : !state.trainingReport?.validatedAt
+        ? `Başlangıç ağırlıkları kullanılıyor. Eğitim için en az ${MODEL_MIN_RACES} uygun koşu, en az 5 ayrı tarih ve en az 5 doğrulama koşusu gerekir; mevcut uygun koşu ${state.trainingReport?.sampleSize || 0}.`
+        : `Ayrılmış tarih doğrulamasında en az %2 iyileşme görülmedi; başlangıç ağırlıkları korunuyor (${state.trainingReport.trainingRaces} eğitim / ${state.trainingReport.validationRaces} doğrulama koşusu).`;
+  const methodNote = options.experimental
+    ? "At başına veri bulunan kriterler eşit ağırlıkla puanlanır; veri yoksa kriter dışarıda kalır. Deney kuponunda yeterli bütçe yoksa doğrulanmamış tek seçim üretmek yerine kupon oluşturulmaz. Kolon sayısı bütçeyi aşamaz."
+    : "Her açık ayak sekiz stratejinin ortak sıralamasıyla puanlanır. Tüm atlar bütçeye sığıyorsa tamamı alınır; sığmıyorsa seçilen atların birikimli model payı, bütçenin izin verdiği kolonlar içinde optimize edilir. Bağımsız veri kapsamı düşük ve analiz robotlarının lider atta daha az uzlaştığı ayaklara, ek at kapsamı için daha yüksek öncelik verilir; bu yalnızca bütçe dağıtım sezgisidir ve kazanma olasılığı değildir. Doğrulanmış tek at koşulunu geçen bir ayak tek at kalabilir; mümkün olduğunda diğer ayaklarda en az iki at korunur. Bütçe buna yetmezse önce tek bir doğrulanmamış tek seçim denenir; hâlâ kupon çıkmazsa bütçeye uyan kurgu oluşturulur ve doğrulanmamış tek atların her biri açıkça işaretlenerek risk uyarısı gösterilir. Kolon adedi seçilen at adetlerinin çarpımıdır; toplam tutar kolon adedi × birim fiyat olarak hesaplanır.";
+  return `<div class="card"><h2>${title} · ${options.experimental ? "deneysel gölge kupon" : "öğrenen model önerisi"}</h2><p class="hint">${trainingNote} Sistem, seçilen atların model payını bütçeye göre dağıtır. Model payları gerçek kazanma olasılığı veya garanti değildir.</p><details class="analysis-details coupon-method"><summary>Kupon nasıl oluşturuluyor?</summary><p class="hint">${methodNote}</p></details>${warning}${coupon.picks.map((pick) => {
     const horses = pick.ranked.slice(0, pick.count);
     const horseLabels = horses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)} · sıralama payı %${Math.round(horse.modelShare * 100)}`).join(", ");
     const singleLabel = horses.length === 1
       ? pick.budgetForcedSingle ? " · bütçenin zorladığı, eşiği geçmeyen tek seçim" : pick.ranked.length === 1 ? " · tek koşabilir at" : " · tek seçim eşiği karşılandı"
       : "";
     return `<div class="alert"><b>${pick.no}. Koşu · ${horses.length} at${singleLabel} · seçilen sıralama payı %${Math.round(pick.modelCoverage * 100)}:</b> ${horseLabels}</div>`;
-  }).join("")}${completed}<b>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL / ${coupon.budget.toFixed(2)} TL bütçe</b><div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">Bu kuponu sonuç takibine kaydet</button></div></div>`;
+  }).join("")}${completed}<b>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL / ${coupon.budget.toFixed(2)} TL bütçe</b><div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">${options.experimental ? "Deney kuponunu sonuç takibine kaydet" : "Bu kuponu sonuç takibine kaydet"}</button></div></div>`;
 }
 const POOL_KEYS = ["first", "second", "third", "fourth", "fifth", "sixth"];
 const POOL_ORDINALS = ["Birinci", "İkinci", "Üçüncü", "Dördüncü", "Beşinci", "Altıncı"];
@@ -813,6 +833,7 @@ async function analyze() {
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
   const couponCity = $("couponCityInput")?.value.trim().slice(0, 80) || "";
   scoreCache = new WeakMap();
+  ahpShadowCache = new WeakMap();
   const openRaces = parsed.races.filter((race) => !race.finished);
   const { results, robotCount } = openRaces.length
     ? await analyzeWithDeterministicRobots(openRaces)
@@ -824,7 +845,8 @@ async function analyze() {
     surface: race.surface,
     type: race.type,
     distance: race.distance,
-    horses: results[index].map((horse) => ({ number: horse.number, name: horse.name, score: horse.score, modelShare: horse.modelShare, features: horse.features, performanceScore: horse.performanceScore, marketScore: horse.marketScore, coverage: horse.coverage, independentCoverage: horse.independentCoverage, signal: horse.signal }))
+    horses: results[index].map((horse) => ({ number: horse.number, name: horse.name, score: horse.score, modelShare: horse.modelShare, features: horse.features, performanceScore: horse.performanceScore, marketScore: horse.marketScore, coverage: horse.coverage, independentCoverage: horse.independentCoverage, signal: horse.signal })),
+    experimentalHorses: scoreAHPShadow(race).ranked.map((horse) => ({ number: horse.number, name: horse.name, score: horse.score, modelShare: horse.modelShare, criteriaCoverage: horse.criteriaCoverage }))
   }));
   state.predictions = mergePredictionHistory(state.predictions, lastAnalysis);
   $("resultsDateInput").value = couponDate;
@@ -859,6 +881,10 @@ async function analyze() {
       const coupon = buildCoupon(poolLegs, budget, unit);
       lastCoupons[poolKey] = coupon;
       poolCards.push(formatCoupon(coupon, poolTitle, poolKey));
+      const experimentKey = `ahp-${poolKey}`;
+      const experimentCoupon = buildCoupon(poolLegs, budget, unit, (race) => scoreAHPShadow(race).ranked, true);
+      lastCoupons[experimentKey] = experimentCoupon;
+      poolCards.push(formatCoupon(experimentCoupon, `${poolTitle} · 20 kriter`, experimentKey, { experimental: true }));
     } else {
       poolCards.push(formatIncompletePool(poolLegs, start, poolTitle));
     }
@@ -1090,6 +1116,9 @@ function compareResults() {
     const top3 = prediction.horses.slice(0, 3);
     const marketFavorite = prediction.horses.filter((horse) => horse.marketScore !== null).sort((a, b) => b.marketScore - a.marketScore)[0];
     const winnerPrediction = prediction.horses.find((horse) => horse.number === winner.number);
+    const experimentalRank = Array.isArray(prediction.experimentalHorses)
+      ? prediction.experimentalHorses.findIndex((horse) => Number(horse.number) === Number(winner.number))
+      : -1;
     const singleGap = prediction.horses.length > 1 ? prediction.horses[0].score - prediction.horses[1].score : 0;
     const singleCandidate = singleGap >= SINGLE_GAP_THRESHOLD && prediction.horses[0].independentCoverage >= MIN_SINGLE_COVERAGE;
     outcomes.push({
@@ -1099,6 +1128,9 @@ function compareResults() {
       winnerName: winner.name,
       top3Hit: top3.some((horse) => horse.number === winner.number),
       top1Hit: top3[0]?.number === winner.number,
+      experimentalTop1Hit: experimentalRank < 0 ? null : experimentalRank === 0,
+      experimentalTop3Hit: experimentalRank < 0 ? null : experimentalRank < 3,
+      experimentalWinnerRank: experimentalRank < 0 ? null : experimentalRank + 1,
       favoriteMiss: marketFavorite ? marketFavorite.number !== winner.number : null,
       surpriseHit: winnerPrediction?.signal === "Sürpriz adayı",
       singleGap,
@@ -1129,6 +1161,10 @@ function compareResults() {
   const surpriseHits = outcomes.filter((item) => item.surpriseHit).length;
   const singleCandidates = outcomes.filter((item) => item.singleCandidate);
   const singleHits = singleCandidates.filter((item) => item.singleHit).length;
+  const experimentalOutcomes = outcomes.filter((item) => typeof item.experimentalTop1Hit === "boolean");
+  const experimentalTop1Hits = experimentalOutcomes.filter((item) => item.experimentalTop1Hit).length;
+  const experimentalTop3Hits = experimentalOutcomes.filter((item) => item.experimentalTop3Hit).length;
+  const experimentalBaselineHits = experimentalOutcomes.filter((item) => item.top1Hit).length;
   const learningStatus = fresh.length === 0
     ? "Sonuçlar daha önce kaydedilmiş; özet yeniden hesaplandı."
     : state.trainingReport?.updated
@@ -1139,7 +1175,10 @@ function compareResults() {
     : "";
   target.setAttribute("role", "status");
   target.setAttribute("aria-live", "polite");
-  target.innerHTML = `<div class="alert success"><b>${outcomes.length} koşu karşılaştırıldı.</b> ${escapeHtml(learningStatus + skippedSummary)} İlk 3 içinde birinci: ${top3Hits}/${outcomes.length} (%${Math.round(top3Hits / outcomes.length * 100)}); model lideri: ${top1Hits}/${outcomes.length} (%${Math.round(top1Hits / outcomes.length * 100)}); tek seçim eşiği (${SINGLE_GAP_THRESHOLD} puan, bağımsız kapsam ≥%${MIN_SINGLE_COVERAGE}): ${singleHits}/${singleCandidates.length} isabet${singleCandidates.length < 30 ? " · örnek yetersiz (<30)" : ""}; piyasa favorisi yanılgısı: ${favoriteErrors}/${outcomes.length}; sürpriz sinyalinin kazananı yakalaması: ${surpriseHits}/${outcomes.length}.</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · İlk üç ${item.top3Hit ? "isabet" : "isabet değil"} · Model lideri ${item.top1Hit ? "isabet" : "isabet değil"} · Tek seçim eşiği ${item.singleCandidate ? item.singleHit ? "isabet" : "isabet değil" : "karşılanmadı"} · Favori yanılgısı ${item.favoriteMiss === null ? "ölçülemedi" : item.favoriteMiss ? "var" : "yok"}</div>`).join("")}`;
+  const experimentalSummary = experimentalOutcomes.length
+    ? ` · Gölge deney (aynı ${experimentalOutcomes.length} koşu): ilk 3 ${experimentalTop3Hits}/${experimentalOutcomes.length} (%${Math.round(experimentalTop3Hits / experimentalOutcomes.length * 100)}), lider ${experimentalTop1Hits}/${experimentalOutcomes.length} (%${Math.round(experimentalTop1Hits / experimentalOutcomes.length * 100)}) · ana model lideri ${experimentalBaselineHits}/${experimentalOutcomes.length} (%${Math.round(experimentalBaselineHits / experimentalOutcomes.length * 100)})${experimentalOutcomes.length < 30 ? " · örnek küçük, sonuç çıkarılamaz" : ""}.`
+    : " · 20 kriter deneyi için sonuç eşleşmesi henüz yok.";
+  target.innerHTML = `<div class="alert success"><b>${outcomes.length} koşu karşılaştırıldı.</b> ${escapeHtml(learningStatus + skippedSummary)} İlk 3 içinde birinci: ${top3Hits}/${outcomes.length} (%${Math.round(top3Hits / outcomes.length * 100)}); model lideri: ${top1Hits}/${outcomes.length} (%${Math.round(top1Hits / outcomes.length * 100)})${experimentalSummary}; tek seçim eşiği (${SINGLE_GAP_THRESHOLD} puan, bağımsız kapsam ≥%${MIN_SINGLE_COVERAGE}): ${singleHits}/${singleCandidates.length} isabet${singleCandidates.length < 30 ? " · örnek yetersiz (<30)" : ""}; piyasa favorisi yanılgısı: ${favoriteErrors}/${outcomes.length}; sürpriz sinyalinin kazananı yakalaması: ${surpriseHits}/${outcomes.length}.</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · İlk üç ${item.top3Hit ? "isabet" : "isabet değil"} · Model lideri ${item.top1Hit ? "isabet" : "isabet değil"} · 20 kriter ${item.experimentalWinnerRank === null ? "veri yetersiz" : `lider ${item.experimentalTop1Hit ? "isabet" : "isabet değil"}, kazanan sıra ${item.experimentalWinnerRank}`} · Tek seçim eşiği ${item.singleCandidate ? item.singleHit ? "isabet" : "isabet değil" : "karşılanmadı"} · Favori yanılgısı ${item.favoriteMiss === null ? "ölçülemedi" : item.favoriteMiss ? "var" : "yok"}</div>`).join("")}`;
   target.scrollIntoView({ behavior: "smooth", block: "nearest" });
   updateMemory();
 }
@@ -1159,9 +1198,11 @@ function saveGeneratedCoupon(poolKey) {
   if (!coupon || coupon.error || coupon.completedOnly) return;
   const date = $("couponDateInput")?.value || lastAnalysis[0]?.date || new Date().toISOString().slice(0, 10);
   const city = $("couponCityInput")?.value.trim().slice(0, 80) || "";
+  const experimental = coupon.experimental === true;
   const record = {
-    id: createCouponId(), date, city, poolType: poolKey, cost: coupon.total, payout: null, status: "pending",
-    source: "Yarış Robotu", columns: coupon.columns, unit: parseNumber($("birimInput")?.value),
+    id: createCouponId(), date, city, poolType: poolKey.replace(/^ahp-/, ""), cost: coupon.total, payout: null, status: "pending",
+    source: experimental ? "20 Kriter Deneysel" : "Yarış Robotu", columns: coupon.columns, unit: parseNumber($("birimInput")?.value),
+    modelVersion: experimental ? "ahp-shadow-equal-v1" : "baseline",
     legs: coupon.picks.map((pick) => ({ raceNo: pick.no, horses: pick.ranked.slice(0, pick.count).map((horse) => ({ number: horse.number, name: horse.name, modelShare: horse.modelShare })) })),
     finishedNos: coupon.finishedNos || [],
     createdAt: new Date().toISOString()
@@ -1169,7 +1210,14 @@ function saveGeneratedCoupon(poolKey) {
   state.coupons.unshift(record);
   state.coupons = state.coupons.slice(0, 500);
   saveState();
-  showMessage($("ogrenmeLogAlani"), `${getPoolLabel(poolKey)} kuponu sonuç takibine eklendi. Sonucu ve ödeme tutarını daha sonra ayrıca kaydedebilirsiniz.`, "success");
+  renderCouponHistory();
+  const poolLabel = getPoolLabel(poolKey.replace(/^ahp-/, ""));
+  const status = document.createElement("div");
+  status.className = "alert success";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  status.textContent = `${poolLabel}${experimental ? " deney kuponu" : " kuponu"} sonuç takibine eklendi. Sonucu ve ödeme tutarını daha sonra ayrıca kaydedebilirsiniz.`;
+  $("kuponAlani").prepend(status);
 }
 function addManualCoupon(event) {
   event.preventDefault();
@@ -1220,6 +1268,16 @@ function renderCouponHistory() {
   const payout = resolved.reduce((sum, record) => sum + Number(record.payout || 0), 0);
   const net = payout - cost;
   const roi = cost > 0 ? (net / cost) * 100 : null;
+  const baselineRecords = records.filter((record) => record.source === "Yarış Robotu");
+  const baselineResolved = baselineRecords.filter((record) => ["won", "lost"].includes(record.status) && Number.isFinite(Number(record.payout)));
+  const baselineCost = baselineResolved.reduce((sum, record) => sum + Number(record.cost || 0), 0);
+  const baselineNet = baselineResolved.reduce((sum, record) => sum + Number(record.payout || 0) - Number(record.cost || 0), 0);
+  const baselineRoi = baselineCost > 0 ? (baselineNet / baselineCost) * 100 : null;
+  const experimentalRecords = records.filter((record) => record.source === "20 Kriter Deneysel");
+  const experimentalResolved = experimentalRecords.filter((record) => ["won", "lost"].includes(record.status) && Number.isFinite(Number(record.payout)));
+  const experimentalCost = experimentalResolved.reduce((sum, record) => sum + Number(record.cost || 0), 0);
+  const experimentalNet = experimentalResolved.reduce((sum, record) => sum + Number(record.payout || 0) - Number(record.cost || 0), 0);
+  const experimentalRoi = experimentalCost > 0 ? (experimentalNet / experimentalCost) * 100 : null;
   const money = (value) => `${Number(value).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL`;
   const metric = (label, value) => {
     const item = document.createElement("div");
@@ -1232,12 +1290,18 @@ function renderCouponHistory() {
     return item;
   };
   metrics.replaceChildren(
-    metric("Kaydedilen kupon", records.length.toLocaleString("tr-TR")),
-    metric("Sonucu girilen (devir hariç)", resolved.length.toLocaleString("tr-TR")),
-    metric("Sonuçlanan maliyet", money(cost)),
-    metric("Net ödeme farkı", resolved.length ? money(net) : "—"),
-    metric("Net getiri / maliyet", roi === null ? "—" : `${roi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
-    metric("Devreden kupon", carryovers.length.toLocaleString("tr-TR"))
+    metric("Tüm kaynaklar · kupon", records.length.toLocaleString("tr-TR")),
+    metric("Tüm kaynaklar · sonuçlanan", resolved.length.toLocaleString("tr-TR")),
+    metric("Tüm kaynaklar · maliyet", money(cost)),
+    metric("Tüm kaynaklar · net ödeme farkı", resolved.length ? money(net) : "—"),
+    metric("Tüm kaynaklar · getiri / maliyet", roi === null ? "—" : `${roi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
+    metric("Devreden kupon", carryovers.length.toLocaleString("tr-TR")),
+    metric("Ana model kuponu / sonuçlanan", `${baselineRecords.length} / ${baselineResolved.length}`),
+    metric("Ana model net ödeme farkı", baselineResolved.length ? money(baselineNet) : "—"),
+    metric("Ana model net getiri / maliyet", baselineRoi === null ? "—" : `${baselineRoi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
+    metric("Deney kuponu / sonuçlanan", `${experimentalRecords.length} / ${experimentalResolved.length}`),
+    metric("Deney net ödeme farkı", experimentalResolved.length ? money(experimentalNet) : "—"),
+    metric("Deney net getiri / maliyet", experimentalRoi === null ? "—" : `${experimentalRoi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`)
   );
   if (!records.length) {
     target.innerHTML = '<p class="muted">Henüz kupon kaydı yok. Analizden üretilen kuponu kaydedin veya harici kuponun sonucunu ekleyin.</p>';
