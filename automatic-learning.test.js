@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { BASE_WEIGHTS, dateInTurkey, fitModel, raceToTrainingExample } = require('./lib/automatic-learning');
 const { createIndex } = require('./lib/race-context');
+const classHistory = require('./class-history');
+const pedigreeHistory = require('./lib/pedigree-history');
 const cronHandler = require('./api/cron/daily-learning');
 
 function response() {
@@ -38,16 +40,29 @@ test('ambiguous, missing-winner, and unmatched race results are excluded from tr
 test('archive training examples include prior venue, weather, and track performance only', () => {
   const previous = {
     race_date: '2026-11-01', city: 'Ankara',
-    program: { weather: 'Yağmurlu', surface: 'Kum', trackCondition: 'Islak', runners: [{ no: 1, name: 'KIR AT' }] },
-    results: { runners: [{ no: 1, finishPosition: 1 }] }
+    program: { raceType: 'Grup 1', distance: 1200, weather: 'Yağmurlu', surface: 'Kum', trackCondition: 'Islak', runners: [
+      { no: 1, name: 'KIR AT', handicapPoints: 90, sire: 'TOROK', damSire: 'LUXOR' },
+      { no: 2, name: 'RAKİP A', handicapPoints: 85 },
+      { no: 3, name: 'RAKİP B', handicapPoints: 80 }
+    ] },
+    results: { runners: [{ no: 1, finishPosition: 1 }, { no: 2, finishPosition: 2 }, { no: 3, finishPosition: 3 }] }
   };
   const target = {
     raceDate: '2026-11-02', city: 'Ankara',
-    program: { weather: 'Yağmurlu', surface: 'Kum', trackCondition: 'Islak', raceCategory: 'Maiden', runners: [{ no: 1, name: 'KIR AT' }, { no: 2, name: 'AK AT' }] },
+    program: { raceType: 'Handikap 15', distance: 1200, weather: 'Yağmurlu', surface: 'Kum', trackCondition: 'Islak', raceCategory: 'Maiden', runners: [
+      { no: 1, name: 'KIR AT', handicapPoints: 90, sire: 'TOROK', damSire: 'LUXOR' },
+      { no: 2, name: 'AK AT', handicapPoints: 70, sire: 'MENDIP', damSire: 'KAIZBERT' }
+    ] },
     results: { runners: [{ no: 1, finishPosition: 1 }, { no: 2, finishPosition: 2 }] }
   };
-  const example = raceToTrainingExample(target, { contextIndex: createIndex([previous]) });
+  const example = raceToTrainingExample(target, {
+    contextIndex: createIndex([previous]),
+    classIndex: classHistory.createIndex([previous]),
+    pedigreeIndex: pedigreeHistory.createIndex([previous])
+  });
   assert.ok(example.horses[0].features.venueFit > 50);
+  assert.ok(example.horses[0].features.classHistory > 50);
+  assert.ok(example.horses[0].features.groupFit > 50);
   assert.ok(example.horses[0].features.weatherFit > 50);
   assert.ok(example.horses[0].features.trackFit > 50);
   assert.equal(example.horses[1].features.weatherFit, null);

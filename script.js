@@ -252,6 +252,7 @@ let scoreCache = new WeakMap();
 let classHistoryArchive = new Map();
 let raceRelationArchive = new Map();
 let raceContextArchive = new Map();
+let pedigreeHistoryArchive = new Map();
 const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
@@ -657,7 +658,9 @@ function scoreRace(race) {
         jockey: horse.jockey,
         weight: horse.weight
       }, raceDate),
-      classHistoryScore: window.RaceClassHistory.scoreForHorse(classHistoryArchive, horse.name, raceClass, raceDate)
+      classHistoryScore: window.RaceClassHistory.scoreForHorse(classHistoryArchive, horse.name, raceClass, raceDate),
+      groupFit: window.RaceClassHistory.groupFitForHorse(classHistoryArchive, horse.name, raceDate),
+      pedigreeFit: window.RacePedigreeHistory.scoreForHorse(pedigreeHistoryArchive, horse, { surface: race.surface, distance: race.distance }, raceDate)
     }))
   };
   const ranked = window.RaceScoring.analyzeRace(scoringRace, {
@@ -747,8 +750,8 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     }
     const ekuriPairCount = [...ekuriCounts.values()].filter((count) => count > 1).length;
     const relationshipNote = `<p class="hint historical-summary">Atın geçmiş hipodrom, hava ve pist koşullarındaki sonuçları yeterli eşleşme varsa puana katılır; eşleşmeyen bağlam puanı etkilemez. Jokey/rakip arşiv bilgileri bilgilendirme amaçlıdır. ${repeatedJockeyCount ? `${repeatedJockeyCount} jokey birden fazla ayakta görünüyor.` : "Ayaklar arasında tekrarlanan jokey tespit edilmedi."} Eküri yalnızca bültendeki açık eküri kodu aynı olan atlarda uygulanır; ${ekuriPairCount ? `${ekuriPairCount} eküri grubu bulundu.` : "bu bültende açık eküri kodu bulunmadı."} Sistem at sahibi benzerliğinden eşleşme tahmin etmez.</p>`;
-    const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Puanlar yalnızca bu koşudaki göreli sıralamayı gösterir; kazanma olasılığı değildir. Derece uyumu, arşivdeki aynı pist türü ve 200 m yakınlıktaki önceki yarışların hızını karşılaştırır; derece verisi yoksa puana katılmaz.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">Derece uyumu</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</td><td>${horse.features.timeFit === null ? "—" : horse.features.timeFit.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td></tr>`).join("")}</tbody></table></div></details>` : "";
-    return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${relationshipNote}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}${horse.isCoupled ? `<small>Eküri · ${horse.members.map((member) => `#${member.number} ${escapeHtml(member.name)}`).join(" + ")}</small>` : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small></span><span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small>${historicalEvidenceMarkup(race, horse)}</div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
+    const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Puanlar göreli sıralamadır, kazanma olasılığı değildir. Grup gücü; önceki yarışın sınıfı, rakiplerin medyan HP&apos;si ve atın bitirişini birlikte değerlendirir. Pedigri puanı, aynı pist türü ve mesafe bandındaki önceki yavru sonuçlarından öğrenilir; en az üç farklı yavru yoksa gösterilmez. Derece uyumu aynı pist türü ve 200 m yakınlıktaki geçmiş dereceleri karşılaştırır.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">Grup gücü</th><th scope="col">Derece uyumu</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</td><td>${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)}</td><td>${horse.features.timeFit === null ? "—" : horse.features.timeFit.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td></tr>`).join("")}</tbody></table></div></details>` : "";
+    return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${relationshipNote}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}${horse.isCoupled ? `<small>Eküri · ${horse.members.map((member) => `#${member.number} ${escapeHtml(member.name)}`).join(" + ")}</small>` : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small><small>Grup puanı ${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)} · Pedigri puanı ${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</small></span><span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small>${historicalEvidenceMarkup(race, horse)}</div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
 function buildCoupon(races, budget, unit) {
@@ -1145,7 +1148,7 @@ async function syncHistoricalArchive() {
   const remoteMemory = await refreshRemoteMemory();
   const sharedModel = remoteMemory?.automaticModel;
   const sharedWeights = sharedModel?.weights;
-  if (sharedWeights && Object.keys(BASE_WEIGHTS).every((key) => Number.isFinite(Number(sharedWeights[key])))) {
+  if (sharedWeights && Object.entries(sharedWeights).every(([key, value]) => Object.hasOwn(BASE_WEIGHTS, key) && Number.isFinite(Number(value)))) {
     state.modelWeights = { ...BASE_WEIGHTS, ...sharedWeights };
     state.lastGoodModelWeights = { ...state.modelWeights };
     if (sharedModel.contextWeights && typeof sharedModel.contextWeights === "object") {
@@ -1166,6 +1169,7 @@ async function syncHistoricalArchive() {
     classHistoryArchive = window.RaceClassHistory.createIndex(archive);
     raceRelationArchive = window.RaceRelations.createIndex(archive);
     raceContextArchive = window.RaceContextPerformance.createIndex(archive);
+    pedigreeHistoryArchive = window.RacePedigreeHistory.createIndex(archive);
     scoreCache = new WeakMap();
     const converted = archive.map(archiveRowToOutcome).filter(Boolean);
     let freshCount = 0;
@@ -1175,11 +1179,11 @@ async function syncHistoricalArchive() {
       const existingIndex = state.outcomes.findIndex((outcome) => outcomeKey(outcome) === outcomeKey(item));
       const existing = existingIndex >= 0 ? state.outcomes[existingIndex] : null;
       const existingHorses = new Map((existing?.horses || []).map((horse) => [Number(horse.number), horse]));
-      const classHistoryChanged = existing?.sourceKey?.startsWith("tjk:") && item.horses.some((horse) => {
-        const previousFeature = existingHorses.get(Number(horse.number))?.features?.classHistory;
-        return Number.isFinite(horse.features?.classHistory) && previousFeature !== horse.features.classHistory;
+      const learnedSignalsChanged = existing?.sourceKey?.startsWith("tjk:") && item.horses.some((horse) => {
+        const previousFeatures = existingHorses.get(Number(horse.number))?.features || {};
+        return ["classHistory", "groupFit", "pedigree"].some((key) => Number.isFinite(horse.features?.[key]) && previousFeatures[key] !== horse.features[key]);
       });
-      if (classHistoryChanged) {
+      if (learnedSignalsChanged) {
         state.outcomes[existingIndex] = item;
         refreshedClassHistoryCount += 1;
         continue;

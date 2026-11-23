@@ -12,6 +12,16 @@ test('race context discovers venue-specific distance and surface combinations wi
   assert.deepEqual(raceContextKeys({ ...race, city: '', distance: 1200 }), ['Kum|HANDİKAP|kisa', 'Kum|HANDİKAP']);
 });
 
+test('race context uses country and course configuration when those fields are available', () => {
+  const { raceContextKeys } = require('./scoring');
+  const keys = raceContextKeys({ country: 'Hong Kong', city: 'Sha Tin', venueConfig: 'B+2', surface: 'Turf', type: 'HANDICAP', distance: 1600 });
+
+  assert.equal(keys[0], 'SHA TİN|B+2|Turf|HANDICAP|orta');
+  assert.ok(keys.includes('HONG KONG|SHA TİN|Turf|HANDICAP|orta'));
+  assert.ok(keys.includes('HONG KONG|Turf|HANDICAP|orta'));
+  assert.ok(keys.includes('Turf|HANDICAP|orta'));
+});
+
 test('the model prefers an exact distance context over a broader one', () => {
   const race = {
     distance: 1200,
@@ -103,6 +113,40 @@ test('learned class-history evidence influences the ranking without replacing ot
   assert.equal(ranked[0].number, 2);
   assert.equal(ranked[0].features.classHistory, 95);
   assert.ok(ranked[0].score > ranked[1].score);
+});
+
+test('learned group strength influences ranking when prior-group evidence exists', () => {
+  const race = {
+    distance: 1400,
+    surface: 'Kum',
+    type: 'HANDİKAP',
+    horses: [
+      { number: 1, groupFit: 25 },
+      { number: 2, groupFit: 90 }
+    ]
+  };
+  const modelWeights = Object.fromEntries(Object.keys(require('./scoring').BASE_WEIGHTS).map((name) => [name, name === 'groupFit' ? 1 : 0]));
+  const ranked = analyzeRace(race, { modelWeights });
+
+  assert.equal(ranked[0].number, 2);
+  assert.equal(ranked[0].features.groupFit, 90);
+});
+
+test('learned pedigree evidence takes precedence over the static sire profile', () => {
+  const race = {
+    distance: 1400,
+    surface: 'Kum',
+    type: 'HANDİKAP',
+    horses: [
+      { number: 1, sire: 'TOROK', pedigreeFit: 20 },
+      { number: 2, sire: 'TOROK', pedigreeFit: 95 }
+    ]
+  };
+  const modelWeights = Object.fromEntries(Object.keys(require('./scoring').BASE_WEIGHTS).map((name) => [name, name === 'pedigree' ? 1 : 0]));
+  const ranked = analyzeRace(race, { modelWeights, profileScore: () => 99 });
+
+  assert.equal(ranked[0].number, 2);
+  assert.equal(ranked[0].features.pedigree, 95);
 });
 
 test('missing horse numbers do not collapse distinct runners in the main ranking', () => {
