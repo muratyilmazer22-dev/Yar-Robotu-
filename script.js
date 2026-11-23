@@ -249,6 +249,7 @@ const TRAINING_WINDOW_RACES = 2000;
 const SINGLE_GAP_THRESHOLD = 12.5;
 const MIN_SINGLE_COVERAGE = 50;
 let scoreCache = new WeakMap();
+let classHistoryArchive = new Map();
 const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
@@ -637,7 +638,16 @@ function profileScore(name, distance) {
 function scoreRace(race) {
   const cached = scoreCache.get(race);
   if (cached) return cached;
-  const ranked = window.RaceScoring.analyzeRace(race, {
+  const raceDate = race.date || $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
+  const raceClass = race.raceType || race.raceCategory || race.title || race.type;
+  const scoringRace = {
+    ...race,
+    horses: race.horses.map((horse) => ({
+      ...horse,
+      classHistoryScore: window.RaceClassHistory.scoreForHorse(classHistoryArchive, horse.name, raceClass, raceDate)
+    }))
+  };
+  const ranked = window.RaceScoring.analyzeRace(scoringRace, {
     modelWeights: state.modelWeights,
     contextWeights: state.contextWeights,
     profileScore
@@ -1020,6 +1030,8 @@ function archiveRowToOutcome(row) {
   const type = normalizedTitle.includes("HANDIKAP") ? "HANDIKAP" : normalizedTitle.includes("MAIDEN") || normalizedTitle.includes("SATIS") ? "MAIDEN / SATIŞ" : "DİĞER";
   const race = {
     no: Number(row.race_no),
+    date: String(row.race_date || "").slice(0, 10),
+    raceType: String(program.raceType || program.raceCategory || title),
     distance: distanceAndSurface ? Number(distanceAndSurface[1]) : 1400,
     surface,
     type,
@@ -1094,16 +1106,31 @@ async function syncHistoricalArchive() {
       archive.push(...page);
       if (page.length < pageSize) break;
     }
+    classHistoryArchive = window.RaceClassHistory.createIndex(archive);
+    scoreCache = new WeakMap();
     const converted = archive.map(archiveRowToOutcome).filter(Boolean);
     let freshCount = 0;
     let correctedCount = 0;
+    let refreshedClassHistoryCount = 0;
     for (const item of converted) {
+      const existingIndex = state.outcomes.findIndex((outcome) => outcomeKey(outcome) === outcomeKey(item));
+      const existing = existingIndex >= 0 ? state.outcomes[existingIndex] : null;
+      const existingHorses = new Map((existing?.horses || []).map((horse) => [Number(horse.number), horse]));
+      const classHistoryChanged = existing?.sourceKey?.startsWith("tjk:") && item.horses.some((horse) => {
+        const previousFeature = existingHorses.get(Number(horse.number))?.features?.classHistory;
+        return Number.isFinite(horse.features?.classHistory) && previousFeature !== horse.features.classHistory;
+      });
+      if (classHistoryChanged) {
+        state.outcomes[existingIndex] = item;
+        refreshedClassHistoryCount += 1;
+        continue;
+      }
       const merged = window.RaceLearningEvaluation.mergeOutcome(state.outcomes, item);
       state.outcomes = merged.outcomes;
       freshCount += Number(merged.added);
       correctedCount += Number(merged.corrected);
     }
-    if (freshCount || correctedCount) trainModel();
+    if (freshCount || correctedCount || refreshedClassHistoryCount) trainModel();
     state.archiveRaceCount = converted.length;
     state.archiveLatestDate = archive.map((row) => String(row.race_date || "").slice(0, 10)).sort().at(-1) || "";
     state.archiveSyncedAt = new Date().toISOString();
@@ -1112,6 +1139,67 @@ async function syncHistoricalArchive() {
     if (status) status.textContent = `Neon arşivinden ${converted.length.toLocaleString("tr-TR")} sonuçlu koşu alındı; ${freshCount.toLocaleString("tr-TR")} yeni koşu eklendi; ${correctedCount.toLocaleString("tr-TR")} eski sonuç düzeltildi. Son arşiv tarihi: ${state.archiveLatestDate || "bilinmiyor"}. ${state.trainingReport?.updated ? "Ayrılmış doğrulamada iyileşme görüldü; öğrenilmiş ağırlıklar etkin." : `Ağırlıklar ${MODEL_MIN_RACES} yarış ve ayrılmış doğrulama iyileşmesi şartıyla güncellenir.`}`;
   } catch {
     if (status) status.textContent = "Neon yarış arşivine şu an ulaşılamadı. Bu cihazdaki kayıtlar korunuyor; bağlantı kurulduğunda arşiv yeniden kontrol edilir.";
+  }
+}
+let selectedResultImage = null;
+let resultImagePreviewUrl = null;
+function setResultImageStatus(message, isError = false) {
+  const status = $("resultsImageStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle("error", isError);
+}
+function readImageAsJpeg(file) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const sourceUrl = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(sourceUrl);
+      const scale = Math.min(1, 1800 / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext("2d");
+      if (!context) return reject(new Error("Görsel dönüştürülemedi."));
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) return reject(new Error("Görsel küçültülemedi."));
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Görsel okunamadı."));
+        reader.readAsDataURL(blob);
+      }, "image/jpeg", 0.82);
+    };
+    image.onerror = () => { URL.revokeObjectURL(sourceUrl); reject(new Error("Bu görsel açılamadı.")); };
+    image.src = sourceUrl;
+  });
+}
+async function extractResultsFromImage() {
+  if (!selectedResultImage) return;
+  const button = $("readResultsImageButton");
+  button.disabled = true;
+  button.textContent = "Görsel okunuyor…";
+  setResultImageStatus("Görsel küçültülüyor ve sonuç tablosu okunuyor…");
+  try {
+    const image = await readImageAsJpeg(selectedResultImage);
+    const response = await fetch("/api/result-image-ocr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Görsel okunamadı. Daha net bir görüntü seçip tekrar deneyin.");
+    const recognizedText = String(payload.text || "").trim();
+    if (!recognizedText) throw new Error("Görselde okunabilir sonuç metni bulunamadı.");
+    const textarea = $("sonucluBultenInput");
+    textarea.value = [textarea.value.trim(), recognizedText].filter(Boolean).join("\n\n");
+    textarea.focus();
+    setResultImageStatus("Metin taslağı eklendi. Koşu ve sıra bilgilerini kontrol edin; ardından sonuçları eşleştirip önizleyin.");
+  } catch (error) {
+    setResultImageStatus(error instanceof Error ? error.message : "Görsel işlenemedi. Lütfen yeniden deneyin.", true);
+  } finally {
+    button.disabled = !selectedResultImage;
+    button.textContent = "Görselden metni oku";
   }
 }
 function compareResults() {
@@ -1508,6 +1596,28 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("analyzeButton")?.addEventListener("click", analyze);
   $("clearBtn")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
   $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; $("bultenUyariAlani").innerHTML = ""; });
+  $("chooseResultsImageButton")?.addEventListener("click", () => $("resultsImageInput")?.click());
+  $("resultsImageInput")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.type) || file.size > 15 * 1024 * 1024) {
+      selectedResultImage = null;
+      $("readResultsImageButton").disabled = true;
+      $("resultsImagePreview").hidden = true;
+      setResultImageStatus("JPG, PNG veya WebP biçiminde ve 15 MB’tan küçük bir görsel seçin.", true);
+      return;
+    }
+    selectedResultImage = file;
+    const preview = $("resultsImagePreview");
+    if (resultImagePreviewUrl) URL.revokeObjectURL(resultImagePreviewUrl);
+    resultImagePreviewUrl = URL.createObjectURL(file);
+    preview.src = resultImagePreviewUrl;
+    preview.hidden = false;
+    $("readResultsImageButton").disabled = false;
+    setResultImageStatus(`${file.name} seçildi. Metni okumak için düğmeye basın.`);
+  });
+  $("readResultsImageButton")?.addEventListener("click", extractResultsFromImage);
   $("learnBtn")?.addEventListener("click", handleCompareResults);
   $("learnButton")?.addEventListener("click", handleCompareResults);
   $("saveHorseBtn")?.addEventListener("click", addProfile);

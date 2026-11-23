@@ -3,8 +3,12 @@
     "start": "bash -lc 'set -a; [ ! -f .env.development.local ] || . ./.env.development.local; set +a; vercel dev --local --listen 8080'",
     "test": "node --test"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@vercel/connect": "^2.9.5",
+    "ai": "^7.0.179",
     "cheerio": "^1.2.0",
     "drizzle-orm": "^0.45.4",
     "pg": "^8.23.1",
