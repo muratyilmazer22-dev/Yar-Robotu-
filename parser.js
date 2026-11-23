@@ -91,7 +91,7 @@
         const numberIndex = headers.findIndex((header) => header === 'n' || header === 'no' || header.includes('at no') || header.includes('horse no') || header.includes('horse number') || header.includes('program no'));
         horseNumber = numberIndex >= 0 ? parseNumber(cells[numberIndex]) : horseMatch ? Number(horseMatch[1]) : null;
         const rankIndex = headers.findIndex((header) => header === 's' || header.includes('sira') || header.includes('sonuc') || header.includes('result') || header.includes('rank') || header.includes('placing') || header.includes('position'));
-        assumedRank = rankIndex >= 0 ? parseNumber(cells[rankIndex]) : null;
+        assumedRank = rankIndex >= 0 ? parseNumber(cells[rankIndex]) : numberIndex >= 0 && horseMatch ? Number(horseMatch[1]) : null;
         const origin = column('orijin');
         const pedigree = parseOrigin(origin);
         const weightText = column('siklet');
