@@ -2,6 +2,9 @@ const { and, gte, lte } = require('drizzle-orm');
 const { db } = require('../lib/db');
 const { raceHistory } = require('../lib/db/schema');
 const { analyzeRace, normalizeName } = require('../scoring');
+const classHistory = require('../class-history');
+const raceContext = require('../lib/race-context');
+const pedigreeHistory = require('../lib/pedigree-history');
 const { getWinnerRank, getWinnerRankBucket } = require('../lib/backtest-metrics');
 
 function validDate(value) {
@@ -56,6 +59,9 @@ module.exports = async function handler(req, res) {
     let surpriseCandidateRaces = 0;
     let surpriseCandidateWinnerHits = 0;
     let validationMarketFavoriteHits = 0;
+    const contextIndex = raceContext.createIndex(rows);
+    const classIndex = classHistory.createIndex(rows);
+    const pedigreeIndex = pedigreeHistory.createIndex(rows);
 
     for (const row of rows) {
       const program = row.program || {};
@@ -68,7 +74,30 @@ module.exports = async function handler(req, res) {
       }
 
       const finishById = new Map(finishers.map((horse) => [identity(horse), Number(horse.finishPosition)]).filter(([, place]) => Number.isFinite(place) && place > 0));
-      const scores = analyzeRace({ distance: Number(program.distance) || 1400, surface: program.surface, type: program.raceCategory || program.raceType, horses });
+      const raceDate = String(row.raceDate || '').slice(0, 10);
+      const scoringHorses = horses.map((horse) => ({
+        ...horse,
+        ...raceContext.scoreForHorse(contextIndex, horse.name, {
+          city: row.city,
+          weather: program.weather,
+          surface: program.surface,
+          trackCondition: program.trackCondition,
+          surfaceChange: program.surfaceChange,
+          distance: program.distance,
+          jockey: horse.jockey,
+          weight: horse.weight
+        }, raceDate),
+        classHistoryScore: classHistory.scoreForHorse(classIndex, horse.name, program.raceType || program.raceCategory || program.title || '', raceDate),
+        groupFit: classHistory.groupFitForHorse(classIndex, horse.name, raceDate),
+        pedigreeFit: pedigreeHistory.scoreForHorse(pedigreeIndex, horse, { surface: program.surface, distance: program.distance }, raceDate)
+      }));
+      const scores = analyzeRace({
+        distance: Number(program.distance) || 1400,
+        surface: program.surface,
+        type: program.raceCategory || program.raceType,
+        city: row.city,
+        horses: scoringHorses
+      });
       const matched = scores.map((horse) => ({ horse, place: finishById.get(identity(horse)) })).filter((entry) => Number.isFinite(entry.place));
       const winnerEntry = matched.find((entry) => entry.place === 1);
       if (!winnerEntry) {
@@ -182,7 +211,7 @@ module.exports = async function handler(req, res) {
         averageTopThreeHits: Number((group.totalTopThreeHits / group.races).toFixed(2)),
         winnerHitRate: rate(group.winnerHits, group.races)
       })),
-      method: 'Bu rapor dört mevcut sinyali (handikap, form, piyasa ve pedigri) tek ağırlıklı modelle değerlendirir. Son tarihlerden ayrılan %20 bölüm doğrulama için tutulur; kullanıcıya özel profiller ve öğrenilmiş ağırlıklar bu sunucu testinde yer almaz. 30’dan az eşik adayı sonuçları yön gösterici sayılmamalıdır. Sonuçlar kazanma garantisi değildir.'
+      method: 'Bu rapor sabit temel ağırlıklarla form, piyasa, HP, pedigri, grup seviyesi/bitiriş, sınıf geçmişi, hipodrom, hava, pist ve derece sinyallerini değerlendirir. Tüm arşiv indeksleri hedef tarihten önceki yarışlarla sınırlandırılır; son tarihlerden ayrılan %20 bölüm doğrulama için tutulur. Kullanıcıya özel profiller ve sonradan öğrenilmiş ağırlıklar bu sunucu testinde yer almaz. 30’dan az eşik adayı sonuçları yön gösterici sayılmamalıdır. Sonuçlar kazanma garantisi değildir.'
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected server error.';
