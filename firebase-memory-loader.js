@@ -24,7 +24,7 @@
           firestoreSdk.getDoc(firestoreSdk.doc(db, ...accountPath(user.uid), "memory", "state")),
           firestoreSdk.getDocs(firestoreSdk.collection(db, ...accountPath(user.uid), "memoryData"))
         ]);
-        const memory = { predictions: [], outcomes: [], coupons: [] };
+        const memory = { predictions: [], outcomes: [], coupons: [], bulletins: [] };
         let found = settingsSnapshot.exists() || chunksSnapshot.size > 0;
         if (settingsSnapshot.exists()) Object.assign(memory, settingsSnapshot.data());
 
@@ -32,6 +32,9 @@
           const chunk = chunkDocument.data();
           if (["predictions", "outcomes", "coupons"].includes(chunk.kind) && Array.isArray(chunk.items)) {
             memory[chunk.kind].push(...chunk.items);
+            found = true;
+          } else if (chunk.kind === "bulletin" && chunk.item && typeof chunk.item === "object") {
+            memory.bulletins.push(chunk.item);
             found = true;
           }
         }
@@ -54,7 +57,7 @@
           const applyLegacyState = (source) => {
             const legacyState = source?.state && typeof source.state === "object" ? source.state : source;
             if (!legacyState || typeof legacyState !== "object") return;
-            for (const key of ["predictions", "outcomes", "coupons"]) {
+            for (const key of ["predictions", "outcomes", "coupons", "bulletins"]) {
               if (Array.isArray(legacyState[key])) memory[key].push(...legacyState[key]);
             }
             for (const key of ["profiles", "modelWeights", "contextWeights", "contextReports", "trainingReport", "archiveRaceCount", "archiveLatestDate", "archiveSyncedAt", "localUpdatedAt"]) {
@@ -97,11 +100,19 @@
         const lists = {
           predictions: state.predictions || [],
           outcomes: personalOutcomes,
-          coupons: state.coupons || []
+          coupons: state.coupons || [],
+          bulletins: state.bulletins || []
         };
         const pending = new Map();
 
         for (const [kind, items] of Object.entries(lists)) {
+          if (kind === "bulletins") {
+            for (const [index, item] of items.entries()) {
+              const id = String(item.id || index).replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 120);
+              pending.set(`bulletin-${id}`, { kind: "bulletin", item, schemaVersion: 1, updatedAt: firestoreSdk.serverTimestamp() });
+            }
+            continue;
+          }
           for (let offset = 0; offset < items.length; offset += 50) {
             const index = String(Math.floor(offset / 50)).padStart(4, "0");
             const documentId = `${kind}-${index}`;
@@ -114,15 +125,23 @@
           }
         }
 
-        const batch = firestoreSdk.writeBatch(db);
+        const operations = [];
         for (const [documentId, data] of pending) {
-          batch.set(firestoreSdk.doc(collectionReference, documentId), data);
+          operations.push({ ref: firestoreSdk.doc(collectionReference, documentId), data });
         }
         for (const [documentId, document] of previousDocuments) {
           const data = document.data();
-          if (["predictions", "outcomes", "coupons"].includes(data.kind) && !pending.has(documentId)) {
-            batch.delete(document.ref);
+          if (["predictions", "outcomes", "coupons", "bulletin"].includes(data.kind) && !pending.has(documentId)) {
+            operations.push({ ref: document.ref, delete: true });
           }
+        }
+        for (let offset = 0; offset < operations.length; offset += 400) {
+          const batch = firestoreSdk.writeBatch(db);
+          for (const operation of operations.slice(offset, offset + 400)) {
+            if (operation.delete) batch.delete(operation.ref);
+            else batch.set(operation.ref, operation.data);
+          }
+          await batch.commit();
         }
 
         const settings = {
@@ -138,8 +157,9 @@
           localUpdatedAt: String(state.localUpdatedAt || ""),
           updatedAt: firestoreSdk.serverTimestamp()
         };
-        batch.set(firestoreSdk.doc(db, ...accountPath(user.uid), "memory", "state"), settings, { merge: true });
-        await batch.commit();
+        const settingsBatch = firestoreSdk.writeBatch(db);
+        settingsBatch.set(firestoreSdk.doc(db, ...accountPath(user.uid), "memory", "state"), settings, { merge: true });
+        await settingsBatch.commit();
       }
 
       return {
