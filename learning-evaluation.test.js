@@ -4,7 +4,7 @@ const { evaluateForwardComparison, isPersonalBulletinOutcome, mergeOutcome, merg
 
 function outcome(date, winner = 1) {
   return {
-    at: `${date}T12:00:00.000Z`, city: 'İstanbul', raceNo: 1, winner, surface: 'Kum', type: 'Maiden',
+    at: `${date}T12:00:00.000Z`, city: 'İstanbul', raceNo: 1, winner, surface: 'Kum', type: 'Maiden', reviewedByUser: true,
     horses: [
       { number: 1, score: 70, marketScore: 30, features: { rating: 90, form: 70 } },
       { number: 2, score: 60, marketScore: 70, features: { rating: 40, form: 60 } }
@@ -41,6 +41,15 @@ test('only user bulletin outcomes are eligible for personal learning', () => {
   assert.equal(isPersonalBulletinOutcome(personal), true);
   assert.equal(isPersonalBulletinOutcome(archive), false);
   assert.equal(evaluateForwardComparison([archive], { rating: 1 }).validated, false);
+});
+
+test('unreviewed personal outcomes are excluded and become eligible only after explicit review', () => {
+  const unreviewed = { ...outcome('2026-01-01'), reviewedByUser: false };
+  const report = evaluateForwardComparison(Array.from({ length: 10 }, (_, index) => ({ ...outcome(`2026-01-${String(index + 1).padStart(2, '0')}`), reviewedByUser: false })), { rating: 1 });
+  assert.equal(report.validated, false);
+  const promoted = mergeOutcome([unreviewed], { ...unreviewed, reviewedByUser: true });
+  assert.equal(promoted.corrected, true);
+  assert.equal(promoted.outcomes[0].reviewedByUser, true);
 });
 
 test('user bulletin outcomes take precedence over official archive duplicates', () => {

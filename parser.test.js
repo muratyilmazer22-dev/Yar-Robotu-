@@ -141,6 +141,17 @@ test('reads finishing positions from result-table headers', () => {
   assert.deepEqual(race.horses.map((horse) => horse.rank), [1, 2]);
 });
 
+test('does not use a horse number as a finish position when result rank is absent', () => {
+  const results = [
+    '3. Koşu 15:30 Maiden',
+    'N\tAt İsmi',
+    '9\tBY NALÇAKAN',
+    '3\tDJUMBO'
+  ].join('\n');
+  const [race] = parseRaces(results);
+  assert.deepEqual(race.horses.map((horse) => horse.rank), [0, 0]);
+});
+
 test('reads parenthesized finishing positions when the horse number has its own column', () => {
   const results = [
     '3. Koşu 15:30 Maiden',
