@@ -33,6 +33,20 @@ test("result image OCR rejects invalid data URLs before calling a model", async 
   assert.match(res.body.error, /JPG, PNG veya WebP/);
 });
 
+test("result image OCR rejects unsupported extraction modes", async () => {
+  const res = createResponse();
+  await handler({ method: "POST", headers: { "content-type": "application/json" }, body: { image: "", mode: "unknown" } }, res);
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /okuma türü geçersiz/);
+});
+
+test("result image OCR accepts the general memory extraction mode", async () => {
+  const res = createResponse();
+  await handler({ method: "POST", headers: { "content-type": "application/json" }, body: { image: "invalid", mode: "memory" } }, res);
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.error, /Yalnızca 3 MB/);
+});
+
 test("result image OCR verifies image signatures", async () => {
   const res = createResponse();
   await handler({ method: "POST", headers: { "content-type": "application/json" }, body: { image: `data:image/jpeg;base64,${Buffer.from("not an image").toString("base64")}` } }, res);
