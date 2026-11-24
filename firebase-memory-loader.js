@@ -169,8 +169,12 @@
           await auth.authStateReady();
           return auth.currentUser ? auth.currentUser.getIdToken() : null;
         },
-        signIn: (email, password) => authSdk.signInWithEmailAndPassword(auth, email, password),
-        createAccount: (email, password) => authSdk.createUserWithEmailAndPassword(auth, email, password),
+        isEmailSignInLink: (url) => authSdk.isSignInWithEmailLink(auth, url),
+        sendEmailSignInLink: (email, url) => authSdk.sendSignInLinkToEmail(auth, email, {
+          url,
+          handleCodeInApp: true
+        }),
+        completeEmailSignIn: (email, url) => authSdk.signInWithEmailLink(auth, email, url),
         signOut: () => authSdk.signOut(auth),
         loadMemory,
         saveMemory
