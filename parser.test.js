@@ -167,3 +167,42 @@ test('supports English race headings and result column names', () => {
   assert.equal(race.no, 1);
   assert.deepEqual(race.horses.map((horse) => [horse.horseNumber, horse.rank]), [[2, 1], [3, 2]]);
 });
+
+test('does not treat a generic one-letter S program column as finishing positions', () => {
+  const program = [
+    '2. Koşu 14:00 Handikap 1400 Kum',
+    'At No\tAt İsmi\tS\tAGF',
+    '1\tKIR AT\t1\t%24',
+    '2\tAK AT\t2\t%10'
+  ].join('\n');
+
+  const [race] = parseRaces(program);
+
+  assert.deepEqual(race.horses.map((horse) => horse.rank), [0, 0]);
+});
+
+test('recognizes an abbreviated S result column only when the table also has a result time', () => {
+  const results = [
+    '2. Koşu 14:00 Handikap 1400 Kum',
+    'At No\tAt İsmi\tS\tDerece',
+    '1\tKIR AT\t1\t1.23.45',
+    '2\tAK AT\t2\t1.24.10'
+  ].join('\n');
+
+  const [race] = parseRaces(results);
+
+  assert.deepEqual(race.horses.map((horse) => horse.rank), [1, 2]);
+});
+
+test('ignores percentage-only cells instead of treating them as unnamed runners', () => {
+  const bulletin = [
+    '1. Koşu 14:00 Maiden 1400 Kum',
+    'At İsmi\tAGF\tHP',
+    'KIR AT (1)\t%24\t72',
+    '%18\t%18\t0'
+  ].join('\n');
+
+  const [race] = parseRaces(bulletin);
+
+  assert.deepEqual(race.horses.map((horse) => [horse.horseNumber, horse.name]), [[1, 'KIR AT']]);
+});

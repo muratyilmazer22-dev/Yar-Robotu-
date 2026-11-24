@@ -264,8 +264,9 @@
 })();
 const STORAGE_KEY = "race-analysis-v1";
 const BASE_WEIGHTS = window.RaceScoring.BASE_WEIGHTS;
-const MODEL_VERSION = "single-weighted-v1";
-const MODEL_MIN_RACES = 30;
+  const MODEL_VERSION = "single-weighted-v1";
+  const PERSONAL_LEARNING_SOURCE = "user-bulletins-v1";
+  const MODEL_MIN_RACES = 30;
 const TRAINING_WINDOW_RACES = 2000;
 const SINGLE_GAP_THRESHOLD = 12.5;
 const MIN_SINGLE_COVERAGE = 50;
@@ -287,9 +288,10 @@ const DEFAULT_PROFILES = {
 };
 
 function normalizeState(saved) {
-  const modelWeights = { ...BASE_WEIGHTS, ...(saved?.modelWeights || {}) };
-  const hasWeightHistory = Array.isArray(saved?.modelWeightVersions) && saved.modelWeightVersions.length > 0;
-  const modelWeightVersions = hasWeightHistory ? saved.modelWeightVersions.slice(-20) : Object.keys(BASE_WEIGHTS).some((key) => Math.abs(Number(modelWeights[key]) - Number(BASE_WEIGHTS[key])) > 1e-8) ? [{ version: 1, weights: modelWeights, createdAt: saved?.trainingReport?.validatedAt || null, legacy: true }] : [];
+  const hasPersonalLearningState = saved?.learningSource === PERSONAL_LEARNING_SOURCE;
+  const modelWeights = { ...BASE_WEIGHTS, ...(hasPersonalLearningState ? saved?.modelWeights || {} : {}) };
+  const hasWeightHistory = hasPersonalLearningState && Array.isArray(saved?.modelWeightVersions) && saved.modelWeightVersions.length > 0;
+  const modelWeightVersions = hasWeightHistory ? saved.modelWeightVersions.slice(-20) : [];
   return {
     ...DEFAULT_STATE,
     ...(saved && typeof saved === "object" ? saved : {}),
@@ -299,10 +301,12 @@ function normalizeState(saved) {
     outcomes: Array.isArray(saved?.outcomes) ? saved.outcomes : [],
   coupons: Array.isArray(saved?.coupons) ? saved.coupons : [],
   bulletins: Array.isArray(saved?.bulletins) ? saved.bulletins : [],
-  modelWeights,
-    lastGoodModelWeights: { ...BASE_WEIGHTS, ...(saved?.lastGoodModelWeights || saved?.modelWeights || {}) },
+    modelWeights,
+    learningSource: PERSONAL_LEARNING_SOURCE,
+    trainingReport: hasPersonalLearningState ? saved?.trainingReport || null : null,
+    lastGoodModelWeights: hasPersonalLearningState ? { ...BASE_WEIGHTS, ...(saved?.lastGoodModelWeights || saved?.modelWeights || {}) } : { ...BASE_WEIGHTS },
     modelWeightVersions,
-    contextWeights: saved?.contextWeights && typeof saved.contextWeights === "object" ? saved.contextWeights : {}
+    contextWeights: hasPersonalLearningState && saved?.contextWeights && typeof saved.contextWeights === "object" ? saved.contextWeights : {}
   };
 }
 function loadLegacyState() {
@@ -337,22 +341,14 @@ async function restoreState() {
 let state = normalizeState(null);
 let stateDb = null;
 let sharedAutomaticModel = null;
-function hasCompleteModelWeights(weights) {
-  if (!weights || typeof weights !== "object" || Array.isArray(weights) || Object.keys(weights).length !== Object.keys(BASE_WEIGHTS).length) return false;
-  const values = Object.keys(BASE_WEIGHTS).map((key) => Number(weights[key]));
-  return values.every((value) => Number.isFinite(value) && value >= 0) && Math.abs(values.reduce((sum, value) => sum + value, 0) - 1) < 0.01;
-}
-function isVerifiedSharedModel(model) {
-  return Boolean(model?.lastAcceptedValidation?.from && hasCompleteModelWeights(model.weights));
-}
 function sharedModelReportText() {
   const model = sharedAutomaticModel;
   if (!model) return "Ortak otomatik model raporu henüz alınmadı.";
   const report = model.report || {};
   const validation = model.lastAcceptedValidation;
   const status = validation
-    ? `etkin doğrulanmış model (${validation.from}–${validation.to || "—"})`
-    : "henüz kabul edilmiş ileri-tarih doğrulaması yok; temel model kullanılıyor";
+    ? `resmi TJK verisinden doğrulanmış ortak model (${validation.from}–${validation.to || "—"}; kişisel tahmin ağırlıklarına uygulanmaz)`
+    : "henüz kabul edilmiş ileri-tarih doğrulaması yok; ortak model yalnızca ayrı raporlanır";
   const scores = typeof report.baselineBrier === "number" && Number.isFinite(report.baselineBrier)
     && typeof report.validationBrier === "number" && Number.isFinite(report.validationBrier)
     ? `Brier temel ${report.baselineBrier.toFixed(4)} / rapor ${report.validationBrier.toFixed(4)}`
@@ -822,6 +818,18 @@ function buildCoupon(races, budget, unit) {
   const finishedNos = races.filter((race) => race.finished).map((race) => race.no);
   const openLegs = races.filter((race) => !race.finished).map((race) => ({ race, ranked: window.RaceEkuri.selectionUnits(scoreRace(race)) }));
   if (!openLegs.length) return { completedOnly: true, finishedNos };
+  const unnumberedHorses = openLegs.flatMap(({ race }) => race.horses
+    .filter((horse) => !horse.scratched)
+    .filter((horse) => {
+      const value = horse.horseNumber ?? horse.no;
+      const number = value === null || value === undefined || value === "" ? null : Number(value);
+      return !Number.isSafeInteger(number) || number <= 0;
+    })
+    .map((horse) => `${race.no}. koşu${horse.name ? ` (${horse.name})` : ""}`));
+  if (unnumberedHorses.length) {
+    const affected = [...new Set(unnumberedHorses)].slice(0, 4).join(", ");
+    return { error: `Bültende at numarası okunamayan koşucular var: ${affected}. Yanlış ayak/at üretmemek için kupon oluşturulmadı; at numarası ve adı sütunlarıyla bülteni yeniden yapıştırın.` };
+  }
   if (openLegs.some(({ ranked }) => !ranked.length)) return { error: "Açık ayaklardan birinde koşabilir at bulunamadı." };
   if (!Number.isFinite(budget) || budget <= 0 || !Number.isFinite(unit) || unit <= 0) return { error: "Bütçe ve kolon fiyatı sıfırdan büyük olmalıdır." };
   const maxColumns = Math.floor(budget / unit);
@@ -900,7 +908,7 @@ function formatCoupon(coupon, poolTitle, poolKey) {
   const completed = coupon.finishedNos?.length ? `<p class="coupon-intro">Koşulan ayaklar: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}</p>` : "";
   const excludedPicks = coupon.picks.filter((pick) => pick.excludedHorses.length);
   const excludedNote = excludedPicks.length
-    ? `<p class="coupon-intro">Bütçe nedeniyle alınmayan seçimler: ${excludedPicks.map((pick) => `${pick.no}. koşu: ${pick.excludedHorses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)}`).join(", ")}`).join(" · ")}</p>`
+    ? `<p class="coupon-intro">Bütçe nedeniyle alınmayan seçimler: ${excludedPicks.map((pick) => `${pick.no}. koşu: ${pick.excludedHorses.map((horse) => `${Number.isSafeInteger(horse.number) && horse.number > 0 ? `#${horse.number}` : "No belirtilmemiş"} ${escapeHtml(horse.name || "İsimsiz at")}`).join(", ")}`).join(" · ")}</p>`
     : "";
   const unusedBudget = Math.max(0, coupon.budget - coupon.total);
   const legs = coupon.picks.map((pick) => {
@@ -1072,9 +1080,10 @@ function renderTrainingReport() {
   const target = $("trainingReportArea");
   if (!target) return;
   const report = state.trainingReport || {};
-  const comparison = window.RaceLearningEvaluation.evaluateForwardComparison(state.outcomes, BASE_WEIGHTS);
+  const personalOutcomes = state.outcomes.filter(window.RaceLearningEvaluation.isPersonalBulletinOutcome);
+  const comparison = window.RaceLearningEvaluation.evaluateForwardComparison(personalOutcomes, BASE_WEIGHTS);
   if (!report.sampleSize && !comparison.validated) {
-    target.textContent = `Öğrenme raporu: ${state.outcomes.length.toLocaleString("tr-TR")} kayıtlı sonuç · ileri tarih kıyaslaması için en az 5 ayrı yarış tarihi gerekir. ${sharedModelReportText()}`;
+    target.textContent = `Öğrenme raporu: ${personalOutcomes.length.toLocaleString("tr-TR")} kişisel bülten sonucu · ileri tarih kıyaslaması için en az 5 ayrı yarış tarihi gerekir. ${sharedModelReportText()}`;
     return;
   }
   const currentValidation = report.validationMethod === "fixed-forward-v1";
@@ -1084,10 +1093,11 @@ function renderTrainingReport() {
     return `${key === "learned" ? "tahmin anındaki model" : key === "favorite" ? "piyasa favorisi" : "sabit temel model"}: ${item.races ? `${item.wins}/${item.races} (%${(item.hitRate * 100).toFixed(1)})` : "ölçülemedi"}`;
   }).join(" · ") : "İleri tarih karşılaştırması için henüz yeterli tarih yok.";
   const segments = comparison.byContext.filter((item) => item.eligible).map((item) => `${item.name} (${item.kind === "surface" ? "zemin" : "yarış türü"}, n=${item.races})`).join(", ");
-  target.textContent = `Öğrenme raporu: ${report.sampleSize || state.outcomes.length} uygun yarış · eğitim ${report.trainingRaces || 0} · doğrulama ${report.validationRaces || 0}${report.validationStartDate ? ` (${report.validationStartDate} sonrası)` : ""}. ${modelStatus} Brier temel: ${currentValidation && Number.isFinite(report.baselineBrier) ? report.baselineBrier.toFixed(4) : "—"} · doğrulama: ${currentValidation && Number.isFinite(report.validationBrier) ? report.validationBrier.toFixed(4) : "—"}. ${comparison.validated ? `Aynı son tarih dilimi (${comparison.startDate}–${comparison.endDate}, n=${comparison.races}): ${metrics}` : "İleri tarih kıyaslaması için beş ayrı tarihe yayılmış, yarış öncesinde kaydedilmiş sonuç bulunamadı"}. Yeterli örnekli zemin/tür: ${segments || `henüz yok (eşik ${comparison.minimumContextSample})`}. Sızıntıyı önlemek için TJK arşivinden sonradan puanlanan kayıtlar bu kıyasa dahil edilmez; yalnız yarış öncesi saklanan tahminler kullanılır. Ağırlık sürümü: ${(state.modelWeightVersions || []).at(-1)?.version || 0}. ${sharedModelReportText()}`;
+  target.textContent = `Öğrenme raporu: ${report.sampleSize || personalOutcomes.length} uygun kişisel yarış · eğitim ${report.trainingRaces || 0} · doğrulama ${report.validationRaces || 0}${report.validationStartDate ? ` (${report.validationStartDate} sonrası)` : ""}. ${modelStatus} Brier temel: ${currentValidation && Number.isFinite(report.baselineBrier) ? report.baselineBrier.toFixed(4) : "—"} · doğrulama: ${currentValidation && Number.isFinite(report.validationBrier) ? report.validationBrier.toFixed(4) : "—"}. ${comparison.validated ? `Aynı son tarih dilimi (${comparison.startDate}–${comparison.endDate}, n=${comparison.races}): ${metrics}` : "İleri tarih kıyaslaması için beş ayrı tarihe yayılmış, yarış öncesinde kaydedilmiş sonuç bulunamadı"}. Yeterli örnekli zemin/tür: ${segments || `henüz yok (eşik ${comparison.minimumContextSample})`}. Sızıntıyı önlemek için TJK arşivinden sonradan puanlanan kayıtlar bu kıyasa dahil edilmez; yalnız yarış öncesi saklanan tahminler kullanılır. Ağırlık sürümü: ${(state.modelWeightVersions || []).at(-1)?.version || 0}. ${sharedModelReportText()}`;
 }
 function trainModel() {
-  const races = state.outcomes.filter((item) => Array.isArray(item.horses) && item.horses.length > 1 && item.horses.some((horse) => horse.number === item.winner)).sort((a, b) => String(a.at || "").localeCompare(String(b.at || ""))).slice(-TRAINING_WINDOW_RACES);
+  state.learningSource = PERSONAL_LEARNING_SOURCE;
+  const races = state.outcomes.filter((item) => window.RaceLearningEvaluation.isPersonalBulletinOutcome(item) && Array.isArray(item.horses) && item.horses.length > 1 && item.horses.some((horse) => horse.number === item.winner)).sort((a, b) => String(a.at || "").localeCompare(String(b.at || ""))).slice(-TRAINING_WINDOW_RACES);
   const globalFit = fitModelWeights(races, BASE_WEIGHTS, state.lastGoodModelWeights || state.modelWeights);
   const validatedAt = new Date().toISOString();
   let weightsChanged = false;
@@ -1216,20 +1226,6 @@ function archiveRowToOutcome(row) {
     at: `${String(row.race_date || "").slice(0, 10)}T12:00:00.000Z`
   };
 }
-function applyVerifiedSharedModel(model) {
-  const sharedWeights = model?.weights;
-  if (!isVerifiedSharedModel(model) || !sharedWeights) return;
-  const sharedContexts = model.contextWeights && typeof model.contextWeights === "object" && !Array.isArray(model.contextWeights)
-    ? Object.fromEntries(Object.entries(model.contextWeights).filter(([, weights]) => hasCompleteModelWeights(weights)))
-    : {};
-  if (JSON.stringify(state.modelWeights) === JSON.stringify(sharedWeights)
-    && JSON.stringify(state.contextWeights) === JSON.stringify(sharedContexts)) return;
-  state.modelWeights = { ...sharedWeights };
-  state.lastGoodModelWeights = { ...sharedWeights };
-  state.contextWeights = sharedContexts;
-  scoreCache = new WeakMap();
-  saveState();
-}
 async function refreshRemoteMemory() {
   const target = $("cloudMemoryArea");
   if (!target) return;
@@ -1237,17 +1233,16 @@ async function refreshRemoteMemory() {
     const response = await fetch("/api/model-memory", { headers: { Accept: "application/json" } });
     const memory = await response.json();
     if (!response.ok) throw new Error(memory.error || "Neon hafızası alınamadı.");
-    sharedAutomaticModel = memory.automaticModel && typeof memory.automaticModel === "object" ? memory.automaticModel : null;
-    applyVerifiedSharedModel(sharedAutomaticModel);
-    renderTrainingReport();
+  sharedAutomaticModel = memory.automaticModel && typeof memory.automaticModel === "object" ? memory.automaticModel : null;
+  renderTrainingReport();
     const automated = sharedAutomaticModel;
-    const automatedStatus = automated?.report?.updated
-      ? " · yeni otomatik ağırlıklar ileri tarih doğrulamasını geçti ve etkin"
-      : automated?.lastAcceptedValidation
-        ? " · bu çalışmada yeni iyileşme yok; önceki doğrulanmış ağırlıklar etkin"
-        : automated?.report?.verified
-          ? " · aday model doğrulamayı geçemedi; başlangıç ağırlıkları korunuyor"
-          : " · otomatik model için henüz yeterli ileri tarih doğrulaması yok";
+  const automatedStatus = automated?.report?.updated
+    ? " · resmi TJK arşivine dayalı ortak model ileri tarih doğrulamasını geçti (kişisel tahminlerde kullanılmıyor)"
+    : automated?.lastAcceptedValidation
+      ? " · resmi TJK arşivine dayalı ortak model mevcut (kişisel tahminlerde kullanılmıyor)"
+      : automated?.report?.verified
+        ? " · resmi TJK arşivinden aday model doğrulamayı geçemedi (kişisel model etkilenmedi)"
+        : " · ortak model henüz doğrulanmadı; kişisel öğrenme kendi bülten sonuçlarını kullanır";
     const learnedContexts = Object.keys(automated?.contextWeights || {}).length;
     target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu TJK koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Öğrenme hedefi: tüm mevcut yarış sinyallerinde ve hipodrom/zemin/tür/mesafe kesişimlerinde daha iyi ileri-tarih tahminleri bulmak; yalnızca doğrulama kazanan değişiklikleri etkinleştirmek. ${learnedContexts} doğrulanmış bağlam modeli ortak hafızada. Bu resmi arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi bu cihazda kalır.`;
     return memory;
@@ -1312,13 +1307,12 @@ async function syncHistoricalArchive() {
       if (learnedSignalsChanged) {
         mergedOutcomes[existingIndex] = item;
         refreshedClassHistoryCount += 1;
-      } else if (Number(existing.winner) !== Number(item.winner)) {
+      } else if (!window.RaceLearningEvaluation.isPersonalBulletinOutcome(existing) && Number(existing.winner) !== Number(item.winner)) {
         mergedOutcomes[existingIndex] = item;
         correctedCount += 1;
       }
     }
     state.outcomes = mergedOutcomes;
-    if (freshCount || correctedCount || refreshedClassHistoryCount) trainModel();
     state.archiveRaceCount = converted.length;
     state.archiveLatestDate = archive.map((row) => String(row.race_date || "").slice(0, 10)).sort().at(-1) || "";
     state.archiveSyncedAt = new Date().toISOString();
