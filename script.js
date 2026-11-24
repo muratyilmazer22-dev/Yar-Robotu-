@@ -1798,9 +1798,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const button = event.target.closest("[data-save-coupon]");
     if (button) saveGeneratedCoupon(button.dataset.saveCoupon);
   });
-  $("analyzeBtn")?.addEventListener("click", analyze);
   $("analyzeButton")?.addEventListener("click", analyze);
-  $("clearBtn")?.addEventListener("click", () => { $("hamBultenInput").value = ""; saveBulletinDraft("program", { text: "", date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }); $("bultenUyariAlani").innerHTML = ""; });
   $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; saveBulletinDraft("program", { text: "", date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }); $("bultenUyariAlani").innerHTML = ""; });
   $("chooseResultsImageButton")?.addEventListener("click", () => $("resultsImageInput")?.click());
   $("resultsImageInput")?.addEventListener("change", async (event) => {
@@ -1843,7 +1841,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
   $("readResultsImageButton")?.addEventListener("click", extractResultsFromImage);
-  $("learnBtn")?.addEventListener("click", handleCompareResults);
   $("learnButton")?.addEventListener("click", handleCompareResults);
   $("exportBackupBtn").addEventListener("click", exportBackup);
   $("refreshArchiveBtn")?.addEventListener("click", syncHistoricalArchive);
@@ -1852,7 +1849,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     event.target.value = "";
   });
   $("resetBtn")?.addEventListener("click", resetHistory);
-  $("resetButton")?.addEventListener("click", resetHistory);
   document.querySelectorAll(".tab").forEach((button, index, buttons) => button.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
