@@ -1,5 +1,6 @@
 const { Pool } = require("pg");
 const { drizzle } = require("drizzle-orm/node-postgres");
+const { secureDatabaseConnectionString } = require("../lib/db/connection-string");
 const { and, asc, desc, eq, sql } = require("drizzle-orm");
 const { date, jsonb, pgTable, smallint, text } = require("drizzle-orm/pg-core");
 
@@ -26,7 +27,7 @@ module.exports = async function handler(request, response) {
     return response.status(503).json({ error: "Historical archive is not configured" });
   }
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 5000, idleTimeoutMillis: 1000 });
+  const pool = new Pool({ connectionString: secureDatabaseConnectionString(process.env.DATABASE_URL), max: 1, connectionTimeoutMillis: 5000, idleTimeoutMillis: 1000 });
   try {
     const db = drizzle(pool);
     const today = new Date().toISOString().slice(0, 10);

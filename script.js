@@ -831,6 +831,7 @@ function saveBulletinDraft(kind, details = {}) {
     city: String(details.city ?? existing.city ?? ""),
     budget: String(details.budget ?? existing.budget ?? $("butceInput")?.value ?? ""),
     unit: String(details.unit ?? existing.unit ?? $("birimInput")?.value ?? ""),
+    analystNotes: String(details.analystNotes ?? existing.analystNotes ?? $("analystSignalInput")?.value ?? ""),
     updatedAt: new Date().toISOString(),
     ...(details.image ? { image: imageForMemory(details.image) } : existing.image ? { image: imageForMemory(existing.image) } : {})
   };
@@ -871,7 +872,7 @@ function showMessage(target, text, type = "") {
 }
 function setTab(name) {
   const target = document.getElementById(`panel-${name}`);
-  document.querySelectorAll(".panel-details").forEach((panel) => { panel.open = panel === target; });
+  if (target instanceof HTMLDetailsElement) target.open = true;
   target?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function normalize(text) { return text.toLocaleUpperCase("en-US").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "I"); }
@@ -1153,8 +1154,8 @@ function getPoolLabel(poolKey) {
 function formatIncompletePool(races, start, title) {
   const availableNos = new Set(races.map((race) => race.no));
   const missingNos = Array.from({ length: 6 }, (_, index) => start + index).filter((no) => !availableNos.has(no));
-  const missing = missingNos.length ? ` Eksik koşular: ${missingNos.join(", ")}.` : "";
-  return `<div class="card"><h2>${title} · tamamlanmamış</h2><p class="hint">${availableNos.size}/6 koşu okundu.${missing} Mevcut koşuların ayrıntılı analizi aşağıda; eksikler tamamlanmadan kupon hesaplanmaz.</p></div>`;
+  const missing = missingNos.length ? ` Eksik koşu numaraları: ${missingNos.join(", ")}.` : "";
+  return `<div class="card"><h2>${title} · kupon için 6 koşu gerekli</h2><p class="hint">Bu bir analiz hatası değil: ${availableNos.size}/6 koşu bulundu.${missing} Bulunan koşuların tahminleri aşağıda görüntülenir; yalnızca altılı kupon, altı koşu tamamlanınca hesaplanır.</p></div>`;
 }
 async function analyze() {
   const button = $("analyzeButton");
@@ -1181,7 +1182,7 @@ async function runAnalysis() {
   $("kuponAlani").innerHTML = "";
   $("kosuSonucAlani").innerHTML = "";
   if (!input) { showMessage(warning, "Önce analiz etmek istediğiniz bülteni yapıştırın.", "error"); return; }
-  const archivedBulletin = archiveBulletin("program", { text: input, date: $("couponDateInput")?.value || new Date().toISOString().slice(0, 10), city: $("couponCityInput")?.value.trim().slice(0, 80) || "", budget: $("butceInput")?.value || "", unit: $("birimInput")?.value || "" });
+  const archivedBulletin = archiveBulletin("program", { text: input, date: $("couponDateInput")?.value || new Date().toISOString().slice(0, 10), city: $("couponCityInput")?.value.trim().slice(0, 80) || "", budget: $("butceInput")?.value || "", unit: $("birimInput")?.value || "", analystNotes: $("analystSignalInput")?.value || "" });
   const parsed = parseRaces(input);
   if (!parsed.races.length) {
     state.bulletins = state.bulletins.map((item) => item.id === archivedBulletin.id ? { ...item, analysisStatus: "parse-failed", analyzedAt: new Date().toISOString() } : item);
@@ -2167,7 +2168,6 @@ function resetHistory() {
 }
 document.addEventListener("DOMContentLoaded", async () => {
   state = await restoreState();
-  compactResultsTools();
   initializeFirebaseMemory().catch(() => setFirebaseStatus("Firebase bağlantısı başlatılamadı; yerel hafıza korunuyor.", true));
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -2194,6 +2194,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (savedProgramDraft.city) $("couponCityInput").value = savedProgramDraft.city;
     if (savedProgramDraft.budget) $("butceInput").value = savedProgramDraft.budget;
     if (savedProgramDraft.unit) $("birimInput").value = savedProgramDraft.unit;
+    $("analystSignalInput").value = savedProgramDraft.analystNotes || "";
   }
   if (savedResultDraft) {
     $("sonucluBultenInput").value = savedResultDraft.text || "";
@@ -2214,6 +2215,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("resultsReviewedCheck")?.addEventListener("change", scheduleResultComparison);
   $("loadArchivedResultsButton")?.addEventListener("click", loadArchivedResults);
   $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
+  $("analystSignalInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), analystNotes: $("analystSignalInput").value }));
   $("hamBultenInput")?.addEventListener("paste", () => window.setTimeout(() => analyze(), 0));
   $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("couponCityInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
