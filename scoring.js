@@ -61,13 +61,10 @@
 
   const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, groupFit: 0.05, classHistory: 0.08, timeFit: 0.06, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.015, distanceFit: 0.015, restFit: 0.01, weightFit: 0.01 };
   function softmaxScores(horses, weights) {
-    const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0) || 1;
     const scores = horses.map((horse) => {
       const available = Object.entries(horse.features || {}).filter(([key, value]) => Number.isFinite(value) && weights[key] !== 0);
       const weightTotal = available.reduce((sum, [key]) => sum + weights[key], 0);
-      const rawScore = weightTotal ? available.reduce((sum, [key, value]) => sum + value * weights[key], 0) / weightTotal : 50;
-      const coverage = Math.max(0, Math.min(1, weightTotal / totalWeight));
-      return 50 + (rawScore - 50) * coverage;
+      return weightTotal ? available.reduce((sum, [key, value]) => sum + value * weights[key], 0) / weightTotal : 50;
     });
     const logits = scores.map((score) => score / 12.5);
     const maximum = Math.max(...logits);
@@ -151,7 +148,7 @@
         : coverage >= 50 && independentCoverage >= 35
           ? "Orta"
           : "Düşük";
-      const score = 50 + (rawScore - 50) * coverage / 100;
+      const score = rawScore;
       const signal = independentKeys.length < 2 || independentCoverage < 35 || coverage < 40 || performanceScore === null || features.market === null
         ? "Veri yetersiz"
         : performanceScore - features.market >= 12
