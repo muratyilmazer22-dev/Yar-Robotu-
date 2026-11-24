@@ -154,6 +154,22 @@ test('learned group strength influences ranking when prior-group evidence exists
   assert.equal(ranked[0].features.groupFit, 90);
 });
 
+test('head-to-head evidence affects ranking when past meetings are available', () => {
+  const race = {
+    distance: 1400,
+    surface: 'Kum',
+    horses: [
+      { number: 1, rivalFit: 95 },
+      { number: 2, rivalFit: 5 }
+    ]
+  };
+  const modelWeights = Object.fromEntries(Object.keys(require('./scoring').BASE_WEIGHTS).map((name) => [name, name === 'rivalFit' ? 1 : 0]));
+  const ranked = analyzeRace(race, { modelWeights });
+
+  assert.equal(ranked[0].number, 1);
+  assert.equal(ranked[0].features.rivalFit, 95);
+});
+
 test('learned pedigree evidence takes precedence over the static sire profile', () => {
   const race = {
     distance: 1400,

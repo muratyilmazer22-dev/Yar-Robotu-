@@ -32,6 +32,8 @@ test('parses tabular race bulletins by their column headers', () => {
   assert.equal(race.horses[0].agf, 24);
   assert.equal(race.horses[0].odds, 2.4);
   assert.equal(race.horses[0].form, '112321');
+  assert.equal(race.horses[0].sire, 'TOROK');
+  assert.equal(race.horses[0].dam, 'ANOTHER');
   assert.equal(race.horses[0].damSire, 'LUXOR');
   assert.equal(race.horses[0].rank, 0);
 });
