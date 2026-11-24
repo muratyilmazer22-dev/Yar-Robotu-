@@ -818,6 +818,18 @@ function buildCoupon(races, budget, unit) {
   const finishedNos = races.filter((race) => race.finished).map((race) => race.no);
   const openLegs = races.filter((race) => !race.finished).map((race) => ({ race, ranked: window.RaceEkuri.selectionUnits(scoreRace(race)) }));
   if (!openLegs.length) return { completedOnly: true, finishedNos };
+  const unnumberedHorses = openLegs.flatMap(({ race }) => race.horses
+    .filter((horse) => !horse.scratched)
+    .filter((horse) => {
+      const value = horse.horseNumber ?? horse.no;
+      const number = value === null || value === undefined || value === "" ? null : Number(value);
+      return !Number.isSafeInteger(number) || number <= 0;
+    })
+    .map((horse) => `${race.no}. koşu${horse.name ? ` (${horse.name})` : ""}`));
+  if (unnumberedHorses.length) {
+    const affected = [...new Set(unnumberedHorses)].slice(0, 4).join(", ");
+    return { error: `Bültende at numarası okunamayan koşucular var: ${affected}. Yanlış ayak/at üretmemek için kupon oluşturulmadı; at numarası ve adı sütunlarıyla bülteni yeniden yapıştırın.` };
+  }
   if (openLegs.some(({ ranked }) => !ranked.length)) return { error: "Açık ayaklardan birinde koşabilir at bulunamadı." };
   if (!Number.isFinite(budget) || budget <= 0 || !Number.isFinite(unit) || unit <= 0) return { error: "Bütçe ve kolon fiyatı sıfırdan büyük olmalıdır." };
   const maxColumns = Math.floor(budget / unit);
@@ -896,7 +908,7 @@ function formatCoupon(coupon, poolTitle, poolKey) {
   const completed = coupon.finishedNos?.length ? `<p class="coupon-intro">Koşulan ayaklar: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}</p>` : "";
   const excludedPicks = coupon.picks.filter((pick) => pick.excludedHorses.length);
   const excludedNote = excludedPicks.length
-    ? `<p class="coupon-intro">Bütçe nedeniyle alınmayan seçimler: ${excludedPicks.map((pick) => `${pick.no}. koşu: ${pick.excludedHorses.map((horse) => `#${horse.number} ${escapeHtml(horse.name)}`).join(", ")}`).join(" · ")}</p>`
+    ? `<p class="coupon-intro">Bütçe nedeniyle alınmayan seçimler: ${excludedPicks.map((pick) => `${pick.no}. koşu: ${pick.excludedHorses.map((horse) => `${Number.isSafeInteger(horse.number) && horse.number > 0 ? `#${horse.number}` : "No belirtilmemiş"} ${escapeHtml(horse.name || "İsimsiz at")}`).join(", ")}`).join(" · ")}</p>`
     : "";
   const unusedBudget = Math.max(0, coupon.budget - coupon.total);
   const legs = coupon.picks.map((pick) => {
