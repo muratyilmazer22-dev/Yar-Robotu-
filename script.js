@@ -1700,6 +1700,7 @@ function renderCouponHistory() {
   const baselineCost = baselineResolved.reduce((sum, record) => sum + Number(record.cost || 0), 0);
   const baselineNet = baselineResolved.reduce((sum, record) => sum + Number(record.payout || 0) - Number(record.cost || 0), 0);
   const baselineRoi = baselineCost > 0 ? (baselineNet / baselineCost) * 100 : null;
+  const sixLegEvaluation = window.CouponResults.evaluateSixLegCoupons(records);
   const legDiagnostics = records.flatMap((record) => (record.legResults || []).map((result) => {
     const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
     return window.CouponLearning.analyzePredictionResult(prediction, result.winnerNumber, record.legs?.find((leg) => Number(leg.raceNo) === Number(result.raceNo))?.horses?.map((horse) => horse.number) || []);
@@ -1727,8 +1728,33 @@ function renderCouponHistory() {
     metric("Ana model net ödeme farkı", baselineResolved.length ? money(baselineNet) : "—"),
     metric("Ana model net getiri / maliyet", baselineRoi === null ? "—" : `${baselineRoi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
     metric("Tahminle eşleşen ayak sonucu", `${matchedLegDiagnostics.length} / ${legDiagnostics.length}`),
-    metric("Model ilk 3 içinde · kupon isabeti", `${matchedLegDiagnostics.filter((item) => item.top3Hit).length} / ${matchedLegDiagnostics.length}`)
+    metric("Model ilk 3 içinde · kupon isabeti", `${matchedLegDiagnostics.filter((item) => item.top3Hit).length} / ${matchedLegDiagnostics.length}`),
+    metric("Altılı geçmiş testi · tamamlanan", `${sixLegEvaluation.evaluatedCoupons} / ${sixLegEvaluation.eligibleCoupons}`),
+    metric("Altılı geçmiş testi · 6/6", sixLegEvaluation.sixOfSixRate === null ? "—" : `${sixLegEvaluation.sixOfSix} · %${sixLegEvaluation.sixOfSixRate}`),
+    metric("Altılı geçmiş testi · 5/6", sixLegEvaluation.fiveOfSixRate === null ? "—" : `${sixLegEvaluation.fiveOfSix} · %${sixLegEvaluation.fiveOfSixRate}`),
+    metric("Altılı başına ortalama isabet", sixLegEvaluation.averageHits === null ? "—" : `${sixLegEvaluation.averageHits} / 6`)
   );
+  const sixLegTarget = $("sixLegEvaluation");
+  if (sixLegTarget) {
+    const note = document.createElement("p");
+    note.className = "sub";
+    note.textContent = sixLegEvaluation.evaluatedCoupons
+      ? `${sixLegEvaluation.eligibleCoupons} uygun sistem kuponunun ${sixLegEvaluation.evaluatedCoupons} tanesinde altı kazananın tamamı girilmiş; ${sixLegEvaluation.incompleteCoupons} eksik kayıt oran hesabına katılmadı.${sixLegEvaluation.evaluatedCoupons < 30 ? " Örneklem küçük; oranlar yalnızca ilk gözlemdir, güvenilir performans iddiası için daha fazla tamamlanmış kupon gerekir." : " Sonuçlar yalnızca tamamlanmış geçmiş kayıtlara dayanır; gelecekteki başarıyı garanti etmez."}`
+      : `Henüz değerlendirilebilir sistem altılısı yok. Uygun kupon: ${sixLegEvaluation.eligibleCoupons}; bunların ${sixLegEvaluation.incompleteCoupons} tanesinde altı ayağın tamamının kazananı girilmemiş. Sonuçları kupon kaydında tamamladıkça rapor güncellenir.`;
+    const budgetGroups = document.createElement("div");
+    budgetGroups.className = "stats";
+    for (const group of sixLegEvaluation.byBudget) {
+      const item = document.createElement("div");
+      item.className = "stat";
+      const label = document.createElement("span");
+      label.textContent = `${money(group.budget)} · ${group.coupons} kupon`;
+      const value = document.createElement("strong");
+      value.textContent = `6/6: %${group.sixOfSixRate} · 5/6: %${group.fiveOfSixRate} · ort. ${group.averageHits}/6`;
+      item.append(label, value);
+      budgetGroups.append(item);
+    }
+    sixLegTarget.replaceChildren(note, budgetGroups);
+  }
   if (!records.length) {
     target.innerHTML = '<p class="muted">Henüz kupon kaydı yok. Analizden üretilen kuponu kaydedin veya harici kuponun sonucunu ekleyin.</p>';
     return;
