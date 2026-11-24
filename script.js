@@ -264,7 +264,7 @@
 })();
 const STORAGE_KEY = "race-analysis-v1";
 const BASE_WEIGHTS = window.RaceScoring.BASE_WEIGHTS;
-  const MODEL_VERSION = "single-weighted-v1";
+  const MODEL_VERSION = "single-weighted-v2-lineage-rivals";
   const PERSONAL_LEARNING_SOURCE = "user-bulletins-v1";
   const MODEL_MIN_RACES = 30;
 const TRAINING_WINDOW_RACES = 2000;
@@ -708,9 +708,15 @@ function parseRaces(text) {
   return { races, warnings };
 }
 function profileScore(name, distance) {
-  const profile = state.profiles[normalize(name).replace(/[^A-Z0-9]/g, "")];
-  if (!Array.isArray(profile)) return null;
-  const [speed, intermediate, classic, stamina, staminaPlus] = profile.map(Number);
+  const key = normalize(name).replace(/[^A-Z0-9]/g, "");
+  const profile = state.profiles[key] || window.RaceScoring.DEFAULT_DNA?.[key];
+  const values = Array.isArray(profile)
+    ? profile.map(Number)
+    : profile && typeof profile === "object"
+      ? [profile.B, profile.I, profile.C, profile.S, profile.P].map(Number)
+      : [];
+  if (!values.length) return null;
+  const [speed, intermediate, classic, stamina, staminaPlus] = values;
   const total = speed + intermediate + classic + stamina + staminaPlus;
   if (!total) return null;
   const speedFit = (speed + intermediate) / total;
@@ -740,7 +746,8 @@ function scoreRace(race) {
       }, raceDate),
       classHistoryScore: window.RaceClassHistory.scoreForHorse(classHistoryArchive, horse.name, raceClass, raceDate),
       groupFit: window.RaceClassHistory.groupFitForHorse(classHistoryArchive, horse.name, raceDate),
-      pedigreeFit: window.RacePedigreeHistory.scoreForHorse(pedigreeHistoryArchive, horse, { surface: race.surface, distance: race.distance }, raceDate)
+      pedigreeFit: window.RacePedigreeHistory.scoreForHorse(pedigreeHistoryArchive, horse, { surface: race.surface, distance: race.distance }, raceDate),
+      rivalFit: window.RaceRelations.scoreAgainstField(race, horse, raceRelationArchive, raceDate)
     }))
   };
   const ranked = window.RaceScoring.analyzeRace(scoringRace, {
@@ -805,7 +812,13 @@ function historicalEvidenceMarkup(race, horse) {
   const rivalText = insight.headToHead
     ? `${escapeHtml(insight.headToHead.name)} ile ${insight.headToHead.meetings} önceki karşılaşma · bu at ${insight.headToHead.ahead} kez önde bitirdi`
     : "Mevcut rakiplerle ortak sonuç kaydı bulunamadı";
-  return `<small class="horse-meta historical-evidence">Geçmiş veri: ${jockeyText}. ${rivalText}. Bu kayıtlar puana/olasılığa eklenmez.</small>`;
+  const riderContextText = horse.jockeyStarts
+    ? `Bu pist/mesafe çevresinde jokey ${horse.jockeyStarts} start · ${horse.jockeyWins} birincilik · ${horse.jockeyTopThree} ilk üç`
+    : "Bu pist/mesafe çevresinde jokey geçmişi bulunamadı";
+  const rivalScoreText = horse.features?.rivalFit === null || horse.features?.rivalFit === undefined
+    ? "Bu rakiplere karşı karşılaştırılabilir geçmiş yok"
+    : `Mevcut rakiplere karşı geçmiş puanı ${Number(horse.features.rivalFit).toFixed(1)}`;
+  return `<small class="horse-meta historical-evidence">Geçmiş veri: ${jockeyText}. ${riderContextText}. ${rivalText}. ${rivalScoreText}. Jokey/at ortak geçmişi bilgilendirme amaçlıdır; veri puana yalnızca eşleşen jokey ve rakip sinyalleri üzerinden girer.</small>`;
 }
 function renderAnalysis(races, targetId = "kosuSonucAlani") {
   const target = $(targetId);
@@ -834,8 +847,8 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
       if (group) ekuriCounts.set(group, (ekuriCounts.get(group) || 0) + 1);
     }
     const ekuriPairCount = [...ekuriCounts.values()].filter((count) => count > 1).length;
-    const relationshipNote = `<p class="hint historical-summary">Atın geçmiş hipodrom, hava ve pist koşullarındaki sonuçları yeterli eşleşme varsa puana katılır; eşleşmeyen bağlam puanı etkilemez. Jokey/rakip arşiv bilgileri bilgilendirme amaçlıdır. ${repeatedJockeyCount ? `${repeatedJockeyCount} jokey birden fazla ayakta görünüyor.` : "Ayaklar arasında tekrarlanan jokey tespit edilmedi."} Eküri yalnızca bültendeki açık eküri kodu aynı olan atlarda uygulanır; ${ekuriPairCount ? `${ekuriPairCount} eküri grubu bulundu.` : "bu bültende açık eküri kodu bulunmadı."} Sistem at sahibi benzerliğinden eşleşme tahmin etmez.</p>`;
-    const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Puanlar göreli sıralamadır, kazanma olasılığı değildir. Grup gücü; önceki yarışın sınıfı, rakiplerin medyan HP&apos;si ve atın bitirişini birlikte değerlendirir. Pedigri puanı, aynı pist türü ve mesafe bandındaki önceki yavru sonuçlarından öğrenilir; en az üç farklı yavru yoksa gösterilmez. Derece uyumu aynı pist türü ve 200 m yakınlıktaki geçmiş dereceleri karşılaştırır.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">Grup gücü</th><th scope="col">Derece uyumu</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</td><td>${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)}</td><td>${horse.features.timeFit === null ? "—" : horse.features.timeFit.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td></tr>`).join("")}</tbody></table></div></details>` : "";
+    const relationshipNote = `<p class="hint historical-summary">Atın geçmiş hipodrom, hava ve pist koşullarındaki sonuçları yeterli eşleşme varsa puana katılır; jokeyin aynı pist/mesafe performansı ile mevcut rakiplere karşı önceki bitirişleri de puanlanır. Eşleşmeyen bağlam puanı etkilemez. ${repeatedJockeyCount ? `${repeatedJockeyCount} jokey birden fazla ayakta görünüyor.` : "Ayaklar arasında tekrarlanan jokey tespit edilmedi."} Eküri yalnızca bültendeki açık eküri kodu aynı olan atlarda uygulanır; ${ekuriPairCount ? `${ekuriPairCount} eküri grubu bulundu.` : "bu bültende açık eküri kodu bulunmadı."} Sistem at sahibi benzerliğinden eşleşme tahmin etmez.</p>`;
+    const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Puanlar göreli sıralamadır, kazanma olasılığı değildir. Grup gücü; önceki yarışın sınıfı, rakiplerin medyan HP&apos;si ve atın bitirişini birlikte değerlendirir. Pedigri puanı, aynı pist türü ve mesafe bandındaki önceki yavru sonuçlarından öğrenilir; en az üç farklı yavru yoksa gösterilmez. Derece uyumu aynı pist türü ve 200 m yakınlıktaki geçmiş dereceleri karşılaştırır.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">Rakip geçmişi</th><th scope="col">Jokey</th><th scope="col">Mesafe</th><th scope="col">Kilo</th><th scope="col">Grup gücü</th><th scope="col">Derece uyumu</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : `${horse.features.pedigree.toFixed(1)} · ${escapeHtml(horse.pedigreeSource || "kaynak yok")}`}</td><td>${horse.features.rivalFit === null ? "—" : horse.features.rivalFit.toFixed(1)}</td><td>${horse.features.jockeyFit === null ? "—" : horse.features.jockeyFit.toFixed(1)}</td><td>${horse.features.distanceFit === null ? "—" : horse.features.distanceFit.toFixed(1)}</td><td>${horse.features.weightFit === null ? "—" : horse.features.weightFit.toFixed(1)}</td><td>${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)}</td><td>${horse.features.timeFit === null ? "—" : horse.features.timeFit.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td></tr>`).join("")}</tbody></table></div></details>` : "";
     return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${relationshipNote}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}${horse.isCoupled ? `<small>Eküri · ${horse.members.map((member) => `#${member.number} ${escapeHtml(member.name)}`).join(" + ")}</small>` : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small><small>Veri güveni: ${escapeHtml(horse.confidence || "Düşük")} · kapsam %${Number(horse.coverage) || 0} · bağımsız veri %${Number(horse.independentCoverage) || 0}</small><small>Grup puanı ${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)} · Pedigri puanı ${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)}</small></span><span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}</small>${historicalEvidenceMarkup(race, horse)}</div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
@@ -1226,6 +1239,7 @@ function archiveRowToOutcome(row) {
         odds: Number.isFinite(odds) && odds > 0 ? odds : null,
         last6: form,
         sire: String(runner.sire || ""),
+        dam: String(runner.dam || ""),
         damSire: String(runner.damSire || ""),
         scratched: Boolean(runner.scratched)
       };

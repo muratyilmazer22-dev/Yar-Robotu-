@@ -27,8 +27,10 @@
     const parts = String(origin || '').split(/\s*[-–—]\s*/);
     const sire = (parts[0] || '').trim();
     const damLine = parts.slice(1).join(' - ');
-    const damSire = (damLine.split(/\s*\/\s*/).slice(1).join(' / ') || '').trim();
-    return { sire, damSire };
+    const damParts = damLine.split(/\s*\/\s*/);
+    const dam = (damParts[0] || '').trim();
+    const damSire = (damParts.slice(1).join(' / ') || '').trim();
+    return { sire, dam, damSire };
   }
 
   function parseRaceConditions(text) {
@@ -120,6 +122,7 @@
           horseNumber,
           name,
           sire: pedigree.sire,
+          dam: pedigree.dam,
           damSire: pedigree.damSire,
           origin,
           age,
@@ -168,6 +171,7 @@ rank: Number.isFinite(assumedRank) ? assumedRank : 0
         horseNumber,
         name,
         sire: pedigree.sire,
+        dam: pedigree.dam,
         damSire: pedigree.damSire,
         origin,
         age,

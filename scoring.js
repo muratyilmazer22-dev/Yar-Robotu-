@@ -59,7 +59,7 @@
     return [...new Set(keys)];
   }
 
-  const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, groupFit: 0.05, classHistory: 0.08, timeFit: 0.06, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.015, distanceFit: 0.015, restFit: 0.01, weightFit: 0.01 };
+  const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, groupFit: 0.05, classHistory: 0.08, timeFit: 0.06, rivalFit: 0.025, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.025, distanceFit: 0.02, restFit: 0.01, weightFit: 0.015 };
   function softmaxScores(horses, weights) {
     const scores = horses.map((horse) => {
       const available = Object.entries(horse.features || {}).filter(([key, value]) => Number.isFinite(value) && weights[key] !== 0);
@@ -112,18 +112,24 @@
         return 45 + 55 * (distance <= 1300 ? speedFit : distance >= 1800 ? staminaFit : middleFit);
       });
       const sire = horse.sire ? getProfileScore(horse.sire, race.distance) : null;
+      const dam = horse.dam ? getProfileScore(horse.dam, race.distance) : null;
       const damSire = horse.damSire ? getProfileScore(horse.damSire, race.distance) : null;
       const learnedPedigree = horse.pedigreeFit !== null && horse.pedigreeFit !== undefined && Number.isFinite(Number(horse.pedigreeFit)) ? Number(horse.pedigreeFit) : null;
+      const profileLines = [[sire, 0.45], [dam, 0.3], [damSire, 0.25]].filter(([value]) => value !== null);
+      const profilePedigree = profileLines.length
+        ? profileLines.reduce((sum, [value, weight]) => sum + value * weight, 0) / profileLines.reduce((sum, [, weight]) => sum + weight, 0)
+        : null;
+      const pedigreeSource = learnedPedigree !== null ? "Arşiv soy hattı" : profilePedigree !== null ? "Genel soy profili" : "Veri yok";
       const agfScore = horse.agf > 0 ? horse.agf / maxAgf * 100 : null;
       const oddsScore = horse.odds > 0 && Number.isFinite(favoriteOdds) ? favoriteOdds / horse.odds * 100 : null;
       const market = agfScore !== null && oddsScore !== null ? agfScore * 0.65 + oddsScore * 0.35 : agfScore ?? oddsScore;
-      const pedigreeSource = learnedPedigree !== null ? "Arşiv" : sire !== null || damSire !== null ? "Genel profil" : "Veri yok";
       const features = {
         rating: horse.hp ? horse.hp / maxHp * 100 : null,
         form: recent.length ? recent.reduce((sum, place) => sum + (10 - place), 0) / recent.length * 10 : null,
         market,
-        pedigree: learnedPedigree ?? (sire !== null && damSire !== null ? sire * 0.65 + damSire * 0.35 : sire ?? damSire),
+        pedigree: learnedPedigree ?? profilePedigree,
         groupFit: horse.groupFit !== null && horse.groupFit !== undefined && Number.isFinite(Number(horse.groupFit)) ? Number(horse.groupFit) : null,
+        rivalFit: horse.rivalFit !== null && horse.rivalFit !== undefined && Number.isFinite(Number(horse.rivalFit)) ? Number(horse.rivalFit) : null,
         timeFit: Number.isFinite(Number(horse.timePace)) && Number(horse.timePace) > 0 && medianTimePace !== null
           ? Math.max(0, Math.min(100, Math.round((50 + (medianTimePace - Number(horse.timePace)) / medianTimePace * 400) * 10) / 10))
           : null,
@@ -138,7 +144,7 @@
       };
       const availableWeight = Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : weights[key]), 0);
       const rawScore = availableWeight ? Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : value * weights[key]), 0) / availableWeight : 50;
-      const independentKeys = ["rating", "form", "pedigree", "groupFit", "classHistory", "timeFit"].filter((key) => features[key] !== null);
+      const independentKeys = ["rating", "form", "pedigree", "groupFit", "classHistory", "timeFit", "rivalFit"].filter((key) => features[key] !== null);
       const independentWeight = independentKeys.reduce((sum, key) => sum + weights[key], 0);
       const performanceScore = independentWeight ? independentKeys.reduce((sum, key) => sum + features[key] * weights[key], 0) / independentWeight : null;
       const independentCoverage = Math.round(independentWeight / (totalWeight - weights.market || 1) * 100);
@@ -156,7 +162,7 @@
           : features.market - performanceScore >= 15
             ? "Favori riski"
             : "Sinyaller uyumlu";
-      return { ...horse, score: Math.round(score * 10) / 10, rawScore: Math.round(rawScore * 10) / 10, features, performanceScore, marketScore: features.market, coverage, independentCoverage, confidence, signal };
+      return { ...horse, score: Math.round(score * 10) / 10, rawScore: Math.round(rawScore * 10) / 10, features, pedigreeSource, performanceScore, marketScore: features.market, coverage, independentCoverage, confidence, signal };
     });
     const shares = softmaxScores(ranked, weights);
     return ranked.map((horse, index) => ({ ...horse, modelShare: shares[index] })).sort((a, b) => b.modelShare - a.modelShare);

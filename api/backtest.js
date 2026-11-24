@@ -5,6 +5,7 @@ const { analyzeRace, normalizeName, BASE_WEIGHTS, softmaxScores } = require('../
 const classHistory = require('../class-history');
 const raceContext = require('../lib/race-context');
 const pedigreeHistory = require('../lib/pedigree-history');
+const raceRelations = require('../lib/race-relations');
 const { getWinnerRank, getWinnerRankBucket } = require('../lib/backtest-metrics');
 const { createReturnMetrics, recordReturn, finalizeReturnMetrics } = require('../lib/backtest-economics');
 
@@ -79,6 +80,7 @@ module.exports = async function handler(req, res) {
     const contextIndex = raceContext.createIndex(rows);
     const classIndex = classHistory.createIndex(rows);
     const pedigreeIndex = pedigreeHistory.createIndex(rows);
+    const relationIndex = raceRelations.createIndex(rows);
 
     for (const row of rows) {
       const program = row.program || {};
@@ -107,7 +109,8 @@ module.exports = async function handler(req, res) {
         }, raceDate),
         classHistoryScore: classHistory.scoreForHorse(classIndex, horse.name, program.raceType || program.raceCategory || program.title || '', raceDate),
         groupFit: classHistory.groupFitForHorse(classIndex, horse.name, raceDate),
-        pedigreeFit: pedigreeHistory.scoreForHorse(pedigreeIndex, horse, { surface: program.surface, distance: program.distance }, raceDate)
+        pedigreeFit: pedigreeHistory.scoreForHorse(pedigreeIndex, horse, { surface: program.surface, distance: program.distance }, raceDate),
+        rivalFit: raceRelations.scoreAgainstField({ horses: horses.filter((runner) => !runner.scratched) }, horse, relationIndex, raceDate)
       }));
       const scoringRace = {
         distance: Number(program.distance) || 1400,
