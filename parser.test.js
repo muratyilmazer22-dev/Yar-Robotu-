@@ -38,6 +38,20 @@ test('parses tabular race bulletins by their column headers', () => {
   assert.equal(race.horses[0].rank, 0);
 });
 
+test('parses KGS as days since the horse last raced and leaves missing values unknown', () => {
+  const bulletin = [
+    '1. Koşu 14:00 Maiden 1400 Kum',
+    'At No\tAt İsmi\tKGS\tHP',
+    '1\tKIR AT\t28\t72',
+    '2\tAK AT\t—\t55'
+  ].join('\n');
+
+  const [race] = parseRaces(bulletin);
+
+  assert.equal(race.horses[0].daysSinceLastRace, 28);
+  assert.equal(race.horses[1].daysSinceLastRace, null);
+});
+
 test('uses a compact At header as the horse name instead of the AGF column', () => {
   const bulletin = [
     '4. Koşu 13:30 Handikap 17 2100 Kum',
