@@ -1633,9 +1633,11 @@ async function syncHistoricalArchive() {
     }
   }
 }
-let selectedResultImage = null;
-let storedResultImage = null;
-let resultImagePreviewUrl = null;
+  let selectedResultImage = null;
+  let storedResultImage = null;
+  let resultImagePreviewUrl = null;
+  let selectedAnalystImage = null;
+  let analystImagePreviewUrl = null;
 function setResultImageStatus(message, isError = false) {
   const status = $("resultsImageStatus");
   if (!status) return;
@@ -1674,6 +1676,39 @@ function readImageAsJpeg(file, { maxDimension = 1800, quality = 0.82, maxBytes =
     image.onerror = () => { URL.revokeObjectURL(sourceUrl); reject(new Error("Bu görsel açılamadı.")); };
     image.src = sourceUrl;
   });
+}
+async function extractAnalystNotesFromImage() {
+  if (!selectedAnalystImage) return;
+  const button = $("readAnalystImageButton");
+  button.disabled = true;
+  button.textContent = "Görsel okunuyor…";
+  $("analystImageStatus").textContent = "Gazete veya uzman tahminleri okunuyor…";
+  $("analystImageStatus").classList.remove("error");
+  try {
+    const image = await readImageAsJpeg(selectedAnalystImage, { maxDimension: 1800, quality: 0.82, maxBytes: 3 * 1024 * 1024 });
+    const response = await fetch("/api/result-image-ocr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image, mode: "notes" })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Görsel okunamadı. Daha net bir fotoğraf deneyin.");
+    const recognizedText = String(payload.text || "").trim();
+    if (!recognizedText || recognizedText === "[NO_EXPERT_NOTES]") {
+      throw new Error("Görselde okunabilir uzman tahmini bulunamadı. Sonuç tablosuysa Sonuçları doğrula bölümünü kullanın.");
+    }
+    const textarea = $("analystSignalInput");
+    textarea.value = [textarea.value.trim(), recognizedText].filter(Boolean).join("\n\n");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.focus();
+    $("analystImageStatus").textContent = "OCR taslağı uzman notlarına eklendi. At numaralarını ve koşu etiketlerini kaynağıyla kontrol edin; notlar düzenlenebilir.";
+  } catch (error) {
+    $("analystImageStatus").textContent = error instanceof Error ? error.message : "Görsel işlenemedi. Yeniden deneyin.";
+    $("analystImageStatus").classList.add("error");
+  } finally {
+    button.disabled = !selectedAnalystImage;
+    button.textContent = "Görselden notları oku";
+  }
 }
 async function extractResultsFromImage() {
   if (!selectedResultImage && !storedResultImage?.dataUrl) return;
@@ -1752,6 +1787,10 @@ async function compareResults() {
     return;
   }
   const resultText = $("sonucluBultenInput").value.trim();
+  if (!window.ResultEvidence.hasFinishOrder(resultText)) {
+    showMessage(target, "Bu metinde sonuç tablosunu doğrulayan açık bir At No/At Adı ve Sıra/Rank/Position sütun başlığı bulunamadı. Normal yarış bültenini bu alana koymayın; sonuç tablosunu ekleyin veya gazete tahminlerini Hafıza > Uzman notları bölümüne aktarın. Öğrenme başlatılmadı.", "error");
+    return;
+  }
   const parsed = parseRaces(resultText);
   if (!parsed.races.length) {
     showMessage(target, "Sonuç bülteninde koşu ve at sonuç satırları bulunamadı. At numarası ve Sıra/Rank/Position bilgisini içeren tabloyu ekleyin.", "error");
@@ -2242,6 +2281,30 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   $("analyzeButton")?.addEventListener("click", analyze);
   $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; saveBulletinDraft("program", { text: "", date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }); $("bultenUyariAlani").innerHTML = ""; });
+  $("chooseAnalystImageButton")?.addEventListener("click", () => $("analystImageInput")?.click());
+  $("analystImageInput")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.type) || file.size > 15 * 1024 * 1024) {
+      selectedAnalystImage = null;
+      $("readAnalystImageButton").disabled = true;
+      $("analystImagePreview").hidden = true;
+      $("analystImageStatus").textContent = "JPG, PNG veya WebP biçiminde ve 15 MB’tan küçük bir görsel seçin.";
+      $("analystImageStatus").classList.add("error");
+      return;
+    }
+    selectedAnalystImage = file;
+    $("readAnalystImageButton").disabled = false;
+    const preview = $("analystImagePreview");
+    if (analystImagePreviewUrl) URL.revokeObjectURL(analystImagePreviewUrl);
+    analystImagePreviewUrl = URL.createObjectURL(file);
+    preview.src = analystImagePreviewUrl;
+    preview.hidden = false;
+    $("analystImageStatus").textContent = "Görsel seçildi. Metni uzman notlarına aktarmak için görselden notları okuyun.";
+    $("analystImageStatus").classList.remove("error");
+  });
+  $("readAnalystImageButton")?.addEventListener("click", extractAnalystNotesFromImage);
   $("chooseResultsImageButton")?.addEventListener("click", () => $("resultsImageInput")?.click());
   $("resultsImageInput")?.addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
