@@ -880,6 +880,20 @@ function setTab(name) {
   target?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function normalize(text) { return text.toLocaleUpperCase("en-US").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "I"); }
+const TURKISH_RACECOURSES = ["Adana", "Ankara", "Antalya", "Bursa", "Diyarbakır", "Elazığ", "İstanbul", "İzmir", "Kocaeli", "Şanlıurfa"];
+function inferRacecourseFromBulletin(text) {
+  const headerLines = String(text || "").split(/\r?\n/).slice(0, 8).map((line) => normalize(line));
+  return TURKISH_RACECOURSES.find((city) => {
+    const normalizedCity = normalize(city);
+    const pattern = new RegExp(`(^|[^A-Z])${normalizedCity}([^A-Z]|$)`);
+    return headerLines.some((line) => {
+      const identifiesRaceDay = line.trim() === normalizedCity
+        || /HIPODROM|YARIS PROGRAMI/.test(line)
+        || /\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/.test(line);
+      return identifiesRaceDay && pattern.test(line);
+    });
+  }) || "";
+}
 function parseNumber(value) { const result = Number(String(value || "").replace(",", ".")); return Number.isFinite(result) ? result : null; }
 function parseRaces(text) {
   const parsedRaces = window.RaceParser.parseRaces(text);
@@ -1186,7 +1200,11 @@ async function runAnalysis() {
   $("kuponAlani").innerHTML = "";
   $("kosuSonucAlani").innerHTML = "";
   if (!input) { showMessage(warning, "Önce analiz etmek istediğiniz bülteni yapıştırın.", "error"); return; }
-  const archivedBulletin = archiveBulletin("program", { text: input, date: $("couponDateInput")?.value || new Date().toISOString().slice(0, 10), city: $("couponCityInput")?.value.trim().slice(0, 80) || "", budget: $("butceInput")?.value || "", unit: $("birimInput")?.value || "", analystNotes: $("analystSignalInput")?.value || "" });
+  const cityInput = $("couponCityInput");
+  const inferredCity = inferRacecourseFromBulletin(input);
+  if (!cityInput?.value.trim() && inferredCity) cityInput.value = inferredCity;
+  const couponCity = (cityInput?.value.trim() || inferredCity).slice(0, 80);
+  const archivedBulletin = archiveBulletin("program", { text: input, date: $("couponDateInput")?.value || new Date().toISOString().slice(0, 10), city: couponCity, budget: $("butceInput")?.value || "", unit: $("birimInput")?.value || "", analystNotes: $("analystSignalInput")?.value || "" });
   const parsed = parseRaces(input);
   if (!parsed.races.length) {
     state.bulletins = state.bulletins.map((item) => item.id === archivedBulletin.id ? { ...item, analysisStatus: "parse-failed", analyzedAt: new Date().toISOString() } : item);
@@ -1195,7 +1213,6 @@ async function runAnalysis() {
     return;
   }
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
-  const couponCity = $("couponCityInput")?.value.trim().slice(0, 80) || "";
   const externalSignals = window.TipSignals.parseAnalystSignals($("analystSignalInput")?.value || "");
   parsed.races.forEach((race) => { race.externalSignals = externalSignals[race.no] || null; });
   scoreCache = new WeakMap();
