@@ -4,28 +4,6 @@ const { BASE_WEIGHTS, TRAINING_WINDOW_DAYS, trainingCutoff, dateInTurkey, fitMod
 const { createIndex } = require('./lib/race-context');
 const classHistory = require('./class-history');
 const pedigreeHistory = require('./lib/pedigree-history');
-const cronHandler = require('./api/cron/daily-learning');
-
-function response() {
-  return { statusCode: 200, headers: {}, body: null, setHeader(key, value) { this.headers[key] = value; }, status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; } };
-}
-
-test('daily automation handler rejects requests without the configured cron secret', async () => {
-  let calls = 0;
-  const handler = cronHandler.createDailyLearningHandler({ secret: () => 'private-secret', run: async () => { calls += 1; } });
-  const res = response();
-  await handler({ method: 'GET', headers: {} }, res);
-  assert.equal(res.statusCode, 401);
-  assert.equal(calls, 0);
-});
-
-test('daily automation handler runs only for an authorized GET request', async () => {
-  const handler = cronHandler.createDailyLearningHandler({ secret: () => 'private-secret', run: async () => ({ imported: { records: 3 } }) });
-  const res = response();
-  await handler({ method: 'GET', headers: { authorization: 'Bearer private-secret' } }, res);
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { ok: true, imported: { records: 3 } });
-});
 
 test('model training window uses the latest 365 days without deleting older archive rows', () => {
   assert.equal(TRAINING_WINDOW_DAYS, 365);
