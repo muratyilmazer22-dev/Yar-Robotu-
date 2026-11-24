@@ -112,6 +112,7 @@
         const jockey = column('jokey');
         const handicapPoints = parseNumber(column('hp'));
         const programStartNumber = parseNumber(column('st'));
+        const daysSinceLastRace = parseNumber(column('kgs'));
         const odds = parseNumber(column('gny'));
         const couplingGroup = column('ekuri') || column('ekuri grubu') || column('ekuri no');
         const weight = parseNumber(weightText);
@@ -129,6 +130,7 @@
           weight,
           handicapPoints,
           programStartNumber,
+          daysSinceLastRace,
           jockey,
           form,
           agf: agfMatch ? Number(agfMatch[1].replace(',', '.')) : 0,

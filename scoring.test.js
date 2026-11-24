@@ -119,6 +119,31 @@ test('venue, weather, and track history signals influence scores when matched da
   }
 });
 
+test('bulletin KGS fills the rest signal when archive history is unavailable', () => {
+  const race = { distance: 1400, horses: [{ number: 1, daysSinceLastRace: 28 }, { number: 2, daysSinceLastRace: 90 }, { number: 3 }] };
+  const ranked = analyzeRace(race);
+  const rested = ranked.find((horse) => horse.number === 1);
+  const longLayoff = ranked.find((horse) => horse.number === 2);
+  const unknown = ranked.find((horse) => horse.number === 3);
+
+  assert.equal(rested.features.restFit, 100);
+  assert.equal(longLayoff.features.restFit, 20);
+  assert.equal(unknown.features.restFit, null);
+});
+
+test('newspaper analyst picks influence ranking only when explicitly supplied', () => {
+  const race = {
+    distance: 1400,
+    horses: [{ number: 1, hp: 80, analystFit: 50 }, { number: 2, hp: 80, analystFit: 92 }]
+  };
+  const withSignal = analyzeRace(race);
+  const withoutSignal = analyzeRace({ ...race, horses: race.horses.map(({ analystFit, ...horse }) => horse) });
+
+  assert.equal(withSignal[0].number, 2);
+  assert.equal(withSignal[0].features.analystFit, 92);
+  assert.equal(withoutSignal.find((horse) => horse.number === 1).features.analystFit, null);
+});
+
 test('learned class-history evidence influences the ranking without replacing other features', () => {
   const race = {
     distance: 1400,

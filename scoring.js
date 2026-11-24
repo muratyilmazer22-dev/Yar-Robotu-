@@ -59,7 +59,7 @@
     return [...new Set(keys)];
   }
 
-  const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, groupFit: 0.05, classHistory: 0.08, timeFit: 0.06, rivalFit: 0.025, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.025, distanceFit: 0.02, restFit: 0.01, weightFit: 0.015 };
+  const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, groupFit: 0.05, classHistory: 0.08, timeFit: 0.06, rivalFit: 0.025, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.025, distanceFit: 0.02, restFit: 0.015, weightFit: 0.015, analystFit: 0.04 };
   function softmaxScores(horses, weights) {
     const scores = horses.map((horse) => {
       const available = Object.entries(horse.features || {}).filter(([key, value]) => Number.isFinite(value) && weights[key] !== 0);
@@ -139,7 +139,12 @@
         trackFit: horse.trackFit !== null && horse.trackFit !== undefined && Number.isFinite(Number(horse.trackFit)) ? Number(horse.trackFit) : null,
         jockeyFit: horse.jockeyFit !== null && horse.jockeyFit !== undefined && Number.isFinite(Number(horse.jockeyFit)) ? Number(horse.jockeyFit) : null,
         distanceFit: horse.distanceFit !== null && horse.distanceFit !== undefined && Number.isFinite(Number(horse.distanceFit)) ? Number(horse.distanceFit) : null,
-        restFit: horse.restFit !== null && horse.restFit !== undefined && Number.isFinite(Number(horse.restFit)) ? Number(horse.restFit) : null,
+        restFit: horse.daysSinceLastRace !== null && horse.daysSinceLastRace !== undefined && horse.daysSinceLastRace !== "" && Number.isFinite(Number(horse.daysSinceLastRace)) && Number(horse.daysSinceLastRace) >= 0
+          ? Math.max(20, Math.min(100, 100 - Math.abs(Number(horse.daysSinceLastRace) - 28) * 1.4))
+          : horse.restFit !== null && horse.restFit !== undefined && Number.isFinite(Number(horse.restFit))
+            ? Number(horse.restFit)
+            : null,
+        analystFit: horse.analystFit !== null && horse.analystFit !== undefined && Number.isFinite(Number(horse.analystFit)) ? Number(horse.analystFit) : null,
         weightFit: horse.weightFit !== null && horse.weightFit !== undefined && Number.isFinite(Number(horse.weightFit)) ? Number(horse.weightFit) : null
       };
       const availableWeight = Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : weights[key]), 0);
