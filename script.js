@@ -735,6 +735,48 @@ function restoreLatestPredictionTarget() {
   $("resultsCityInput").value = latestPrediction.city || "";
   renderResultsContextOptions();
 }
+function restoreStoredAnalysis() {
+  const latestPrediction = [...state.predictions].sort((a, b) => `${a.date || ""}${a.predictionCreatedAt || ""}`.localeCompare(`${b.date || ""}${b.predictionCreatedAt || ""}`)).at(-1);
+  if (!latestPrediction) return;
+
+  const archivedBulletin = state.bulletins
+    .filter((item) => item.kind === "program" && item.status === "saved" && item.text
+      && item.date === latestPrediction.date && normalize(item.city || "") === normalize(latestPrediction.city || ""))
+    .sort((a, b) => String(b.analyzedAt || b.savedAt || "").localeCompare(String(a.analyzedAt || a.savedAt || "")))[0];
+  const source = archivedBulletin || state.bulletins.find((item) => item.id === "draft-program" && item.text
+    && item.date === latestPrediction.date && normalize(item.city || "") === normalize(latestPrediction.city || ""));
+  if (!source) return;
+
+  const parsed = parseRaces(source.text);
+  if (!parsed.races.length) return;
+  const predictionsForRun = state.predictions.filter((item) => latestPrediction.runId
+    ? item.runId === latestPrediction.runId
+    : item.date === latestPrediction.date && normalize(item.city || "") === normalize(latestPrediction.city || ""));
+  parsed.races.forEach((race) => {
+    race.externalSignals = predictionsForRun.find((item) => Number(item.no) === Number(race.no))?.externalSignals || null;
+  });
+  scoreCache = new WeakMap();
+  lastAnalysis = predictionsForRun;
+  $("analysisEmptyState")?.remove();
+  renderAnalysis(parsed.races);
+
+  const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
+  const poolStarts = sortedRaces.length ? [sortedRaces[0].no] : [];
+  const secondPoolStart = sortedRaces.length ? sortedRaces[sortedRaces.length - 1].no - 5 : 0;
+  if (secondPoolStart > poolStarts[0]) poolStarts.push(secondPoolStart);
+  const budget = parseNumber(source.budget || $("butceInput")?.value) || 80;
+  const unit = parseNumber(source.unit || $("birimInput")?.value) || 1.25;
+  lastCoupons = {};
+  $("kuponAlani").innerHTML = poolStarts.map((start, index) => {
+    const legs = sortedRaces.filter((race) => race.no >= start && race.no < start + 6);
+    const complete = Array.from({ length: 6 }, (_, offset) => legs.some((race) => race.no === start + offset)).every(Boolean);
+    const title = `${POOL_ORDINALS[index] || `Altılı ${index + 1}`} altılı · ${start}–${start + 5}. koşular`;
+    if (!complete) return formatIncompletePool(legs, start, title);
+    const coupon = buildCoupon(legs, budget, unit);
+    lastCoupons[getPoolKey(index)] = coupon;
+    return formatCoupon(coupon, title);
+  }).join("");
+}
 function compactResultsTools() {
   const panel = $("panel-ogrenme");
   const cards = [...panel.querySelectorAll(":scope > .card")].slice(1);
@@ -2057,6 +2099,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     applySavedResultDraftImage();
   }
   restoreLatestPredictionTarget();
+  restoreStoredAnalysis();
   $("resultsContextInput")?.addEventListener("change", () => {
     const selected = $("resultsContextInput").selectedOptions[0];
     if (!selected?.dataset.date) return;
