@@ -60,6 +60,12 @@
   }
 
   const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, groupFit: 0.05, classHistory: 0.08, timeFit: 0.06, rivalFit: 0.025, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.025, distanceFit: 0.02, restFit: 0.015, weightFit: 0.015, analystFit: 0.04 };
+  const FEATURE_LABELS = {
+    rating: "HP", form: "Son form", market: "AGF/oran", pedigree: "Pedigri", groupFit: "Grup gücü",
+    classHistory: "Sınıf geçmişi", timeFit: "Derece", rivalFit: "Rakip geçmişi", venueFit: "Hipodrom",
+    weatherFit: "Hava", trackFit: "Pist", jockeyFit: "Jokey", distanceFit: "Mesafe",
+    restFit: "Dinlenme aralığı", weightFit: "Kilo", analystFit: "Uzman yorumu"
+  };
 
   function weightedFeatureScore(features, weights, referenceWeights = weights, marketAgreement = null) {
     const effectiveWeights = { ...weights };
@@ -161,17 +167,19 @@
         weightFit: horse.weightFit !== null && horse.weightFit !== undefined && Number.isFinite(Number(horse.weightFit)) ? Number(horse.weightFit) : null
       };
       const scoreResult = weightedFeatureScore(features, weights, weights, marketAgreement);
-      const independentKeys = ["rating", "form", "pedigree", "groupFit", "classHistory", "timeFit", "rivalFit"].filter((key) => features[key] !== null);
-      const independentWeight = independentKeys.reduce((sum, key) => sum + weights[key], 0);
-      const performanceScore = independentWeight ? independentKeys.reduce((sum, key) => sum + features[key] * weights[key], 0) / independentWeight : null;
-      const independentCoverage = Math.round(independentWeight / (totalWeight - weights.market || 1) * 100);
+      const independentKeys = Object.keys(weights).filter((key) => key !== "market" && Number.isFinite(features[key]) && Number(weights[key]) > 0);
+      const independentWeight = independentKeys.reduce((sum, key) => sum + Number(weights[key]), 0);
+      const performanceScore = independentWeight ? independentKeys.reduce((sum, key) => sum + features[key] * Number(weights[key]), 0) / independentWeight : null;
+      const independentCoverage = Math.round(Math.min(1, independentWeight / Math.max(0.01, totalWeight - Number(weights.market || 0))) * 100);
+      const missingSignals = Object.keys(weights).filter((key) => !Number.isFinite(features[key])).map((key) => FEATURE_LABELS[key] || key);
+      const marketConflict = marketAgreement !== null && marketAgreement < 40;
       const coverage = Math.round(scoreResult.coverage);
       let confidence = coverage >= 70 && independentCoverage >= 60
         ? "Yüksek"
         : coverage >= 50 && independentCoverage >= 35
           ? "Orta"
           : "Düşük";
-      if (marketAgreement !== null && marketAgreement < 40) confidence = confidence === "Yüksek" ? "Orta" : "Düşük";
+      if (marketConflict) confidence = confidence === "Yüksek" ? "Orta" : "Düşük";
       const rawScore = scoreResult.rawScore;
       const score = scoreResult.score;
       const signal = independentKeys.length < 2 || independentCoverage < 35 || coverage < 40 || performanceScore === null || features.market === null
@@ -181,7 +189,7 @@
           : features.market - performanceScore >= 15
             ? "Favori riski"
             : "Sinyaller uyumlu";
-      return { ...horse, score: Math.round(score * 10) / 10, rawScore: Math.round(rawScore * 10) / 10, features, pedigreeSource, performanceScore, marketScore: features.market, marketAgreement, coverage, independentCoverage, confidence, signal };
+      return { ...horse, score: Math.round(score * 10) / 10, rawScore: Math.round(rawScore * 10) / 10, features, pedigreeSource, performanceScore, marketScore: features.market, marketAgreement, marketConflict, missingSignals, coverage, independentCoverage, confidence, signal };
     });
     const shares = softmaxScores(ranked, weights);
     return ranked.map((horse, index) => ({ ...horse, modelShare: shares[index] })).sort((a, b) => b.modelShare - a.modelShare);

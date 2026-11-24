@@ -88,6 +88,22 @@ test('incomplete signals report low confidence while ranking from the available 
   assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
 });
 
+test('independent evidence coverage includes venue, weather, jockey, distance, rest, and analyst signals', () => {
+  const race = {
+    distance: 1400,
+    horses: [
+      { number: 1, hp: 80, venueFit: 75, weatherFit: 70, trackFit: 85, jockeyFit: 90, distanceFit: 80, daysSinceLastRace: 28, analystFit: 72 },
+      { number: 2, hp: 50, form: '123456', agf: 20, odds: 4 }
+    ]
+  };
+  const runner = analyzeRace(race).find((horse) => horse.number === 1);
+
+  assert.ok(runner.independentCoverage > 35);
+  assert.equal(runner.missingSignals.includes('Jokey'), false);
+  assert.equal(runner.missingSignals.includes('Hava'), false);
+  assert.equal(runner.marketConflict, false);
+});
+
 test('strong disagreement between AGF and odds reduces market influence and trust', () => {
   const race = {
     distance: 1400,
