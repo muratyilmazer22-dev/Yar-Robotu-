@@ -6,6 +6,7 @@ const classHistory = require('../class-history');
 const raceContext = require('../lib/race-context');
 const pedigreeHistory = require('../lib/pedigree-history');
 const { getWinnerRank, getWinnerRankBucket } = require('../lib/backtest-metrics');
+const { createReturnMetrics, recordReturn, finalizeReturnMetrics } = require('../lib/backtest-economics');
 
 function validDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const parsed = new Date(`${value}T00:00:00Z`); return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
@@ -15,6 +16,7 @@ function identity(horse) {
   if (horse.horseNumber != null && Number.isFinite(Number(horse.horseNumber))) return `number:${Number(horse.horseNumber)}`;
   return `name:${normalizeName(horse.name)}`;
 }
+
 
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -26,11 +28,11 @@ module.exports = async function handler(req, res) {
 
   const today = new Date().toISOString().slice(0, 10);
   const oldest = new Date();
-  oldest.setUTCFullYear(oldest.getUTCFullYear() - 2);
+  oldest.setUTCDate(oldest.getUTCDate() - 365);
   const from = req.query.from || oldest.toISOString().slice(0, 10);
   const to = req.query.to || today;
   if (!validDate(from) || !validDate(to) || from > to || from < oldest.toISOString().slice(0, 10) || to > today) {
-    return res.status(400).json({ error: 'Use a valid date range within the last two years.' });
+    return res.status(400).json({ error: 'Use a valid date range within the latest 365 days.' });
   }
 
   try {
@@ -73,6 +75,7 @@ module.exports = async function handler(req, res) {
     let automaticMarketFavoriteHits = 0;
     let automaticBaselineBrierTotal = 0;
     let automaticLearnedBrierTotal = 0;
+    const returnMetrics = { fixed: createReturnMetrics(), favorite: createReturnMetrics(), automatic: createReturnMetrics() };
     const contextIndex = raceContext.createIndex(rows);
     const classIndex = classHistory.createIndex(rows);
     const pedigreeIndex = pedigreeHistory.createIndex(rows);
@@ -91,6 +94,7 @@ module.exports = async function handler(req, res) {
       const raceDate = String(row.raceDate || '').slice(0, 10);
       const scoringHorses = horses.map((horse) => ({
         ...horse,
+        odds: null,
         ...raceContext.scoreForHorse(contextIndex, horse.name, {
           city: row.city,
           weather: program.weather,
@@ -138,6 +142,9 @@ module.exports = async function handler(req, res) {
       const marketFavorite = scores.filter((horse) => horse.marketScore !== null).sort((a, b) => b.marketScore - a.marketScore)[0];
       const marketFavoriteHit = Boolean(marketFavorite && marketFavorite.number === winnerEntry.horse.number);
       if (marketFavoriteHit) marketFavoriteHits += 1;
+      const winningOdds = Number(finishers.find((horse) => identity(horse) === identity(winnerEntry.horse))?.odds);
+      recordReturn(returnMetrics.fixed, scores[0], winnerEntry.horse.number, winningOdds);
+      recordReturn(returnMetrics.favorite, marketFavorite, winnerEntry.horse.number, winningOdds);
       const surpriseCandidates = scores.filter((horse) => horse.signal === 'Sürpriz adayı');
       if (surpriseCandidates.length) {
         surpriseCandidateRaces += 1;
@@ -173,6 +180,7 @@ module.exports = async function handler(req, res) {
         const learnedFavorite = learnedScores.filter((horse) => horse.marketScore !== null).sort((a, b) => b.marketScore - a.marketScore)[0];
         if (learnedWinnerRank === 1) automaticModelTop1Hits += 1;
         if (learnedFavorite?.number === winnerEntry.horse.number) automaticMarketFavoriteHits += 1;
+        recordReturn(returnMetrics.automatic, learnedScores[0], winnerEntry.horse.number, winningOdds);
         const baselineProbabilities = softmaxScores(scores, BASE_WEIGHTS);
         const learnedProbabilities = softmaxScores(learnedScores, automaticWeights);
         automaticBaselineBrierTotal += baselineProbabilities.reduce((total, probability, index) => total + (probability - Number(scores[index].number === winnerEntry.horse.number)) ** 2, 0);
@@ -213,6 +221,12 @@ module.exports = async function handler(req, res) {
       averageWinnerRank: evaluatedRaces ? Number((totalWinnerRank / evaluatedRaces).toFixed(2)) : null,
       winnerRankCounts,
       marketFavoriteHitRate: rate(marketFavoriteHits, evaluatedRaces),
+      returnMetrics: {
+        fixed: finalizeReturnMetrics(returnMetrics.fixed),
+        favorite: finalizeReturnMetrics(returnMetrics.favorite),
+        automatic: finalizeReturnMetrics(returnMetrics.automatic),
+        basis: 'Birim bahis; yalnızca kazanan at için pozitif TJK ganyan oranı bulunan koşular ROI paydasına alınır. Bu simülasyon kupon getirisi veya gelecek performans garantisi değildir.'
+      },
       surpriseCandidateHitRate: rate(surpriseCandidateWinnerHits, surpriseCandidateRaces),
       surpriseCandidateRaces,
       surpriseCandidateWinnerHits,
@@ -245,6 +259,9 @@ module.exports = async function handler(req, res) {
         baselineBrier: automaticValidationRaces ? Number((automaticBaselineBrierTotal / automaticValidationRaces).toFixed(4)) : null,
         learnedBrier: automaticValidationRaces ? Number((automaticLearnedBrierTotal / automaticValidationRaces).toFixed(4)) : null,
         trainingReport: automaticModel?.report || null,
+        finalHoldout: automaticModel?.holdoutEvaluation || null,
+        holdoutFrom: automaticModel?.report?.holdoutStartDate || null,
+        holdoutTo: automaticModel?.report?.holdoutTo || null,
         contextModelCount: Object.keys(automaticModel?.contextWeights || {}).length,
         refreshedAt: automaticModel?.refreshedAt || null
       },

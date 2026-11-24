@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const historyApi = require('./api/history');
+const { raceHistoryAudit } = require('./lib/db/schema');
 const { verifyFirebaseIdToken } = require('./lib/history-import-security');
 
 function createResponse() {
@@ -24,8 +25,13 @@ function createRequest({ method = 'POST', date = new Date().toISOString().slice(
 
 function createDatabase({ existing = [] } = {}) {
   let inserted = [];
+  const operations = [];
   return {
     get inserted() { return inserted; },
+    get operations() { return operations; },
+    delete(table) {
+      return { where() { return { returning: async () => { operations.push(table === raceHistoryAudit ? 'prune-quality' : 'prune'); return []; } }; } };
+    },
     select() {
       return {
         from() {
@@ -36,11 +42,15 @@ function createDatabase({ existing = [] } = {}) {
         }
       };
     },
-    insert() {
+    insert(table) {
       return {
         values(values) {
+          if (table === raceHistoryAudit) {
+            operations.push('audit');
+            return Promise.resolve();
+          }
           inserted = values;
-          return { onConflictDoUpdate: async () => undefined };
+          return { onConflictDoUpdate: async () => { operations.push('insert'); } };
         }
       };
     }
@@ -109,6 +119,20 @@ test('POST rate-limits verified users before calling the TJK importer', async ()
   assert.equal(importCalls, 0);
 });
 
+test('POST rejects race dates older than the rolling one-year archive window', async () => {
+  const handler = historyApi.createHistoryHandler({
+    database: { select() { throw new Error('expired date should be rejected before database access'); } },
+    checkRateLimit: async () => 0
+  });
+  const expiredDate = new Date(Date.now() - 366 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const response = createResponse();
+
+  await handler(createRequest({ token: 'token', date: expiredDate }), response);
+
+  assert.equal(response.statusCode, 400);
+  assert.match(response.body.error, /between/);
+});
+
 test('POST rejects malformed JSON before authentication', async () => {
   let verifyCalls = 0;
   const handler = historyApi.createHistoryHandler({
@@ -154,6 +178,10 @@ test('POST imports a valid date only after verified auth and rate checks', async
   assert.equal(response.statusCode, 200);
   assert.equal(importedDate, date);
   assert.equal(database.inserted.length, 1);
+  assert.deepEqual(database.operations, ['insert', 'audit', 'prune', 'prune-quality']);
+  assert.equal(response.body.prunedRecords, 0);
+  assert.equal(response.body.qualityAuditedRaces, 1);
+  assert.deepEqual(response.body.quality, { needs_review: 1 });
   assert.deepEqual(limiterCalls.map(([subject]) => subject), ['ip:203.0.113.10', 'user:firebase-user', 'global']);
 });
 

@@ -23,7 +23,7 @@ module.exports = async function handler(request, response) {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 5000, idleTimeoutMillis: 1000 });
   try {
     const db = drizzle(pool);
-    const cutoff = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const cutoff = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const limit = Math.min(5000, Math.max(1, Number.parseInt(request.query?.limit, 10) || 5000));
     const offset = Math.max(0, Number.parseInt(request.query?.offset, 10) || 0);
     const races = await db.select({
