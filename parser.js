@@ -60,7 +60,7 @@
           time: raceHeader[2] || '',
           title: detail.split(',')[0].trim() || 'Koşu',
           raceType: detail.split(',')[0].trim() || '',
-          distance: distanceMatch ? Number(distanceMatch[1]) : 1400,
+          distance: distanceMatch ? Number(distanceMatch[1]) : null,
           surface: distanceMatch?.[2] || 'Belirtilmedi',
           weather: conditions.weather,
           trackCondition: conditions.trackCondition,
@@ -106,7 +106,8 @@
         const pedigree = parseOrigin(origin);
         const weightText = column('siklet');
         const agfText = column('agf');
-        const agfMatch = agfText.match(/%\s*(\d+(?:[.,]\d+)?)/);
+        const agfValue = parseNumber(agfText);
+        const agf = agfValue !== null && agfValue >= 0 && agfValue <= 100 ? agfValue : null;
         const form = column('form');
         const age = column('yas');
         const jockey = column('jokey');
@@ -133,7 +134,7 @@
           daysSinceLastRace,
           jockey,
           form,
-          agf: agfMatch ? Number(agfMatch[1].replace(',', '.')) : 0,
+          agf,
           odds,
           couplingGroup: couplingGroup.trim(),
           scratched: /koşmaz|scratched/i.test(rowName),
@@ -182,7 +183,7 @@ rank: Number.isFinite(assumedRank) ? assumedRank : 0
         programStartNumber: null,
         jockey,
         form,
-        agf: agfMatch ? Number(agfMatch[1].replace(',', '.')) : 0,
+        agf: agfMatch ? Number(agfMatch[1].replace(',', '.')) : null,
         odds: null,
         scratched: /koşmaz|scratched/i.test(rowName),
         rank: Number.isFinite(assumedRank) ? assumedRank : 0

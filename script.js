@@ -826,7 +826,7 @@ function parseRaces(text) {
       finished: placed.length >= 2 && placed.some((horse) => horse.place === 1)
     };
   });
-  const warnings = races.length ? [] : ["Koşu ve at satırı bulunamadı. TJK metnini sekme ayrımları korunacak şekilde yeniden kopyalayın."];
+  const warnings = races.length ? window.BulletinQuality.auditRaces(races) : ["Koşu ve at satırı bulunamadı. TJK metnini sekme ayrımları korunacak şekilde yeniden kopyalayın."];
   return { races, warnings };
 }
 function profileScore(name, distance) {
@@ -837,7 +837,7 @@ function profileScore(name, distance) {
     : profile && typeof profile === "object"
       ? [profile.B, profile.I, profile.C, profile.S, profile.P].map(Number)
       : [];
-  if (!values.length) return null;
+  if (!values.length || !Number.isFinite(Number(distance)) || Number(distance) <= 0) return null;
   const [speed, intermediate, classic, stamina, staminaPlus] = values;
   const total = speed + intermediate + classic + stamina + staminaPlus;
   if (!total) return null;
@@ -947,7 +947,8 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
   const target = $(targetId);
   target.innerHTML = races.map((race) => {
     const contextLabels = [race.weather && `Hava: ${race.weather}`, race.trackCondition && `Pist: ${race.trackCondition}`, race.surfaceChange && `Pist değişikliği: ${race.surfaceChange}`].filter(Boolean).map(escapeHtml).join(" · ");
-    const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${escapeHtml(race.distance)} m ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}${contextLabels ? ` · ${contextLabels}` : ""}</span></h3>`;
+    const distanceLabel = Number.isFinite(Number(race.distance)) && Number(race.distance) > 0 ? `${escapeHtml(race.distance)} m` : "Mesafe belirtilmedi";
+    const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${distanceLabel} ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}${contextLabels ? ` · ${contextLabels}` : ""}</span></h3>`;
     const signalLabels = { banko: "Banko", favorite: "Favorim", rival: "Rakip", surprise: "Sürpriz" };
     const signalBadges = Object.entries(race.externalSignals || {}).map(([key, numbers]) => `<span class="signal-badge">${signalLabels[key]} #${numbers.join(", #")}</span>`).join(" ");
     const signalNote = signalBadges ? `<p class="external-signals"><strong>Harici yorum:</strong> ${signalBadges}</p>` : "";
@@ -972,26 +973,15 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     const ekuriPairCount = [...ekuriCounts.values()].filter((count) => count > 1).length;
     const relationshipNote = `<p class="hint historical-summary">Atın geçmiş hipodrom, hava ve pist koşullarındaki sonuçları yeterli eşleşme varsa puana katılır; jokeyin aynı pist/mesafe performansı ile mevcut rakiplere karşı önceki bitirişleri de puanlanır. Eşleşmeyen bağlam puanı etkilemez. ${repeatedJockeyCount ? `${repeatedJockeyCount} jokey birden fazla ayakta görünüyor.` : "Ayaklar arasında tekrarlanan jokey tespit edilmedi."} Eküri yalnızca bültendeki açık eküri kodu aynı olan atlarda uygulanır; ${ekuriPairCount ? `${ekuriPairCount} eküri grubu bulundu.` : "bu bültende açık eküri kodu bulunmadı."} KGS (koşmadığı gün sayısı), son starttan bu yana geçen süreyi gösterir; uzun ara ve kısa dinlenme olasılıklarını form ile birlikte değerlendirmeye yardımcı olur. Tek başına performans kanıtı değildir ve veri yoksa tahmin edilmez. Sistem at sahibi benzerliğinden eşleşme tahmin etmez.</p>`;
     const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Puanlar göreli sıralamadır, kazanma olasılığı değildir. Grup gücü; önceki yarışın sınıfı, rakiplerin medyan HP&apos;si ve atın bitirişini birlikte değerlendirir. Pedigri puanı, aynı pist türü ve mesafe bandındaki önceki yavru sonuçlarından öğrenilir; en az üç farklı yavru yoksa gösterilmez. Derece uyumu aynı pist türü ve 200 m yakınlıktaki geçmiş dereceleri karşılaştırır.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">Rakip geçmişi</th><th scope="col">Jokey</th><th scope="col">Mesafe</th><th scope="col">Kilo</th><th scope="col">Grup gücü</th><th scope="col">Derece uyumu</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : `${horse.features.pedigree.toFixed(1)} · ${escapeHtml(horse.pedigreeSource || "kaynak yok")}`}</td><td>${horse.features.rivalFit === null ? "—" : horse.features.rivalFit.toFixed(1)}</td><td>${horse.features.jockeyFit === null ? "—" : horse.features.jockeyFit.toFixed(1)}</td><td>${horse.features.distanceFit === null ? "—" : horse.features.distanceFit.toFixed(1)}</td><td>${horse.features.weightFit === null ? "—" : horse.features.weightFit.toFixed(1)}</td><td>${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)}</td><td>${horse.features.timeFit === null ? "—" : horse.features.timeFit.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td></tr>`).join("")}</tbody></table></div></details>` : "";
-    return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${relationshipNote}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}${horse.isCoupled ? `<small>Eküri · ${horse.members.map((member) => `#${member.number} ${escapeHtml(member.name)}`).join(" + ")}</small>` : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small><small>Veri güveni: ${escapeHtml(horse.confidence || "Düşük")} · kapsam %${Number(horse.coverage) || 0} · bağımsız veri %${Number(horse.independentCoverage) || 0}</small><small>Grup puanı ${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)} · Pedigri puanı ${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)} · Gazete sinyali ${horse.features.analystFit === null ? "—" : horse.features.analystFit.toFixed(0)}</small></span><span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}${Number.isFinite(horse.daysSinceLastRace) ? ` · KGS ${horse.daysSinceLastRace} gün` : " · KGS yok"}</small>${historicalEvidenceMarkup(race, horse)}</div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
+    return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${relationshipNote}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}${horse.isCoupled ? `<small>Eküri · ${horse.members.map((member) => `#${member.number} ${escapeHtml(member.name)}`).join(" + ")}</small>` : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small><small>Veri güveni: ${escapeHtml(horse.confidence || "Düşük")} · kapsam %${Number(horse.coverage) || 0} · bağımsız veri %${Number(horse.independentCoverage) || 0}</small><small>${horse.missingSignals?.length ? `Eksik sinyal: ${horse.missingSignals.map(escapeHtml).join(", ")}` : "Kullanılabilir sinyal grupları mevcut"}${horse.marketConflict ? " · AGF ve oran ayrışıyor; piyasa etkisi otomatik azaltıldı" : ""}</small><small>Grup puanı ${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)} · Pedigri puanı ${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)} · Gazete sinyali ${horse.features.analystFit === null ? "—" : horse.features.analystFit.toFixed(0)}</small></span><span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}${Number.isFinite(horse.daysSinceLastRace) ? ` · KGS ${horse.daysSinceLastRace} gün` : " · KGS yok"}</small>${historicalEvidenceMarkup(race, horse)}</div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
 function buildCoupon(races, budget, unit) {
-  if (races.length !== 6) return { error: "Altılı kupon için 6 okunabilir koşu gerekir." };
+  const audit = window.BulletinQuality.auditCouponPool(races);
+  if (!audit.ok) return { error: audit.error };
   const finishedNos = races.filter((race) => race.finished).map((race) => race.no);
   const openLegs = races.filter((race) => !race.finished).map((race) => ({ race, ranked: window.RaceEkuri.selectionUnits(scoreRace(race)) }));
   if (!openLegs.length) return { completedOnly: true, finishedNos };
-  const unnumberedHorses = openLegs.flatMap(({ race }) => race.horses
-    .filter((horse) => !horse.scratched)
-    .filter((horse) => {
-      const value = horse.horseNumber ?? horse.no;
-      const number = value === null || value === undefined || value === "" ? null : Number(value);
-      return !Number.isSafeInteger(number) || number <= 0;
-    })
-    .map((horse) => `${race.no}. koşu${horse.name ? ` (${horse.name})` : ""}`));
-  if (unnumberedHorses.length) {
-    const affected = [...new Set(unnumberedHorses)].slice(0, 4).join(", ");
-    return { error: `Bültende at numarası okunamayan koşucular var: ${affected}. Yanlış ayak/at üretmemek için kupon oluşturulmadı; at numarası ve adı sütunlarıyla bülteni yeniden yapıştırın.` };
-  }
   if (openLegs.some(({ ranked }) => !ranked.length)) return { error: "Açık ayaklardan birinde koşabilir at bulunamadı." };
   if (!Number.isFinite(budget) || budget <= 0 || !Number.isFinite(unit) || unit <= 0) return { error: "Bütçe ve kolon fiyatı sıfırdan büyük olmalıdır." };
   const maxColumns = Math.floor(budget / unit);
@@ -1056,7 +1046,7 @@ function buildCoupon(races, budget, unit) {
   const forcedSingleCount = picks.filter((pick) => pick.budgetForcedSingle).length;
   return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed), budgetForcedSingle: forcedSingleCount > 0, budgetForcedMultipleSingles: budgetForcedMultipleSingles && forcedSingleCount > 1, forcedSingleCount, finishedNos };
 }
-function formatCoupon(coupon, poolTitle, poolKey) {
+function formatCoupon(coupon, poolTitle) {
   if (coupon.error) return `<article class="card coupon-detail"><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">${escapeHtml(coupon.error)}</p></article>`;
   if (coupon.completedOnly) return `<article class="card coupon-detail"><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Koşular tamamlandı; kupon oluşturulmadı.</p></article>`;
 
@@ -1077,7 +1067,7 @@ function formatCoupon(coupon, poolTitle, poolKey) {
     const labels = pick.ranked.slice(0, pick.count).flatMap((unit) => unit.members || [unit]).map((horse) => `<span class="coupon-horse">${Number.isSafeInteger(horse.number) && horse.number > 0 ? `#${horse.number}` : "No belirtilmemiş"} ${escapeHtml(horse.name)}</span>`).join("");
     return `<li class="coupon-leg"><strong>${pick.no}. Koşu</strong><div class="coupon-horses">${labels}</div></li>`;
   }).join("");
-  return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Model kuponu · bütçe sınırı aşılmaz</p></header>${warning}${completed}<ol class="coupon-legs">${legs}</ol>${excludedNote}<div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Üst bütçe ${coupon.budget.toFixed(2)} TL · Kullanılmayan ${unusedBudget.toFixed(2)} TL</span></div><button class="btn secondary coupon-save" type="button" data-save-coupon="${poolKey}">Kuponu kaydet</button></article>`;
+  return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Model önerisi · bütçe sınırı aşılmaz · otomatik hafızaya kaydedilir</p></header>${warning}${completed}<ol class="coupon-legs">${legs}</ol>${excludedNote}<div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Üst bütçe ${coupon.budget.toFixed(2)} TL · Kullanılmayan ${unusedBudget.toFixed(2)} TL</span></div></article>`;
 }
 const POOL_KEYS = ["first", "second", "third", "fourth", "fifth", "sixth"];
 const POOL_ORDINALS = ["Birinci", "İkinci", "Üçüncü", "Dördüncü", "Beşinci", "Altıncı"];
@@ -1097,6 +1087,23 @@ function formatIncompletePool(races, start, title) {
   return `<div class="card"><h2>${title} · tamamlanmamış</h2><p class="hint">${availableNos.size}/6 koşu okundu.${missing} Mevcut koşuların ayrıntılı analizi aşağıda; eksikler tamamlanmadan kupon hesaplanmaz.</p></div>`;
 }
 async function analyze() {
+  const button = $("analyzeButton");
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  const originalLabel = button.textContent;
+  button.textContent = "Analiz ediliyor…";
+  try {
+    await runAnalysis();
+  } catch (error) {
+    showMessage($("bultenUyariAlani"), error?.message || "Analiz tamamlanamadı. Girdi ve bağlantıyı kontrol edip tekrar deneyin.", "error");
+  } finally {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    button.textContent = originalLabel;
+  }
+}
+async function runAnalysis() {
   const input = $("hamBultenInput").value.trim();
   const warning = $("bultenUyariAlani");
   warning.innerHTML = "";
@@ -1109,7 +1116,7 @@ async function analyze() {
   if (!parsed.races.length) {
     state.bulletins = state.bulletins.map((item) => item.id === archivedBulletin.id ? { ...item, analysisStatus: "parse-failed", analyzedAt: new Date().toISOString() } : item);
     const saved = await saveState();
-    showMessage(warning, `${parsed.warnings.join(" ")}${saved ? " Bülten metni hafızaya kaydedildi; tahmin üretilemedi." : " Bülten hafızasına yazma başarısız oldu; yedeği indirin."}`, "error");
+    showMessage(warning, saved ? "Bülten metni kaydedildi ancak biçimi çözümlenemedi; eksik koşu veya at bilgisi tahmin edilmedi." : "Bülten metni çözümlenemedi ve hafızaya kaydedilemedi; yedeği indirin.", "error");
     return;
   }
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
@@ -1163,14 +1170,15 @@ async function analyze() {
     ? `${openRaces.length} açık koşu analiz edildi; ${completedCount} koşulmuş ayak tahmin dışında bırakıldı. ${memoryStatus}`
     : `${completedCount} koşunun tamamı koşulmuş; tahmin üretilmedi. ${memoryStatus}`;
   const persistenceFailed = !locallySaved || Boolean(firebaseAccount && firebaseSyncReady && !cloudSaved);
-  if (parsed.warnings.length) showMessage(warning, `${statusMessage} ${parsed.warnings.join(" ")}`, persistenceFailed ? "error" : "");
-  else showMessage(warning, `${statusMessage} Açık ayaklarda AGF/oran piyasa sinyaliyle HP/form/pedigri bağımsız performans sinyalleri ayrıştırılır.`, persistenceFailed ? "error" : "success");
+  const dataHandlingMessage = "Eksik bilgiler tahmin edilmedi; seyrek veya birbiriyle uyuşmayan sinyallerin etkisi otomatik azaltıldı.";
+  showMessage(warning, `${statusMessage} ${dataHandlingMessage}`, persistenceFailed ? "error" : "success");
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
   const firstRaceNo = sortedRaces[0].no;
   const lastRaceNo = sortedRaces[sortedRaces.length - 1].no;
   const poolCards = [];
+  let autoSavedCouponCount = 0;
   const poolStarts = [firstRaceNo];
   const secondPoolStart = lastRaceNo - 5;
   if (secondPoolStart > firstRaceNo) poolStarts.push(secondPoolStart);
@@ -1186,12 +1194,29 @@ async function analyze() {
     if (complete) {
       const coupon = buildCoupon(poolLegs, budget, unit);
       lastCoupons[poolKey] = coupon;
-      poolCards.push(formatCoupon(coupon, poolTitle, poolKey));
+      if (!coupon.error && !coupon.completedOnly && saveGeneratedCoupon(poolKey, lastAnalysis[0]?.runId)) autoSavedCouponCount += 1;
+      poolCards.push(formatCoupon(coupon, poolTitle));
     } else {
       poolCards.push(formatIncompletePool(poolLegs, start, poolTitle));
     }
   }
   $("kuponAlani").innerHTML = poolCards.join("");
+  if (autoSavedCouponCount) {
+    const couponsPersisted = await saveState();
+    const couponsCloudSaved = couponsPersisted && firebaseAccount && firebaseSyncReady ? await queueFirebaseMemorySync(true) : null;
+    renderCouponHistory();
+    const note = document.createElement("p");
+    const memoryConfirmed = couponsPersisted && (!firebaseAccount || !firebaseSyncReady || couponsCloudSaved);
+    note.className = memoryConfirmed ? "alert success" : "alert error";
+    note.setAttribute("role", "status");
+    note.setAttribute("aria-live", "polite");
+    note.textContent = !couponsPersisted
+      ? "Kupon önerileri oluşturuldu ancak yerel hafızaya yazma doğrulanamadı; yedeği indirip tekrar deneyin."
+      : firebaseAccount && firebaseSyncReady && !couponsCloudSaved
+        ? "Kupon önerileri bu cihaza kaydedildi ancak hesap eşitlemesi doğrulanamadı."
+        : `${autoSavedCouponCount} kupon önerisi hafızaya otomatik kaydedildi. Öneriler oynanmadı olarak işaretli; 6/6 performans analizine girer, gerçek ödeme/getiri hesabına girmez.`;
+    warning.append(note);
+  }
   setTab("analiz");
 }
 function softmaxScores(horses, weights) {
@@ -1347,7 +1372,7 @@ function archiveRowToOutcome(row) {
     trackCondition: String(program.trackCondition || ""),
     surfaceChange: String(program.surfaceChange || ""),
     raceType: String(program.raceType || program.raceCategory || title),
-    distance: Number(program.distance) || (distanceAndSurface ? Number(distanceAndSurface[1]) : 1400),
+    distance: Number.isFinite(Number(program.distance)) && Number(program.distance) > 0 ? Number(program.distance) : distanceAndSurface ? Number(distanceAndSurface[1]) : null,
     surface: String(program.surface || surface),
     type,
     horses: runners.map((runner) => {
@@ -1743,17 +1768,18 @@ function scheduleResultComparison() {
   if (!$("sonucluBultenInput")?.value.trim() || $("resultsReviewedCheck")?.checked !== true) return;
   resultCompareTimer = window.setTimeout(handleCompareResults, 900);
 }
-const COUPON_STATUS_LABELS = { pending: "Sonuç bekleniyor", won: "Ödeme aldı", lost: "İsabetsiz", carryover: "Devretti" };
+const COUPON_STATUS_LABELS = { suggested: "Öneri · oynanmadı", pending: "Oynandı · sonuç bekleniyor", won: "Ödeme aldı", lost: "İsabetsiz", carryover: "Devretti" };
 function createCouponId() {
   return window.crypto?.randomUUID?.() || `coupon-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
-function saveGeneratedCoupon(poolKey) {
+function saveGeneratedCoupon(poolKey, runId) {
   const coupon = lastCoupons[poolKey];
-  if (!coupon || coupon.error || coupon.completedOnly) return;
+  if (!coupon || coupon.error || coupon.completedOnly || !runId) return false;
+  if (state.coupons.some((record) => record.analysisRunId === runId && record.poolType === poolKey)) return false;
   const date = $("couponDateInput")?.value || lastAnalysis[0]?.date || new Date().toISOString().slice(0, 10);
   const city = $("couponCityInput")?.value.trim().slice(0, 80) || "";
   const record = {
-    id: createCouponId(), date, city, poolType: poolKey, cost: coupon.total, payout: null, status: "pending",
+    id: createCouponId(), analysisRunId: runId, date, city, poolType: poolKey, cost: coupon.total, payout: null, status: "suggested",
     source: "Yarış Robotu", columns: coupon.columns, unit: parseNumber($("birimInput")?.value),
     modelVersion: MODEL_VERSION,
     legs: coupon.picks.map((pick) => ({ raceNo: pick.no, externalSignals: pick.externalSignals || null, horses: pick.ranked.slice(0, pick.count).flatMap((unit) => unit.members || [unit]).map((horse) => ({ number: horse.number, name: horse.name, modelShare: horse.modelShare, couplingGroup: horse.couplingGroup || "" })) })),
@@ -1763,15 +1789,7 @@ function saveGeneratedCoupon(poolKey) {
   };
   state.coupons.unshift(record);
   state.coupons = state.coupons.slice(0, 500);
-  saveState();
-  renderCouponHistory();
-  const poolLabel = getPoolLabel(poolKey);
-  const status = document.createElement("div");
-  status.className = "alert success";
-  status.setAttribute("role", "status");
-  status.setAttribute("aria-live", "polite");
-  status.textContent = `${poolLabel} model kuponu sonuç takibine eklendi. Sonucu ve ödeme tutarını daha sonra kaydedebilirsiniz.`;
-  $("kuponAlani").prepend(status);
+  return true;
 }
 function addManualCoupon(event) {
   event.preventDefault();
@@ -1804,7 +1822,7 @@ function updateCouponResult(id, card) {
   const status = card.querySelector("[data-coupon-status]")?.value;
   const payoutValue = card.querySelector("[data-coupon-payout]")?.value;
   const payout = payoutValue === "" ? null : parseNumber(payoutValue);
-  if (!record || !Object.hasOwn(COUPON_STATUS_LABELS, status) || (status !== "pending" && (!Number.isFinite(payout) || payout < 0))) {
+  if (!record || !Object.hasOwn(COUPON_STATUS_LABELS, status) || (!['pending', 'suggested'].includes(status) && (!Number.isFinite(payout) || payout < 0))) {
     showMessage($("ogrenmeLogAlani"), "Sonucu bekleyen olarak bırakın veya geçerli bir ödeme tutarı girin.", "error");
     return;
   }
@@ -1821,8 +1839,8 @@ function updateCouponResult(id, card) {
   }
   record.legResults = [...legResults].map(([raceNo, winnerNumber]) => ({ raceNo, winnerNumber }));
   record.status = status;
-  record.payout = status === "pending" ? null : payout;
-  record.resolvedAt = status === "pending" ? null : new Date().toISOString();
+  record.payout = ['pending', 'suggested'].includes(status) ? null : payout;
+  record.resolvedAt = ['pending', 'suggested'].includes(status) ? null : new Date().toISOString();
   let learnedLegs = 0;
   let correctedLegs = 0;
   for (const result of record.legResults) {
@@ -1888,7 +1906,7 @@ function renderCouponHistory() {
     metric("Tüm kaynaklar · net ödeme farkı", resolved.length ? money(net) : "—"),
     metric("Tüm kaynaklar · getiri / maliyet", roi === null ? "—" : `${roi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
     metric("Devreden kupon", carryovers.length.toLocaleString("tr-TR")),
-    metric("Ana model kuponu / sonuçlanan", `${baselineRecords.length} / ${baselineResolved.length}`),
+    metric("Ana model önerisi / sonuçlanan", `${baselineRecords.length} / ${baselineResolved.length}`),
     metric("Ana model net ödeme farkı", baselineResolved.length ? money(baselineNet) : "—"),
     metric("Ana model net getiri / maliyet", baselineRoi === null ? "—" : `${baselineRoi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
     metric("Tahminle eşleşen ayak sonucu", `${matchedLegDiagnostics.length} / ${legDiagnostics.length}`),
@@ -1920,7 +1938,7 @@ function renderCouponHistory() {
     sixLegTarget.replaceChildren(note, budgetGroups);
   }
   if (!records.length) {
-    target.innerHTML = '<p class="muted">Henüz kupon kaydı yok. Analizden üretilen kuponu kaydedin veya harici kuponun sonucunu ekleyin.</p>';
+    target.innerHTML = '<p class="muted">Henüz kupon kaydı yok. Analiz ettiğinizde öneriler ve 6/6 değerlendirme için otomatik olarak kaydedilir; oynanıp oynanmadığını buradan işaretleyebilirsiniz.</p>';
     return;
   }
   target.innerHTML = records.map((record) => {
@@ -1928,9 +1946,9 @@ function renderCouponHistory() {
     const date = escapeHtml(record.date || "Tarih yok");
     const venue = record.city ? ` · ${escapeHtml(record.city)}` : "";
     const ticket = record.columns ? `${record.columns} kolon · ${money(record.cost)}` : `Maliyet ${money(record.cost)} · seçim dökümü yok`;
-    const paid = Number.isFinite(Number(record.payout)) && record.status !== "pending" ? money(record.payout) : "bekleniyor";
-    const netValue = Number(record.payout) - Number(record.cost);
-    const netText = record.status !== "pending" ? `<p>Net: <span class="coupon-net${netValue < 0 ? " negative" : ""}">${money(netValue)}</span></p>` : "";
+  const paid = record.status === "suggested" ? "oynanmadı" : Number.isFinite(Number(record.payout)) && record.status !== "pending" ? money(record.payout) : "bekleniyor";
+  const netValue = Number(record.payout) - Number(record.cost);
+  const netText = ["won", "lost"].includes(record.status) && Number.isFinite(Number(record.payout)) ? `<p>Net: <span class="coupon-net${netValue < 0 ? " negative" : ""}">${money(netValue)}</span></p>` : "";
     const legs = Array.isArray(record.legs) && record.legs.length ? `<p>Seçimler: ${record.legs.map((leg) => `${leg.raceNo}. ayak #${leg.horses.map((horse) => horse.number).join(", #")}`).join(" · ")}</p>` : "";
     const legEvaluation = window.CouponResults.evaluateCouponLegs(record.legs, record.legResults);
     const legSummary = legEvaluation.total ? `<p class="coupon-leg-summary">${legEvaluation.completed === legEvaluation.total ? `${legEvaluation.hits}/${legEvaluation.total} ayak tuttu` : `${legEvaluation.hits} isabet · ${legEvaluation.completed}/${legEvaluation.total} ayak sonucu girildi`}${legEvaluation.missedRaceNos.length ? ` · kaçan ayak: ${legEvaluation.missedRaceNos.join(", ")}` : ""}</p>` : "";
@@ -2050,6 +2068,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("resultsReviewedCheck")?.addEventListener("change", scheduleResultComparison);
   $("loadOfficialResultsButton")?.addEventListener("click", loadOfficialResults);
   $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
+  $("hamBultenInput")?.addEventListener("paste", () => window.setTimeout(() => analyze(), 0));
   $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("couponCityInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("butceInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), budget: $("butceInput").value }));
@@ -2072,10 +2091,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("couponHistoryArea")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-update-coupon]");
     if (button) updateCouponResult(button.dataset.updateCoupon, button.closest("[data-coupon-card]"));
-  });
-  $("kuponAlani")?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-save-coupon]");
-    if (button) saveGeneratedCoupon(button.dataset.saveCoupon);
   });
   $("analyzeButton")?.addEventListener("click", analyze);
   $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; saveBulletinDraft("program", { text: "", date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }); $("bultenUyariAlani").innerHTML = ""; });
