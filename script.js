@@ -1116,7 +1116,7 @@ async function runAnalysis() {
   if (!parsed.races.length) {
     state.bulletins = state.bulletins.map((item) => item.id === archivedBulletin.id ? { ...item, analysisStatus: "parse-failed", analyzedAt: new Date().toISOString() } : item);
     const saved = await saveState();
-    showMessage(warning, `${parsed.warnings.join(" ")}${saved ? " Bülten metni hafızaya kaydedildi; tahmin üretilemedi." : " Bülten hafızasına yazma başarısız oldu; yedeği indirin."}`, "error");
+    showMessage(warning, saved ? "Bülten metni kaydedildi ancak biçimi çözümlenemedi; eksik koşu veya at bilgisi tahmin edilmedi." : "Bülten metni çözümlenemedi ve hafızaya kaydedilemedi; yedeği indirin.", "error");
     return;
   }
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
@@ -1170,8 +1170,8 @@ async function runAnalysis() {
     ? `${openRaces.length} açık koşu analiz edildi; ${completedCount} koşulmuş ayak tahmin dışında bırakıldı. ${memoryStatus}`
     : `${completedCount} koşunun tamamı koşulmuş; tahmin üretilmedi. ${memoryStatus}`;
   const persistenceFailed = !locallySaved || Boolean(firebaseAccount && firebaseSyncReady && !cloudSaved);
-  if (parsed.warnings.length) showMessage(warning, `${statusMessage} ${parsed.warnings.join(" ")}`, persistenceFailed ? "error" : "");
-  else showMessage(warning, `${statusMessage} Açık ayaklarda AGF/oran piyasa sinyaliyle HP/form/pedigri bağımsız performans sinyalleri ayrıştırılır.`, persistenceFailed ? "error" : "success");
+  const dataHandlingMessage = "Eksik bilgiler tahmin edilmedi; seyrek veya birbiriyle uyuşmayan sinyallerin etkisi otomatik azaltıldı.";
+  showMessage(warning, `${statusMessage} ${dataHandlingMessage}`, persistenceFailed ? "error" : "success");
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
@@ -2068,6 +2068,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("resultsReviewedCheck")?.addEventListener("change", scheduleResultComparison);
   $("loadOfficialResultsButton")?.addEventListener("click", loadOfficialResults);
   $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
+  $("hamBultenInput")?.addEventListener("paste", () => window.setTimeout(() => analyze(), 0));
   $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("couponCityInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("butceInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), budget: $("butceInput").value }));

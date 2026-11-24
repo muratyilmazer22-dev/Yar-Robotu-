@@ -81,10 +81,29 @@ test('incomplete signals report low confidence while ranking from the available 
 
   assert.equal(sparseRunner.signal, 'Veri yetersiz');
   assert.equal(sparseRunner.confidence, 'Düşük');
-  assert.equal(sparseRunner.score, sparseRunner.rawScore);
+  assert.ok(sparseRunner.score < sparseRunner.rawScore);
+  assert.ok(sparseRunner.score > 50);
   assert.ok(Number.isFinite(sparseRunner.score));
-  assert.equal(ranked[0].number, 2);
+  assert.notEqual(ranked[0].number, 2);
   assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
+});
+
+test('strong disagreement between AGF and odds reduces market influence and trust', () => {
+  const race = {
+    distance: 1400,
+    horses: [
+      { number: 1, hp: 80, last6: '222222', agf: 50, odds: 10 },
+      { number: 2, hp: 80, last6: '222222', agf: 20, odds: 1.5 }
+    ]
+  };
+  const ranked = analyzeRace(race);
+  const agfLeader = ranked.find((horse) => horse.number === 1);
+  const oddsLeader = ranked.find((horse) => horse.number === 2);
+
+  assert.ok(agfLeader.marketAgreement < 40);
+  assert.equal(agfLeader.confidence, 'Düşük');
+  assert.ok(agfLeader.score < agfLeader.rawScore);
+  assert.ok(oddsLeader.marketAgreement < 50);
 });
 
 test('unknown race distance does not fabricate pedigree fit from a speed/stamina profile', () => {
