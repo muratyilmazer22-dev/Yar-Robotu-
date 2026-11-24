@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluateForwardComparison, isPersonalBulletinOutcome, mergeOutcome, mergeOutcomes } = require('./lib/learning-evaluation');
+const { evaluateForwardComparison, isPersonalBulletinOutcome, mergeOutcome, mergeOutcomes, mergePredictions, latestOutcomePerRace } = require('./lib/learning-evaluation');
 
 function outcome(date, winner = 1) {
   return {
@@ -11,6 +11,17 @@ function outcome(date, winner = 1) {
     ]
   };
 }
+
+test('preserves each forecast run and deduplicates same-race model training to the latest run', () => {
+  const morning = { date: '2026-11-23', city: 'Bursa', no: 4, runId: 'morning', predictionCreatedAt: '2026-11-23T08:00:00.000Z', horses: [] };
+  const late = { ...morning, runId: 'late', predictionCreatedAt: '2026-11-23T10:45:00.000Z' };
+  assert.equal(mergePredictions([morning], [late]).length, 2);
+  assert.equal(mergePredictions([morning], [{ ...morning, city: 'BURSA', horses: [{ number: 5 }] }]).length, 1);
+  assert.equal(mergePredictions([morning], [{ ...morning, horses: [{ number: 5 }] }]).length, 1);
+  const earlyOutcome = { ...outcome('2026-11-23'), raceNo: 4, predictionCreatedAt: morning.predictionCreatedAt, sourceKey: 'run:morning' };
+  const lateOutcome = { ...outcome('2026-11-23', 2), raceNo: 4, predictionCreatedAt: late.predictionCreatedAt, sourceKey: 'run:late' };
+  assert.deepEqual(latestOutcomePerRace([earlyOutcome, lateOutcome]), [lateOutcome]);
+});
 
 test('compares stored model, market favorite, and fixed baseline on the same forward dates', () => {
   const outcomes = Array.from({ length: 10 }, (_, index) => outcome(`2026-01-${String(index + 1).padStart(2, '0')}`, 1));
