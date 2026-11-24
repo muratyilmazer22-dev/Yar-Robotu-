@@ -35,7 +35,7 @@ module.exports = async function handler(req, res) {
     return res.status(415).json({ error: "İstek JSON biçiminde olmalıdır." });
   }
   const mode = req.body?.mode || "result";
-  if (mode !== "result" && mode !== "notes") {
+  if (!['result', 'notes', 'memory'].includes(mode)) {
     return res.status(400).json({ error: "Görsel okuma türü geçersiz." });
   }
 
@@ -67,7 +67,9 @@ module.exports = async function handler(req, res) {
             type: "text",
             text: mode === "notes"
               ? "Bu görsel bir at yarışı gazetesi veya uzman tahmin notu olabilir. Yalnızca görüntüde açıkça basılı olan tahmin/not metnini aynen aktar; koşu numarası, at numarası/adı ve Banko, Favori, Plase, Rakip, Sürpriz gibi etiketleri koru. Sıra, derece veya resmi yarış sonucu bilgilerini tahmin diye yorumlama; tahmin veya eksik bilgi üretme. Okunamayan bölümü 'OKUNAMADI' yaz. Görselde uzman tahmini/notu yoksa tek başına [NO_EXPERT_NOTES] döndür. Markdown, tablo kod çiti veya açıklama ekleme."
-              : "Bu görsel bir at yarışı sonuç tablosu olabilir. Yalnızca görüntüde açıkça yazan sonuç verilerini metne aktar; tahmin veya eksik bilgi üretme. TJK satırlarında her koşuyu '1. Koşu' gibi başlıkla, ardından sekmeyle ayrılmış 'At No\tAt Adı\tSıra' sütunlarıyla yaz. Görüntüde birden çok koşu varsa hepsini sırayla aktar. At numarası, at adı ve Sıra/Rank/Position değerlerini olduğu gibi koru; okunamayan hücreyi 'OKUNAMADI' yaz. Sonuç tablosu değilse kısa bir uyarı ver. Markdown tablo çiti veya açıklama ekleme."
+              : mode === "memory"
+                ? "Görselde bulunan tüm okunabilir metni, başlıkları, tablo satırlarını ve sayısal değerleri mümkün olduğunca aynen aktar. At yarışı notu, NotebookLM özeti, galop/sprint derecesi, soy kütüğü veya at analizi olabilir. İçeriği özetleme, yorumlama, sınıflandırma ya da eksik bilgi üretme; özgün sıralamayı ve birimleri koru. Okunamayan bölümü [OKUNAMADI] olarak belirt. Görselde metin yoksa kısa bir uyarı döndür. Markdown kod çiti veya ek açıklama ekleme."
+                : "Bu görsel bir at yarışı sonuç tablosu olabilir. Yalnızca görüntüde açıkça yazan sonuç verilerini metne aktar; tahmin veya eksik bilgi üretme. TJK satırlarında her koşuyu '1. Koşu' gibi başlıkla, ardından sekmeyle ayrılmış 'At No\tAt Adı\tSıra' sütunlarıyla yaz. Görüntüde birden çok koşu varsa hepsini sırayla aktar. At numarası, at adı ve Sıra/Rank/Position değerlerini olduğu gibi koru; okunamayan hücreyi 'OKUNAMADI' yaz. Sonuç tablosu değilse kısa bir uyarı ver. Markdown tablo çiti veya açıklama ekleme."
           },
           { type: "file", mediaType: match[1], data: new Uint8Array(imageBuffer) }
         ]

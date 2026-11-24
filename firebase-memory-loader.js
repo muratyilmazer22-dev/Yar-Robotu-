@@ -24,13 +24,13 @@
           firestoreSdk.getDoc(firestoreSdk.doc(db, ...accountPath(user.uid), "memory", "state")),
           firestoreSdk.getDocs(firestoreSdk.collection(db, ...accountPath(user.uid), "memoryData"))
         ]);
-        const memory = { predictions: [], outcomes: [], coupons: [], bulletins: [] };
+        const memory = { predictions: [], outcomes: [], coupons: [], bulletins: [], memoryNotes: [] };
         let found = settingsSnapshot.exists() || chunksSnapshot.size > 0;
         if (settingsSnapshot.exists()) Object.assign(memory, settingsSnapshot.data());
 
         for (const chunkDocument of chunksSnapshot.docs) {
           const chunk = chunkDocument.data();
-          if (["predictions", "outcomes", "coupons"].includes(chunk.kind) && Array.isArray(chunk.items)) {
+          if (["predictions", "outcomes", "coupons", "memoryNotes"].includes(chunk.kind) && Array.isArray(chunk.items)) {
             memory[chunk.kind].push(...chunk.items);
             found = true;
           } else if (chunk.kind === "bulletin" && chunk.item && typeof chunk.item === "object") {
@@ -57,7 +57,7 @@
           const applyLegacyState = (source) => {
             const legacyState = source?.state && typeof source.state === "object" ? source.state : source;
             if (!legacyState || typeof legacyState !== "object") return;
-            for (const key of ["predictions", "outcomes", "coupons", "bulletins"]) {
+            for (const key of ["predictions", "outcomes", "coupons", "bulletins", "memoryNotes"]) {
               if (Array.isArray(legacyState[key])) memory[key].push(...legacyState[key]);
             }
             for (const key of ["profiles", "modelWeights", "contextWeights", "contextReports", "trainingReport", "archiveRaceCount", "archiveLatestDate", "archiveSyncedAt", "localUpdatedAt"]) {
@@ -101,7 +101,8 @@
           predictions: state.predictions || [],
           outcomes: personalOutcomes,
           coupons: state.coupons || [],
-          bulletins: state.bulletins || []
+          bulletins: state.bulletins || [],
+          memoryNotes: state.memoryNotes || []
         };
         const pending = new Map();
 
@@ -113,12 +114,13 @@
             }
             continue;
           }
-          for (let offset = 0; offset < items.length; offset += 50) {
-            const index = String(Math.floor(offset / 50)).padStart(4, "0");
+          const chunkSize = kind === "memoryNotes" ? 3 : 50;
+          for (let offset = 0; offset < items.length; offset += chunkSize) {
+            const index = String(Math.floor(offset / chunkSize)).padStart(4, "0");
             const documentId = `${kind}-${index}`;
             pending.set(documentId, {
               kind,
-              items: items.slice(offset, offset + 50),
+              items: items.slice(offset, offset + chunkSize),
               schemaVersion: 1,
               updatedAt: firestoreSdk.serverTimestamp()
             });
@@ -131,7 +133,7 @@
         }
         for (const [documentId, document] of previousDocuments) {
           const data = document.data();
-          if (["predictions", "outcomes", "coupons", "bulletin"].includes(data.kind) && !pending.has(documentId)) {
+          if (["predictions", "outcomes", "coupons", "bulletin", "memoryNotes"].includes(data.kind) && !pending.has(documentId)) {
             operations.push({ ref: document.ref, delete: true });
           }
         }

@@ -275,7 +275,9 @@ let classHistoryArchive = new Map();
 let raceRelationArchive = new Map();
 let raceContextArchive = new Map();
 let pedigreeHistoryArchive = new Map();
-const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], bulletins: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
+const MEMORY_NOTE_CATEGORIES = Object.freeze({ analysis: "At analizi / NotebookLM", gallop: "Galop / sprint", pedigree: "Soy kütüğü / orijin", race: "Koşu / hipodrom notu", general: "Genel not" });
+const MAX_MEMORY_NOTE_CHARACTERS = 50000;
+const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], bulletins: [], memoryNotes: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
   NATIVEKHAN: [2, 4, 8, 2, 0], LUXOR: [6, 6, 4, 0, 0], KANEKO: [4, 8, 6, 0, 0],
@@ -300,7 +302,8 @@ function normalizeState(saved) {
     predictions: Array.isArray(saved?.predictions) ? saved.predictions : [],
     outcomes: Array.isArray(saved?.outcomes) ? saved.outcomes : [],
   coupons: Array.isArray(saved?.coupons) ? saved.coupons : [],
-  bulletins: Array.isArray(saved?.bulletins) ? saved.bulletins : [],
+    bulletins: Array.isArray(saved?.bulletins) ? saved.bulletins : [],
+    memoryNotes: Array.isArray(saved?.memoryNotes) ? saved.memoryNotes : [],
     modelWeights,
     learningSource: PERSONAL_LEARNING_SOURCE,
     trainingReport: hasPersonalLearningState ? saved?.trainingReport || null : null,
@@ -447,7 +450,8 @@ function mergeFirebaseMemory(localState, remoteState) {
     predictions: mergePredictionHistory(remoteState.predictions, localState.predictions),
   outcomes: mergeMemoryRecords(remoteState.outcomes, localState.outcomes, (item) => item.sourceKey || `${String(item.at || "").slice(0, 10)}:${item.city || ""}:${item.raceNo}:${item.winner}`),
   coupons: mergeMemoryRecords(remoteState.coupons, localState.coupons, (item) => item.id || JSON.stringify(item)),
-  bulletins: mergeMemoryRecords(remoteState.bulletins, localState.bulletins, (item) => item.id || JSON.stringify(item))
+  bulletins: mergeMemoryRecords(remoteState.bulletins, localState.bulletins, (item) => item.id || JSON.stringify(item)),
+  memoryNotes: mergeMemoryRecords(remoteState.memoryNotes, localState.memoryNotes, (item) => item.id || JSON.stringify(item))
   });
 }
 function queueFirebaseMemorySync(immediate = false) {
@@ -2178,6 +2182,158 @@ function importBackup(file) {
   };
   reader.readAsText(file);
 }
+function updateMemoryNoteCharacterCount() {
+  const input = $("memoryNoteInput");
+  const counter = $("memoryNoteCounter");
+  if (input && counter) counter.textContent = `${input.value.length.toLocaleString("tr-TR")} / ${MAX_MEMORY_NOTE_CHARACTERS.toLocaleString("tr-TR")} karakter`;
+}
+
+function appendMemoryNoteDraft(text) {
+  const input = $("memoryNoteInput");
+  if (!input) return false;
+  const combined = [input.value.trim(), String(text || "").trim()].filter(Boolean).join("\n\n");
+  if (combined.length > MAX_MEMORY_NOTE_CHARACTERS) return false;
+  input.value = combined;
+  updateMemoryNoteCharacterCount();
+  input.focus();
+  return true;
+}
+
+function renderMemoryNotes() {
+  const notes = Array.isArray(state.memoryNotes) ? state.memoryNotes.filter((note) => note && typeof note === "object") : [];
+  const stats = $("memoryStats");
+  const count = $("memoryNoteCount");
+  const list = $("memoryNotesList");
+  const categories = Object.entries(MEMORY_NOTE_CATEGORIES);
+  const counts = Object.fromEntries(categories.map(([key]) => [key, notes.filter((note) => note.category === key).length]));
+  if (stats) stats.innerHTML = categories.map(([key, label]) => `<div class="stat"><b>${counts[key]}</b><span>${escapeHtml(label)}</span></div>`).join("");
+  if (count) count.textContent = notes.length.toLocaleString("tr-TR");
+  if (!list) return;
+  if (!notes.length) {
+    list.innerHTML = '<p class="muted">Henüz kaydedilmiş not yok.</p>';
+    return;
+  }
+  const visibleNotes = [...notes].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))).slice(0, 25);
+  list.innerHTML = `${visibleNotes.map((note) => {
+    const category = MEMORY_NOTE_CATEGORIES[note.category] || MEMORY_NOTE_CATEGORIES.general;
+    const timestamp = Date.parse(note.createdAt || "");
+    const date = Number.isFinite(timestamp) ? new Date(timestamp).toLocaleDateString("tr-TR") : "Tarih yok";
+    return `<article class="memory-note"><div class="memory-note-heading"><strong>${escapeHtml(category)}</strong><time datetime="${escapeHtml(note.createdAt || "")}">${escapeHtml(date)}</time></div><details><summary>Notu görüntüle</summary><p class="memory-note-content">${escapeHtml(note.content || "")}</p></details><div class="memory-note-buttons"><button class="btn secondary" type="button" data-memory-action="use" data-memory-id="${escapeHtml(note.id || "")}">Uzman notlarına aktar</button><button class="btn secondary" type="button" data-memory-action="delete" data-memory-id="${escapeHtml(note.id || "")}" aria-label="${escapeHtml(category)} kaydını sil">Sil</button></div></article>`;
+  }).join("")}${notes.length > visibleNotes.length ? `<p class="sub">Son ${visibleNotes.length} kayıt gösteriliyor; toplam ${notes.length.toLocaleString("tr-TR")} not var.</p>` : ""}`;
+}
+
+async function handleMemoryFile(file) {
+  const status = $("memoryFileStatus");
+  if (!file || !status) return;
+  status.classList.remove("error");
+  const extension = String(file.name || "").split(".").pop().toLowerCase();
+  const isImage = /^image\/(jpeg|png|webp)$/i.test(file.type) || ["jpg", "jpeg", "png", "webp"].includes(extension);
+  try {
+    if (isImage) {
+      if (file.size > 15 * 1024 * 1024) throw new Error("Fotoğraf en fazla 15 MB olabilir.");
+      status.textContent = "Fotoğraf okunuyor; OCR metni yalnızca taslağa eklenecek…";
+      const image = await readImageAsJpeg(file, { maxDimension: 1800, quality: 0.82, maxBytes: 3 * 1024 * 1024 });
+      const response = await fetch("/api/result-image-ocr", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image, mode: "memory" }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Fotoğraf okunamadı. Daha net bir görsel deneyin.");
+      if (!String(payload.text || "").trim()) throw new Error("Fotoğrafta okunabilir metin bulunamadı.");
+      if (!appendMemoryNoteDraft(payload.text)) throw new Error("Metin 50.000 karakter sınırını aşacağı için eklenmedi.");
+      status.textContent = `${file.name}: OCR metni taslağa eklendi. Kaydetmeden önce mutlaka kontrol edin; fotoğraf saklanmaz.`;
+      return;
+    }
+    if (!["txt", "md", "csv", "json"].includes(extension)) throw new Error("Desteklenenler: TXT, Markdown, CSV, JSON ve JPG/PNG/WebP fotoğrafları.");
+    if (file.size > 2 * 1024 * 1024) throw new Error("Metin dosyası en fazla 2 MB olabilir.");
+    const text = await file.text();
+    if (!text.trim()) throw new Error("Dosyada okunabilir metin bulunamadı.");
+    if (!appendMemoryNoteDraft(text)) throw new Error("Metin 50.000 karakter sınırını aşacağı için eklenmedi.");
+    status.textContent = `${file.name}: metin taslağa eklendi. Kaydetmeden önce içeriği kontrol edin.`;
+  } catch (error) {
+    status.textContent = error instanceof Error ? error.message : "Dosya okunamadı.";
+    status.classList.add("error");
+  }
+}
+
+function initializeMemoryNotes() {
+  $("memoryNoteInput")?.addEventListener("input", updateMemoryNoteCharacterCount);
+  $("pasteMemoryButton")?.addEventListener("click", async () => {
+    const status = $("memoryFileStatus");
+    try {
+      if (!navigator.clipboard?.readText) throw new Error("Bu tarayıcı panoya erişemiyor. Metni kopyalayıp alana uzun basarak yapıştırın.");
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) throw new Error("Panoda yapıştırılacak metin yok.");
+      if (!appendMemoryNoteDraft(text)) throw new Error("Metin 50.000 karakter sınırını aşacağı için eklenmedi.");
+      status.textContent = "Panodaki metin taslağa eklendi. Kaydetmeden önce kontrol edin.";
+      status.classList.remove("error");
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : "Panodan metin alınamadı.";
+      status.classList.add("error");
+    }
+  });
+  $("chooseMemoryFileButton")?.addEventListener("click", () => $("memoryFileInput")?.click());
+  $("memoryFileInput")?.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) handleMemoryFile(file);
+  });
+  $("saveMemoryNoteButton")?.addEventListener("click", async () => {
+    const input = $("memoryNoteInput");
+    const status = $("memoryNoteStatus");
+    const content = input?.value.trim() || "";
+    if (!content) {
+      status.textContent = "Kaydetmeden önce bir not girin veya dosyadan aktarın.";
+      status.classList.add("error");
+      return;
+    }
+    const categoryValue = $("memoryNoteCategory")?.value || "general";
+    const category = Object.hasOwn(MEMORY_NOTE_CATEGORIES, categoryValue) ? categoryValue : "general";
+    const note = { id: window.crypto?.randomUUID?.() || `note-${Date.now()}-${Math.random().toString(36).slice(2)}`, category, content, createdAt: new Date().toISOString() };
+    const previousNotes = state.memoryNotes || [];
+    state.memoryNotes = [...previousNotes, note];
+    const saved = await saveState();
+    status.classList.toggle("error", !saved);
+    if (!saved) {
+      state.memoryNotes = previousNotes;
+      updateMemory();
+      status.textContent = "Not yerel hafızaya yazılamadı; metin taslakta korundu.";
+      return;
+    }
+    input.value = "";
+    updateMemoryNoteCharacterCount();
+    status.textContent = firebaseAccount ? "Not kaydedildi ve hesabınızla eşitleniyor." : "Not bu cihazın hafızasına kaydedildi. Hesapla eşitlemek için giriş yapabilirsiniz.";
+  });
+  $("memoryNotesList")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-memory-action]");
+    if (!button) return;
+    const note = (state.memoryNotes || []).find((item) => item.id === button.dataset.memoryId);
+    if (!note) return;
+    const status = $("memoryNoteStatus");
+    if (button.dataset.memoryAction === "delete") {
+      if (!window.confirm("Bu not hafıza bankasından silinsin mi?")) return;
+      const previousNotes = state.memoryNotes;
+      state.memoryNotes = previousNotes.filter((item) => item.id !== note.id);
+      const saved = await saveState();
+      if (!saved) state.memoryNotes = previousNotes;
+      updateMemory();
+      status.textContent = saved ? "Not hafıza bankasından silindi." : "Silme işlemi cihaz hafızasına kaydedilemedi; not korundu.";
+      status.classList.toggle("error", !saved);
+      return;
+    }
+    if (button.dataset.memoryAction === "use") {
+      const input = $("analystSignalInput");
+      if (!input) return;
+      const label = MEMORY_NOTE_CATEGORIES[note.category] || MEMORY_NOTE_CATEGORIES.general;
+      const block = `Hafıza notu (${label}):\n${note.content}`;
+      input.value = [input.value.trim(), block].filter(Boolean).join("\n\n");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.focus();
+      status.textContent = "Not uzman analiz notlarına aktarıldı; otomatik tahmin ağırlıklarını değiştirmez.";
+      status.classList.remove("error");
+    }
+  });
+  updateMemoryNoteCharacterCount();
+  renderMemoryNotes();
+}
+
 function updateMemory() {
   const n = state.outcomes.length;
   const top3 = state.outcomes.filter((item) => item.top3Hit).length;
@@ -2192,12 +2348,13 @@ function updateMemory() {
     ? `<div class="stats"><div class="stat"><b>${n}</b><span>ölçülen koşu</span></div><div class="stat"><b>%${Math.round(top3 / n * 100)}</b><span>ilk 3 içi isabet oranı</span></div><div class="stat"><b>%${Math.round(top1 / n * 100)}</b><span>model lideri isabeti</span></div></div><div class="meter" aria-label="İlk üç isabet oranı"><span style="width:${Math.round(top3 / n * 100)}%"></span></div><p class="hint">Kişisel karşılaştırmalar (girişte Firebase hesabıyla eşitlenir) ve Neon resmi yarış arşivi birlikte değerlendirilir. ${trainable < MODEL_MIN_RACES ? `Ağırlık kalibrasyonu için ${MODEL_MIN_RACES} uygun yarış gerekir; şu an ${trainable} var.` : !report?.validatedAt ? "En az 5 ayrı tarihli eğitim/doğrulama ayrımı henüz oluşmadı; başlangıç ağırlıkları kullanılıyor." : report.updated ? `Ağırlıklar zamana göre ayrılmış doğrulama diliminde iyileşti (Brier ${report.baselineBrier.toFixed(3)} → ${report.validationBrier.toFixed(3)}; doğrulama ${report.validationRaces} koşu).` : "Ayrılmış tarih doğrulamasında en az %2 iyileşme görülmedi; başlangıç ağırlıkları korundu."} Tek seçim eşiği geçmişi: ${singleHits}/${singleResults.length}${singleResults.length < 30 ? " (örnek yetersiz: 30’dan az aday)" : ""}; doğrulanmış pist/koşu türü ağırlığı: ${contextCount}. Yüzdeler geçmiş isabet ölçümüdür, gelecekte kazanma olasılığı değildir.</p>`
     : `<p class="muted">Henüz ölçülmüş sonuç yok. Yüzde hesaplamak için tahminleri gerçek sonuçlarla karşılaştırın.</p>`;
   $("historyArea").innerHTML = n ? `<table class="table"><thead><tr><th>Hipodrom / koşu</th><th>Kazanan</th><th>İlk üç</th><th>Lider</th><th>Tarih</th></tr></thead><tbody>${state.outcomes.slice(-30).reverse().map((item) => `<tr><td>${escapeHtml(item.city || "Manuel")} · ${item.raceNo}</td><td>#${item.winner} ${escapeHtml(item.winnerName)}</td><td>${item.top3Hit ? "Evet" : "Hayır"}</td><td>${item.top1Hit ? "Evet" : "Hayır"}</td><td>${new Date(item.at).toLocaleDateString("tr-TR")}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Karşılaştırma geçmişi henüz yok.</p>`;
+  renderMemoryNotes();
   renderCouponHistory();
 }
 
 function resetHistory() {
   const scope = firebaseAccount ? "Bu cihazdaki ve Firebase hesabınızdaki" : "Bu tarayıcıdaki";
-  if (!window.confirm(`${scope} bülten arşivi, fotoğraflar, yarış sonuçları ve kupon sonuç kayıtları silinsin mi?`)) return;
+  if (!window.confirm(`${scope} bülten arşivi, hafıza notları, fotoğraflar, yarış sonuçları ve kupon sonuç kayıtları silinsin mi?`)) return;
   state = { ...DEFAULT_STATE, profiles: { ...DEFAULT_PROFILES }, coupons: [] };
   lastAnalysis = [];
   lastCoupons = {};
@@ -2207,6 +2364,7 @@ function resetHistory() {
 }
 document.addEventListener("DOMContentLoaded", async () => {
   state = await restoreState();
+  initializeMemoryNotes();
   initializeFirebaseMemory().catch(() => setFirebaseStatus("Firebase bağlantısı başlatılamadı; yerel hafıza korunuyor.", true));
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
