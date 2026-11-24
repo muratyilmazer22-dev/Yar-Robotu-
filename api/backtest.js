@@ -113,7 +113,7 @@ module.exports = async function handler(req, res) {
         rivalFit: raceRelations.scoreAgainstField({ horses: horses.filter((runner) => !runner.scratched) }, horse, relationIndex, raceDate)
       }));
       const scoringRace = {
-        distance: Number(program.distance) || 1400,
+        distance: Number.isFinite(Number(program.distance)) && Number(program.distance) > 0 ? Number(program.distance) : null,
         surface: program.surface,
         type: program.raceCategory || program.raceType,
         city: row.city,

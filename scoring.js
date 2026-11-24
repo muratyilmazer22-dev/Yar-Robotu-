@@ -109,6 +109,7 @@
         const speedFit = (speed + intermediate) / total;
         const staminaFit = (stamina + staminaPlus) / total;
         const middleFit = (classic + intermediate) / total;
+        if (!Number.isFinite(Number(distance)) || Number(distance) <= 0) return null;
         return 45 + 55 * (distance <= 1300 ? speedFit : distance >= 1800 ? staminaFit : middleFit);
       });
       const sire = horse.sire ? getProfileScore(horse.sire, race.distance) : null;

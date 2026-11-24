@@ -87,6 +87,12 @@ test('incomplete signals report low confidence while ranking from the available 
   assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
 });
 
+test('unknown race distance does not fabricate pedigree fit from a speed/stamina profile', () => {
+  const race = { distance: null, horses: [{ number: 1, sire: 'TOROK', hp: 80 }, { number: 2, sire: 'TOROK', hp: 40 }] };
+  const ranked = analyzeRace(race);
+  assert.ok(ranked.every((horse) => horse.features.pedigree === null));
+});
+
 test('historical race-time performance influences ranking when available', () => {
   const race = {
     distance: 1400,

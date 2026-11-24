@@ -13,6 +13,16 @@ test('attaches bulletin conditions to every parsed race', () => {
   assert.equal(race.trackCondition, 'agir');
 });
 
+test('leaves missing distance unknown instead of assuming 1400 meters', () => {
+  const [race] = parseRaces([
+    '1. Koşu 14:00 Maiden',
+    'At İsmi\tAGF\tGNY',
+    'KIR AT (1)\t24\t2,40'
+  ].join('\n'));
+  assert.equal(race.distance, null);
+  assert.equal(race.horses[0].agf, 24);
+});
+
 test('parses tabular race bulletins by their column headers', () => {
   const bulletin = [
     '1. Koşu 14:00 Maiden 1400 Kum',
