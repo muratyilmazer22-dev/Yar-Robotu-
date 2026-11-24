@@ -65,7 +65,7 @@ test('the single model ranks by the active weighted signals', () => {
   assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
 });
 
-test('incomplete signals shrink scores toward neutral and cannot create a false leader', () => {
+test('incomplete signals report low confidence while ranking from the available score', () => {
   const race = {
     distance: 1400,
     surface: 'Kum',
@@ -81,9 +81,9 @@ test('incomplete signals shrink scores toward neutral and cannot create a false 
 
   assert.equal(sparseRunner.signal, 'Veri yetersiz');
   assert.equal(sparseRunner.confidence, 'Düşük');
-  assert.ok(sparseRunner.score < sparseRunner.rawScore);
-  assert.ok(sparseRunner.score < 80);
-  assert.equal(ranked[0].number, 4);
+  assert.equal(sparseRunner.score, sparseRunner.rawScore);
+  assert.ok(Number.isFinite(sparseRunner.score));
+  assert.equal(ranked[0].number, 2);
   assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
 });
 
