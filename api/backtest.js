@@ -28,12 +28,10 @@ module.exports = async function handler(req, res) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const oldest = new Date();
-  oldest.setUTCDate(oldest.getUTCDate() - 365);
-  const from = req.query.from || oldest.toISOString().slice(0, 10);
+  const from = req.query.from || '1900-01-01';
   const to = req.query.to || today;
-  if (!validDate(from) || !validDate(to) || from > to || from < oldest.toISOString().slice(0, 10) || to > today) {
-    return res.status(400).json({ error: 'Use a valid date range within the latest 365 days.' });
+  if (!validDate(from) || !validDate(to) || from > to || to > today) {
+    return res.status(400).json({ error: 'Use a valid archived date range that does not extend into the future.' });
   }
 
   try {

@@ -1,9 +1,5 @@
 {
-  "crons": [
-    { "path": "/api/cron/daily-learning", "schedule": "0 4 * * *" }
-  ],
   "functions": {
-    "api/cron/daily-learning.js": { "maxDuration": 120 },
     "api/history.js": {
       "maxDuration": 120
     },

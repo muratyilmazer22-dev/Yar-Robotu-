@@ -65,7 +65,7 @@
         renderMetric('Son kayıt', data.lastDate || '—'),
         renderMetric('Arşiv kalite kayıtları', auditedCount ? `${needsReview} inceleme / ${auditedCount} denetim` : 'Henüz denetim yok')
       );
-      setStatus(Number(data.raceCount || 0) && data.lastDate ? `TJK arşivindeki son kayıt: ${data.lastDate}. Son içe aktarma kalite bilgisi kalıcı denetim kaydında tutulur.` : 'Neon arşivi boş; TJK’den tarih aralığı seçerek içe aktarın.');
+      setStatus(Number(data.raceCount || 0) && data.lastDate ? `Mevcut arşivdeki son kayıt: ${data.lastDate}. Kalite denetimleri kalıcı olarak saklanır.` : 'Neon geçmiş arşivi şu anda boş.');
       return true;
     } catch (error) {
       setStatus(error.message || 'Neon arşivi yüklenemedi.', true);
@@ -101,7 +101,7 @@
     } catch { /* The user can still use the local analysis tools while signed out. */ }
     if (!signedIn) {
       importing = false;
-      setStatus('TJK arşivini içe aktarmak için önce Firebase hesabınızla giriş yapın.', true);
+      setStatus('Geçmiş arşivi otomatik içe aktarma kapalıdır. Yeni bültenleri kendiniz ekleyin.', true);
       return;
     }
     stopRequested = false;
@@ -347,7 +347,7 @@ function sharedModelReportText() {
   const report = model.report || {};
   const validation = model.lastAcceptedValidation;
   const status = validation
-    ? `resmi TJK verisinden doğrulanmış ortak model (${validation.from}–${validation.to || "—"}; kişisel tahmin ağırlıklarına uygulanmaz)`
+    ? `geçmiş yarış arşivinde ileri-tarih doğrulaması bulunan ortak model (${validation.from}–${validation.to || "—"}; kişisel tahmin ağırlıklarına uygulanmaz)`
     : "henüz kabul edilmiş ileri-tarih doğrulaması yok; ortak model yalnızca ayrı raporlanır";
   const scores = typeof report.baselineBrier === "number" && Number.isFinite(report.baselineBrier)
     && typeof report.validationBrier === "number" && Number.isFinite(report.validationBrier)
@@ -358,6 +358,7 @@ function sharedModelReportText() {
 let lastAnalysis = [];
 let lastCoupons = {};
 let resultCompareTimer = null;
+let resultComparisonInProgress = false;
 let deferredInstallPrompt = null;
 let singleEvidenceCache = null;
 let firebaseSdk = null;
@@ -691,14 +692,14 @@ function renderResultsContextOptions(selectedDate = $("resultsDateInput")?.value
     $("resultsCityInput").value = fallback[1].city;
   }
   const selected = select.selectedOptions[0];
-  const archiveButton = $("loadOfficialResultsButton");
+  const archiveButton = $("loadArchivedResultsButton");
   const contextHelp = $("resultsContextHelp");
   if (archiveButton) archiveButton.disabled = !selected?.dataset.date || !selected?.dataset.city;
   if (contextHelp) contextHelp.textContent = sortedContexts.length
     ? "Tarih ve hipodrom seçili analizden alınır; yanlış gün/şehir eşleşmesini önler."
     : "Bu cihazda tahmin kaydı yok. Başka cihazdaki kayıtlar için aynı hesapla giriş yapın veya yedek yükleyin.";
 }
-function formatOfficialResults(races) {
+function formatArchivedResults(races) {
   return races.map((race) => {
     const rows = (Array.isArray(race.results?.runners) ? race.results.runners : []).map((runner) => {
       const number = Number(runner.horseNumber ?? runner.no);
@@ -710,12 +711,12 @@ function formatOfficialResults(races) {
     if (!rows.length) return "";
     const raceNo = Number(race.race_no ?? race.raceNo);
     if (!Number.isSafeInteger(raceNo) || raceNo < 1) return "";
-    return `${raceNo}. Koşu TJK sonucu\nAt No\tAt Adı\tSıra\n${rows.join("\n")}`;
+    return `${raceNo}. Koşu arşiv sonucu\nAt No\tAt Adı\tSıra\n${rows.join("\n")}`;
   }).filter(Boolean).join("\n\n");
 }
-async function loadOfficialResults() {
-  const button = $("loadOfficialResultsButton");
-  const status = $("officialResultsStatus");
+async function loadArchivedResults() {
+  const button = $("loadArchivedResultsButton");
+  const status = $("archivedResultsStatus");
   const date = $("resultsDateInput").value;
   const city = $("resultsCityInput").value.trim();
   if (!date || !city) {
@@ -723,25 +724,25 @@ async function loadOfficialResults() {
     return;
   }
   button.disabled = true;
-  status.textContent = "TJK arşivindeki sonuçlar aranıyor…";
+  status.textContent = "Kayıtlı arşivdeki sonuçlar aranıyor…";
   try {
     const query = new URLSearchParams({ date, city });
     const response = await window.RaceRobotRecovery.createRecoveryFetch()(`/api/race-history?${query}`, { headers: { Accept: "application/json" }, cache: "no-store" });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || "TJK arşivi okunamadı.");
+    if (!response.ok) throw new Error(data.error || "Kayıtlı arşiv okunamadı.");
     const races = Array.isArray(data) ? data : [];
-    const resultText = formatOfficialResults(races);
+    const resultText = formatArchivedResults(races);
     if (!resultText) {
-      status.textContent = `TJK arşivinde ${city} · ${new Date(`${date}T00:00:00`).toLocaleDateString("tr-TR")} için sonuç bulunamadı. Diğer araçlar bölümünden o günü arşive aktarın.`;
+      status.textContent = `${city} · ${new Date(`${date}T00:00:00`).toLocaleDateString("tr-TR")} için kayıtlı arşiv sonucu bulunamadı. Sonuç tablosunu kendiniz yapıştırabilir veya fotoğrafını yükleyebilirsiniz.`;
       return;
     }
     $("sonucluBultenInput").value = resultText;
     $("resultsReviewedCheck").checked = false;
     saveBulletinDraft("result", { text: resultText, date, city });
-    const raceCount = resultText.split(/\n\n/).length;
-    status.textContent = `${raceCount} koşunun resmî TJK sonucu yüklendi; yarışları kontrol edip onay kutusunu işaretleyin.`;
+    const raceCount = races.filter((race) => Array.isArray(race.results?.runners) && race.results.runners.length > 0).length;
+    status.textContent = `${raceCount} koşu sonucu mevcut arşivden yüklendi; tabloyu kontrol edip onay kutusunu işaretleyin.`;
   } catch (error) {
-    status.textContent = error instanceof Error ? error.message : "TJK arşivi okunamadı.";
+    status.textContent = error instanceof Error ? error.message : "Kayıtlı arşiv okunamadı.";
   } finally {
     button.disabled = false;
   }
@@ -869,8 +870,9 @@ function showMessage(target, text, type = "") {
   target.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 function setTab(name) {
-  document.querySelectorAll(".tab").forEach((button) => { const active = (button.dataset.tab || button.dataset.panel) === name; button.setAttribute("aria-selected", String(active)); button.tabIndex = active ? 0 : -1; });
-  document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === `panel-${name}`));
+  const target = document.getElementById(`panel-${name}`);
+  document.querySelectorAll(".panel-details").forEach((panel) => { panel.open = panel === target; });
+  target?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function normalize(text) { return text.toLocaleUpperCase("en-US").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "I"); }
 function parseNumber(value) { const result = Number(String(value || "").replace(",", ".")); return Number.isFinite(result) ? result : null; }
@@ -894,7 +896,7 @@ function parseRaces(text) {
       finished: placed.length >= 2 && placed.some((horse) => horse.place === 1)
     };
   });
-  const warnings = races.length ? window.BulletinQuality.auditRaces(races) : ["Koşu ve at satırı bulunamadı. TJK metnini sekme ayrımları korunacak şekilde yeniden kopyalayın."];
+  const warnings = races.length ? window.BulletinQuality.auditRaces(races) : ["Koşu ve at satırı bulunamadı. Bülteni sekme ayrımları korunacak şekilde yeniden kopyalayın."];
   return { races, warnings };
 }
 function profileScore(name, distance) {
@@ -1178,7 +1180,7 @@ async function runAnalysis() {
   $("dogrulamaRaporuAlani").innerHTML = "";
   $("kuponAlani").innerHTML = "";
   $("kosuSonucAlani").innerHTML = "";
-  if (!input) { showMessage(warning, "Önce TJK bülten metnini yapıştırın.", "error"); return; }
+  if (!input) { showMessage(warning, "Önce analiz etmek istediğiniz bülteni yapıştırın.", "error"); return; }
   const archivedBulletin = archiveBulletin("program", { text: input, date: $("couponDateInput")?.value || new Date().toISOString().slice(0, 10), city: $("couponCityInput")?.value.trim().slice(0, 80) || "", budget: $("butceInput")?.value || "", unit: $("birimInput")?.value || "" });
   const parsed = parseRaces(input);
   if (!parsed.races.length) {
@@ -1425,8 +1427,16 @@ function archiveRowToOutcome(row) {
   const runners = Array.isArray(program.runners) ? program.runners : [];
   const resultRunners = Array.isArray(results.runners) ? results.runners : [];
   const finishByNumber = new Map(resultRunners.map((runner) => [Number(runner.horseNumber ?? runner.no), Number(runner.finishPosition)]));
-  const winner = [...finishByNumber.entries()].find(([, place]) => place === 1)?.[0];
-  if (winner === undefined || runners.length < 2) return null;
+  const winners = resultRunners.filter((runner) => Number(runner.finishPosition) === 1);
+  const winner = Number(winners[0]?.horseNumber ?? winners[0]?.no);
+  const programNumbers = runners.map((runner) => Number(runner.horseNumber ?? runner.no));
+  const resultNumbers = resultRunners.map((runner) => Number(runner.horseNumber ?? runner.no));
+  if (winners.length !== 1 || !Number.isSafeInteger(winner) || winner < 1 || runners.length < 2
+    || programNumbers.some((number) => !Number.isSafeInteger(number) || number < 1)
+    || new Set(programNumbers).size !== programNumbers.length
+    || resultNumbers.some((number) => !Number.isSafeInteger(number) || number < 1 || !programNumbers.includes(number))
+    || new Set(resultNumbers).size !== resultNumbers.length
+    || resultRunners.some((runner) => !Number.isSafeInteger(Number(runner.finishPosition)) || Number(runner.finishPosition) < 1)) return null;
   const title = String(program.title || "");
   const distanceAndSurface = title.match(/(\d{3,4})\s*(Kum|Çim|Sentetik)/i);
   const normalizedTitle = normalize(title);
@@ -1500,18 +1510,47 @@ async function refreshRemoteMemory() {
   renderTrainingReport();
     const automated = sharedAutomaticModel;
   const automatedStatus = automated?.report?.updated
-    ? " · resmi TJK arşivine dayalı ortak model ileri tarih doğrulamasını geçti (kişisel tahminlerde kullanılmıyor)"
+    ? " · geçmiş arşive dayalı ortak model ileri tarih doğrulamasını geçti (kişisel tahminlerde kullanılmıyor)"
     : automated?.lastAcceptedValidation
-      ? " · resmi TJK arşivine dayalı ortak model mevcut (kişisel tahminlerde kullanılmıyor)"
+      ? " · geçmiş arşive dayalı ortak model mevcut (kişisel tahminlerde kullanılmıyor)"
       : automated?.report?.verified
-        ? " · resmi TJK arşivinden aday model doğrulamayı geçemedi (kişisel model etkilenmedi)"
-        : " · ortak model henüz doğrulanmadı; kişisel öğrenme kendi bülten sonuçlarını kullanır";
+        ? " · geçmiş arşivden aday model doğrulamayı geçemedi (kişisel model etkilenmedi)"
+        : " · ortak arşiv modeli yenilenmedi; yeni manuel sonuçlar kişisel modeli besler";
     const learnedContexts = Object.keys(automated?.contextWeights || {}).length;
-    target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu TJK koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Öğrenme hedefi: tüm mevcut yarış sinyallerinde ve hipodrom/zemin/tür/mesafe kesişimlerinde daha iyi ileri-tarih tahminleri bulmak; yalnızca doğrulama kazanan değişiklikleri etkinleştirmek. ${learnedContexts} doğrulanmış bağlam modeli ortak hafızada. Bu resmi arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi hesabınızla giriş yaptıysanız otomatik eşitlenir, aksi halde bu cihazda kalır.`;
+    target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu arşiv koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Öğrenme hedefi: tüm mevcut yarış sinyallerinde ve hipodrom/zemin/tür/mesafe kesişimlerinde daha iyi ileri-tarih tahminleri bulmak; yalnızca doğrulama kazanan değişiklikleri etkinleştirmek. ${learnedContexts} doğrulanmış bağlam modeli ortak hafızada. Bu geçmiş arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi hesabınızla giriş yaptıysanız otomatik eşitlenir, aksi halde bu cihazda kalır.`;
     return memory;
   } catch {
     target.textContent = "Neon kalıcı hafızasına şu an ulaşılamıyor; bu cihazdaki kayıtlar korunuyor.";
     return null;
+  }
+}
+function renderArchiveMetric(label, value) {
+  const item = document.createElement("div");
+  item.className = "stat";
+  const title = document.createElement("span");
+  title.textContent = label;
+  const strong = document.createElement("strong");
+  strong.textContent = value;
+  item.append(title, strong);
+  return item;
+}
+async function loadArchiveSummary() {
+  const target = $("historySummary");
+  if (!target) return;
+  try {
+    const response = await window.RaceRobotRecovery.createRecoveryFetch()("/api/history/", { headers: { Accept: "application/json" } });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Arşiv özeti alınamadı.");
+    const auditedCount = Number(data.qualitySummary?.auditedCount || 0);
+    const needsReview = Number(data.qualitySummary?.needsReview || 0);
+    target.replaceChildren(
+      renderArchiveMetric("Arşiv kayıtlı koşu", Number(data.raceCount || 0).toLocaleString("tr-TR")),
+      renderArchiveMetric("İlk kayıt", data.firstDate || "—"),
+      renderArchiveMetric("Son kayıt", data.lastDate || "—"),
+      renderArchiveMetric("Kalite incelemesi", auditedCount ? `${needsReview} inceleme / ${auditedCount} denetim` : "Henüz denetim yok")
+    );
+  } catch {
+    target.textContent = "Arşiv özeti şu anda alınamadı; kayıtlı verileriniz değişmedi.";
   }
 }
 let archiveSyncInProgress = false;
@@ -1524,12 +1563,12 @@ async function syncHistoricalArchive() {
     refreshButton.disabled = true;
     refreshButton.textContent = "Eşitleniyor…";
   }
-  if (status) status.textContent = "TJK geçmiş arşivi kontrol ediliyor…";
+  if (status) status.textContent = "Mevcut geçmiş arşiv kontrol ediliyor…";
   try {
     await refreshRemoteMemory();
     const archive = [];
     const pageSize = 5000;
-    for (let offset = 0; offset < 100000; offset += pageSize) {
+    for (let offset = 0; ; offset += pageSize) {
       const response = await window.RaceRobotRecovery.createRecoveryFetch()(`/api/race-history?limit=${pageSize}&offset=${offset}`, { headers: { Accept: "application/json" } });
       const page = await response.json();
       if (!response.ok) throw new Error(page.error || "Arşiv hizmetine ulaşılamadı.");
@@ -1579,16 +1618,17 @@ async function syncHistoricalArchive() {
     state.archiveRaceCount = converted.length;
     state.archiveLatestDate = archive.map((row) => String(row.race_date || "").slice(0, 10)).sort().at(-1) || "";
     state.archiveSyncedAt = new Date().toISOString();
-    saveState();
+    const persistence = await persistCurrentMemory();
     renderTrainingReport();
-    if (status) status.textContent = `Neon arşivinden ${converted.length.toLocaleString("tr-TR")} sonuçlu koşu alındı; ${freshCount.toLocaleString("tr-TR")} yeni koşu eklendi; ${correctedCount.toLocaleString("tr-TR")} eski sonuç düzeltildi. Son arşiv tarihi: ${state.archiveLatestDate || "bilinmiyor"}. ${state.trainingReport?.updated ? "Ayrılmış doğrulamada iyileşme görüldü; öğrenilmiş ağırlıklar etkin." : `Ağırlıklar ${MODEL_MIN_RACES} yarış ve ayrılmış doğrulama iyileşmesi şartıyla güncellenir.`}`;
+    updateMemory();
+    if (status) status.textContent = `Neon arşivinden ${converted.length.toLocaleString("tr-TR")} sonuçlu koşu alındı; ${freshCount.toLocaleString("tr-TR")} yeni koşu eklendi; ${correctedCount.toLocaleString("tr-TR")} eski sonuç düzeltildi. Son arşiv tarihi: ${state.archiveLatestDate || "bilinmiyor"}. ${state.trainingReport?.updated ? "Ayrılmış doğrulamada iyileşme görüldü; öğrenilmiş ağırlıklar etkin." : `Ağırlıklar ${MODEL_MIN_RACES} yarış ve ayrılmış doğrulama iyileşmesi şartıyla güncellenir.`} ${resultPersistenceNote(persistence)}`;
   } catch {
     if (status) status.textContent = "Neon yarış arşivine şu an ulaşılamadı. Bu cihazdaki kayıtlar korunuyor; bağlantı kurulduğunda arşiv yeniden kontrol edilir.";
   } finally {
     archiveSyncInProgress = false;
     if (refreshButton) {
       refreshButton.disabled = false;
-      refreshButton.textContent = "Yarış arşivini eşitle";
+      refreshButton.textContent = "Mevcut arşivi eşitle"
     }
   }
 }
@@ -1676,8 +1716,9 @@ function inferResultPredictionContext(races) {
   }
   for (const context of contexts.values()) {
     for (const race of races) {
-      const winner = race.horses.find((horse) => Number(horse.place) === 1);
-      if (!winner) continue;
+      const winners = race.horses.filter((horse) => Number(horse.place) === 1);
+      if (winners.length !== 1) continue;
+      const [winner] = winners;
       const runs = context.predictions.filter((prediction) => Number(prediction.no) === Number(race.no));
       const matchingHorse = runs.flatMap((prediction) => prediction.horses || []).find((horse) => Number(horse.number) === Number(winner.number));
       if (!matchingHorse) continue;
@@ -1685,23 +1726,44 @@ function inferResultPredictionContext(races) {
       if (winner.name && normalize(matchingHorse.name || "") === normalize(winner.name)) context.nameMatches += 1;
     }
   }
-  return [...contexts.values()].filter((context) => context.numberMatches > 0)
-    .sort((a, b) => b.nameMatches - a.nameMatches || b.numberMatches - a.numberMatches || b.latestAt.localeCompare(a.latestAt))[0] || null;
+  const candidates = [...contexts.values()].filter((context) => context.numberMatches > 0)
+    .sort((a, b) => b.nameMatches - a.nameMatches || b.numberMatches - a.numberMatches || b.latestAt.localeCompare(a.latestAt));
+  if (candidates.length > 1 && candidates[0].nameMatches === candidates[1].nameMatches && candidates[0].numberMatches === candidates[1].numberMatches) return null;
+  return candidates[0] || null;
 }
-function compareResults() {
+async function persistCurrentMemory() {
+  const localSaved = await saveState();
+  const cloudSaved = firebaseAccount
+    ? firebaseSyncReady && localSaved ? await queueFirebaseMemorySync(true) : false
+    : null;
+  return { localSaved, cloudSaved, saved: localSaved && (!firebaseAccount || cloudSaved === true) };
+}
+function resultPersistenceNote(persistence) {
+  if (!persistence.localSaved) return "Tarayıcı hafızasına yazılamadı; yedeği indirip saklayın.";
+  if (firebaseAccount && !persistence.cloudSaved) return "Yerel kayıt korundu ancak Firebase eşitlemesi doğrulanamadı.";
+  if (persistence.cloudSaved) return "Firebase hesabınızla eşitleme doğrulandı.";
+  return "Bu cihazda kaydedildi; hesaplar arası eşitleme için giriş yapın.";
+}
+async function compareResults() {
   const target = $("ogrenmeLogAlani");
   if ($("resultsReviewedCheck")?.checked !== true) {
-    showMessage(target, "Sonuçları karşılaştırmadan önce tabloyu resmî kaynakla kontrol edin ve onay kutusunu işaretleyin. OCR metni taslaktır.", "error");
+    showMessage(target, "Sonuçları karşılaştırmadan önce tabloyu kendi kaynağınızla kontrol edin ve onay kutusunu işaretleyin. OCR metni yalnızca taslaktır.", "error");
     return;
   }
   const resultText = $("sonucluBultenInput").value.trim();
-  if (resultText || storedResultImage) archiveBulletin("result", { text: resultText, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
   const parsed = parseRaces(resultText);
   if (!parsed.races.length) {
     showMessage(target, "Sonuç bülteninde koşu ve at sonuç satırları bulunamadı. At numarası ve Sıra/Rank/Position bilgisini içeren tabloyu ekleyin.", "error");
     return;
   }
   if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) { showMessage(target, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu kaldırıp yeniden deneyin.", "error"); return; }
+  const invalidRace = parsed.races.find((race) => {
+    const numbers = race.horses.map((horse) => Number(horse.number));
+    return numbers.some((number) => !Number.isSafeInteger(number) || number < 1)
+      || new Set(numbers).size !== numbers.length
+      || race.horses.some((horse) => horse.place !== null && (!Number.isSafeInteger(horse.place) || horse.place < 1));
+  });
+  if (invalidRace) { showMessage(target, `${invalidRace.no}. koşuda at numarası yineleniyor veya sıra bilgisi geçersiz. Sonuç tablosunu düzeltip yeniden deneyin.`, "error"); return; }
   const inferredContext = inferResultPredictionContext(parsed.races);
   const selectedContext = $("resultsContextInput")?.selectedOptions[0];
   const manuallySelected = Boolean(selectedContext?.dataset.date && $("resultsContextInput").closest("details")?.open);
@@ -1717,9 +1779,13 @@ function compareResults() {
   $("resultsDateInput").value = resultDate;
   $("resultsCityInput").value = inferredContext?.city || selectedContext?.dataset.city || "";
   renderResultsContextOptions(resultDate, $("resultsCityInput").value);
+  archiveBulletin("result", { text: resultText, date: resultDate, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
   const matchingPredictions = state.predictions.filter((item) => item.date === resultDate && normalize(item.city || "") === resultCity);
   if (!matchingPredictions.length) {
-    showMessage(target, "Seçilen analiz için kayıtlı tahmin bulunamadı. Elle analiz seçimini kontrol edin.", "error");
+    const persistence = await persistCurrentMemory();
+    const note = resultPersistenceNote(persistence);
+    showMessage(target, `Sonuç arşivlendi ancak seçilen analiz için kayıtlı tahmin bulunamadı. Öğrenme güncellenmedi. ${note}`, persistence.saved ? "" : "error");
+    updateMemory();
     return;
   }
   const timestamp = new Date().toISOString();
@@ -1728,7 +1794,8 @@ function compareResults() {
   let racesWithoutPrediction = 0;
   let racesWithWinnerMismatch = 0;
   for (const race of parsed.races) {
-    const winner = race.horses.find((horse) => horse.place === 1);
+    const winners = race.horses.filter((horse) => horse.place === 1);
+    const winner = winners.length === 1 ? winners[0] : null;
     const racePredictions = matchingPredictions.filter((item) => Number(item.no) === Number(race.no));
     if (!winner || !Number.isSafeInteger(Number(winner.number)) || Number(winner.number) < 1) { racesWithoutWinner += 1; continue; }
     if (!racePredictions.length) { racesWithoutPrediction += 1; continue; }
@@ -1774,13 +1841,17 @@ function compareResults() {
   }
   if (!outcomes.length) {
     const mismatchNote = racesWithWinnerMismatch ? ` Kazananın numarası aynı olsa da at adı ${racesWithWinnerMismatch} koşuda tahminle uyuşmadı; yanlış hipodrom eşleşmesi olabileceğinden öğrenme durduruldu.` : "";
-    showMessage(target, `Sonuçlar kaydedildi ancak güvenilir tahmin eşleşmesi bulunamadı. Öğrenme güncellenmedi; ${racesWithoutWinner} koşuda sıra okunamadı, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote}`);
+    const persistence = await persistCurrentMemory();
+    const note = resultPersistenceNote(persistence);
+    showMessage(target, `Sonuç arşivlendi ancak güvenilir tahmin eşleşmesi bulunamadı. Öğrenme güncellenmedi; ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} ${note}`, persistence.saved ? "" : "error");
+    updateMemory();
     return;
   }
   const merged = window.RaceLearningEvaluation.mergeOutcomes(state.outcomes, outcomes);
   state.outcomes = merged.outcomes;
   if (merged.added || merged.corrected) trainModel();
-  const saved = saveState();
+  const persistence = await persistCurrentMemory();
+  const saved = persistence.saved;
   const duplicates = outcomes.length - merged.added - merged.corrected;
   const winnerMismatchNote = racesWithWinnerMismatch ? `${racesWithWinnerMismatch} koşu kazanan at kimliği uyuşmadığı için dışarıda bırakıldı.` : "";
   const report = state.trainingReport || {};
@@ -1791,7 +1862,8 @@ function compareResults() {
       : `Sonuçlar öğrenme arşivine eklendi; model için henüz yeterli doğrulama verisi yok (en az ${MODEL_MIN_RACES} uygun yarış gerekli).`;
   const auditRaces = parsed.races.flatMap((race) => {
     const runs = matchingPredictions.filter((item) => Number(item.no) === Number(race.no)).sort((a, b) => String(a.predictionCreatedAt || "").localeCompare(String(b.predictionCreatedAt || "")));
-    const winner = race.horses.find((horse) => horse.place === 1);
+    const winners = race.horses.filter((horse) => horse.place === 1);
+    const winner = winners.length === 1 ? winners[0] : null;
     if (!winner || !runs.length) return [];
     const leaders = runs.map((run) => window.RaceEkuri.selectionUnits(run.horses)[0]).filter(Boolean);
     const latest = runs.at(-1);
@@ -1810,25 +1882,31 @@ function compareResults() {
   }).join("");
   const leadersCorrect = outcomes.filter((item) => item.top1Hit).length;
   const topThreeCorrect = outcomes.filter((item) => item.top3Hit).length;
-  const stableRaceCount = parsed.races.filter((race) => {
+  const evaluatedRaceNos = new Set(outcomes.map((item) => Number(item.raceNo)));
+  const evaluatedRaceCount = evaluatedRaceNos.size;
+  const stableRaceCount = parsed.races.filter((race) => evaluatedRaceNos.has(Number(race.no))).filter((race) => {
     const leaders = matchingPredictions.filter((item) => Number(item.no) === Number(race.no)).map((run) => {
       const leader = window.RaceEkuri.selectionUnits(run.horses)[0];
       return leader?.members?.map((member) => member.number).join("+") || leader?.number;
     }).filter(Boolean);
     return new Set(leaders).size <= 1;
   }).length;
-  const outcomeDetails = `<section class="card"><h3>Kısa olay yeri incelemesi</h3><p class="sub">${outcomes.length} kayıtlı tahmin sürümü · ${stableRaceCount}/${parsed.races.length} koşuda lider değişmedi · sürüm bazında lider isabeti ${leadersCorrect}/${outcomes.length} · ilk üç isabeti ${topThreeCorrect}/${outcomes.length}.</p>${auditRaces}</section>`;
-  showMessage(target, `${saved ? "Sonuç bülteni otomatik karşılaştırıldı ve hafızaya kaydedildi." : "Karşılaştırma yapıldı ancak hafızaya kaydetme başarısız oldu."} ${merged.added} yeni sürüm sonucu · ${merged.corrected} düzeltilen sonuç · ${duplicates} yinelenen · ${racesWithoutWinner + racesWithoutPrediction} atlanan koşu. ${winnerMismatchNote} ${learningStatus}`, saved ? "success" : "error");
+  const outcomeDetails = `<section class="card"><h3>Kısa olay yeri incelemesi</h3><p class="sub">${outcomes.length} kayıtlı tahmin sürümü · ${stableRaceCount}/${evaluatedRaceCount} değerlendirilen koşuda lider değişmedi · sürüm bazında lider isabeti ${leadersCorrect}/${outcomes.length} · ilk üç isabeti ${topThreeCorrect}/${outcomes.length}.</p>${auditRaces}</section>`;
+  showMessage(target, `${saved ? "Onayladığınız sonuçlar karşılaştırıldı ve kaydedildi." : "Karşılaştırma yapıldı ancak tüm hafıza kayıtları doğrulanamadı."} ${resultPersistenceNote(persistence)} ${merged.added} yeni sürüm sonucu · ${merged.corrected} düzeltilen sonuç · ${duplicates} yinelenen · ${racesWithoutWinner + racesWithoutPrediction} atlanan koşu. ${winnerMismatchNote} ${learningStatus}`, saved ? "success" : "error");
   target.insertAdjacentHTML("beforeend", outcomeDetails);
   renderTrainingReport();
   updateMemory();
   target.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
-function handleCompareResults() {
+async function handleCompareResults() {
+  if (resultComparisonInProgress) return;
+  resultComparisonInProgress = true;
   try {
-    compareResults();
+    await compareResults();
   } catch {
     showMessage($("ogrenmeLogAlani"), "Sonuçlar işlenirken beklenmeyen bir hata oluştu. Girdi alanlarını kontrol edip yeniden deneyin; kayıtlı hafıza korunuyor.", "error");
+  } finally {
+    resultComparisonInProgress = false;
   }
 }
 function scheduleResultComparison() {
@@ -2103,7 +2181,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     $("installAppBtn").hidden = true;
   });
   window.addEventListener("appinstalled", () => { $("installAppBtn").hidden = true; });
-  document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => setTab(button.dataset.tab || button.dataset.panel)));
   $("goToBulletinButton")?.addEventListener("click", () => setTab("bulten"));
   const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   $("couponDateInput").value = todayLocal;
@@ -2135,7 +2212,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     scheduleResultComparison();
   });
   $("resultsReviewedCheck")?.addEventListener("change", scheduleResultComparison);
-  $("loadOfficialResultsButton")?.addEventListener("click", loadOfficialResults);
+  $("loadArchivedResultsButton")?.addEventListener("click", loadArchivedResults);
   $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("hamBultenInput")?.addEventListener("paste", () => window.setTimeout(() => analyze(), 0));
   $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
@@ -2212,15 +2289,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     event.target.value = "";
   });
   $("resetBtn")?.addEventListener("click", resetHistory);
-  document.querySelectorAll(".tab").forEach((button, index, buttons) => button.addEventListener("keydown", (event) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
-    buttons[next].focus(); buttons[next].click();
-  }));
   if (state.predictions?.length) lastAnalysis = state.predictions;
   updateMemory();
   renderTrainingReport();
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+  loadArchiveSummary();
   refreshRemoteMemory();
 });
