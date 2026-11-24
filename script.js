@@ -264,8 +264,8 @@
 })();
 const STORAGE_KEY = "race-analysis-v1";
 const BASE_WEIGHTS = window.RaceScoring.BASE_WEIGHTS;
-  const MODEL_VERSION = "single-weighted-v2-lineage-rivals";
-  const PERSONAL_LEARNING_SOURCE = "user-bulletins-v1";
+  const MODEL_VERSION = "single-weighted-v3-reviewed-results";
+  const PERSONAL_LEARNING_SOURCE = "user-bulletins-reviewed-v2";
   const MODEL_MIN_RACES = 30;
 const TRAINING_WINDOW_RACES = 2000;
 const SINGLE_GAP_THRESHOLD = 12.5;
@@ -710,10 +710,10 @@ async function loadOfficialResults() {
       return;
     }
     $("sonucluBultenInput").value = resultText;
+    $("resultsReviewedCheck").checked = false;
     saveBulletinDraft("result", { text: resultText, date, city });
     const raceCount = resultText.split(/\n\n/).length;
-    status.textContent = `${raceCount} koşunun resmî sonucu yüklendi; tahminlerle karşılaştırılıyor.`;
-    handleCompareResults();
+    status.textContent = `${raceCount} koşunun resmî TJK sonucu yüklendi; yarışları kontrol edip onay kutusunu işaretleyin.`;
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : "TJK arşivi okunamadı.";
   } finally {
@@ -883,7 +883,7 @@ function scoreRace(race) {
 }
 function singleSelectionEvidence() {
   if (singleEvidenceCache) return singleEvidenceCache;
-  const outcomes = state.outcomes.filter((item) => item.modelVersion === MODEL_VERSION && !String(item.sourceKey || "").startsWith("tjk:") && Array.isArray(item.horses) && item.horses.length > 1 && String(item.at || "").slice(0, 10));
+  const outcomes = state.outcomes.filter((item) => item.modelVersion === MODEL_VERSION && item.reviewedByUser === true && !String(item.sourceKey || "").startsWith("tjk:") && Array.isArray(item.horses) && item.horses.length > 1 && String(item.at || "").slice(0, 10));
   const dates = [...new Set(outcomes.map((item) => String(item.at).slice(0, 10)))].sort();
   if (dates.length < 5) {
     singleEvidenceCache = { validated: false, candidates: 0, wins: 0, hitRate: null, baselineHitRate: null, validationStartDate: null };
@@ -1247,10 +1247,11 @@ function renderTrainingReport() {
   const target = $("trainingReportArea");
   if (!target) return;
   const report = state.trainingReport || {};
-  const personalOutcomes = state.outcomes.filter(window.RaceLearningEvaluation.isPersonalBulletinOutcome);
+  const personalOutcomes = state.outcomes.filter((item) => window.RaceLearningEvaluation.isPersonalBulletinOutcome(item) && item.reviewedByUser === true);
+  const unreviewedOutcomeCount = state.outcomes.filter((item) => window.RaceLearningEvaluation.isPersonalBulletinOutcome(item) && item.reviewedByUser !== true).length;
   const comparison = window.RaceLearningEvaluation.evaluateForwardComparison(personalOutcomes, BASE_WEIGHTS);
   if (!report.sampleSize && !comparison.validated) {
-    target.textContent = `Öğrenme raporu: ${personalOutcomes.length.toLocaleString("tr-TR")} kişisel bülten sonucu · ileri tarih kıyaslaması için en az 5 ayrı yarış tarihi gerekir. ${sharedModelReportText()}`;
+    target.textContent = `Öğrenme raporu: ${personalOutcomes.length.toLocaleString("tr-TR")} onaylı kişisel sonuç · ${unreviewedOutcomeCount.toLocaleString("tr-TR")} eski/onaysız kayıt eğitime alınmadı · ileri tarih kıyaslaması için en az 5 ayrı yarış tarihi gerekir. ${sharedModelReportText()}`;
     return;
   }
   const currentValidation = report.validationMethod === "fixed-forward-v1";
@@ -1260,11 +1261,11 @@ function renderTrainingReport() {
     return `${key === "learned" ? "tahmin anındaki model" : key === "favorite" ? "piyasa favorisi" : "sabit temel model"}: ${item.races ? `${item.wins}/${item.races} (%${(item.hitRate * 100).toFixed(1)})` : "ölçülemedi"}`;
   }).join(" · ") : "İleri tarih karşılaştırması için henüz yeterli tarih yok.";
   const segments = comparison.byContext.filter((item) => item.eligible).map((item) => `${item.name} (${item.kind === "surface" ? "zemin" : "yarış türü"}, n=${item.races})`).join(", ");
-  target.textContent = `Öğrenme raporu: ${report.sampleSize || personalOutcomes.length} uygun kişisel yarış · eğitim ${report.trainingRaces || 0} · doğrulama ${report.validationRaces || 0}${report.validationStartDate ? ` (${report.validationStartDate} sonrası)` : ""}. ${modelStatus} Brier temel: ${currentValidation && Number.isFinite(report.baselineBrier) ? report.baselineBrier.toFixed(4) : "—"} · doğrulama: ${currentValidation && Number.isFinite(report.validationBrier) ? report.validationBrier.toFixed(4) : "—"}. ${comparison.validated ? `Aynı son tarih dilimi (${comparison.startDate}–${comparison.endDate}, n=${comparison.races}): ${metrics}` : "İleri tarih kıyaslaması için beş ayrı tarihe yayılmış, yarış öncesinde kaydedilmiş sonuç bulunamadı"}. Yeterli örnekli zemin/tür: ${segments || `henüz yok (eşik ${comparison.minimumContextSample})`}. Sızıntıyı önlemek için TJK arşivinden sonradan puanlanan kayıtlar bu kıyasa dahil edilmez; yalnız yarış öncesi saklanan tahminler kullanılır. Ağırlık sürümü: ${(state.modelWeightVersions || []).at(-1)?.version || 0}. ${sharedModelReportText()}`;
+  target.textContent = `Öğrenme raporu: ${report.sampleSize || personalOutcomes.length} onaylı kişisel yarış · ${unreviewedOutcomeCount} eski/onaysız kayıt eğitime alınmadı · eğitim ${report.trainingRaces || 0} · doğrulama ${report.validationRaces || 0}${report.validationStartDate ? ` (${report.validationStartDate} sonrası)` : ""}. ${modelStatus} Brier temel: ${currentValidation && Number.isFinite(report.baselineBrier) ? report.baselineBrier.toFixed(4) : "—"} · doğrulama: ${currentValidation && Number.isFinite(report.validationBrier) ? report.validationBrier.toFixed(4) : "—"}. ${comparison.validated ? `Aynı son tarih dilimi (${comparison.startDate}–${comparison.endDate}, n=${comparison.races}): ${metrics}` : "İleri tarih kıyaslaması için beş ayrı tarihe yayılmış, yarış öncesinde kaydedilmiş sonuç bulunamadı"}. Yeterli örnekli zemin/tür: ${segments || `henüz yok (eşik ${comparison.minimumContextSample})`}. Sızıntıyı önlemek için TJK arşivinden sonradan puanlanan kayıtlar bu kıyasa dahil edilmez; yalnız yarış öncesi saklanan tahminler kullanılır. Ağırlık sürümü: ${(state.modelWeightVersions || []).at(-1)?.version || 0}. ${sharedModelReportText()}`;
 }
 function trainModel() {
   state.learningSource = PERSONAL_LEARNING_SOURCE;
-  const eligibleOutcomes = state.outcomes.filter((item) => window.RaceLearningEvaluation.isPersonalBulletinOutcome(item) && Array.isArray(item.horses) && item.horses.length > 1 && item.horses.some((horse) => Number(horse.number) === Number(item.winner)));
+  const eligibleOutcomes = state.outcomes.filter((item) => window.RaceLearningEvaluation.isPersonalBulletinOutcome(item) && item.reviewedByUser === true && Array.isArray(item.horses) && item.horses.length > 1 && item.horses.some((horse) => Number(horse.number) === Number(item.winner)));
   const races = window.RaceLearningEvaluation.latestOutcomePerRace(eligibleOutcomes).sort((a, b) => String(a.at || "").localeCompare(String(b.at || ""))).slice(-TRAINING_WINDOW_RACES);
   const globalFit = fitModelWeights(races, BASE_WEIGHTS, state.lastGoodModelWeights || state.modelWeights);
   const validatedAt = new Date().toISOString();
@@ -1559,10 +1560,10 @@ async function extractResultsFromImage() {
     if (!recognizedText) throw new Error("Görselde okunabilir sonuç metni bulunamadı.");
     const textarea = $("sonucluBultenInput");
     textarea.value = [textarea.value.trim(), recognizedText].filter(Boolean).join("\n\n");
+    $("resultsReviewedCheck").checked = false;
     saveBulletinDraft("result", { text: textarea.value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
     textarea.focus();
-    setResultImageStatus("Metin ve fotoğraf otomatik hafızaya kaydedildi. Sonuçlar kısa süre içinde otomatik karşılaştırılacak.");
-    scheduleResultComparison();
+    setResultImageStatus("OCR taslağı eklendi. At adlarını, numaraları ve bitiriş sırasını kaynağıyla kontrol edin; ardından onay kutusunu işaretleyin.");
   } catch (error) {
     setResultImageStatus(error instanceof Error ? error.message : "Görsel işlenemedi. Lütfen yeniden deneyin.", true);
   } finally {
@@ -1596,6 +1597,10 @@ function inferResultPredictionContext(races) {
 }
 function compareResults() {
   const target = $("ogrenmeLogAlani");
+  if ($("resultsReviewedCheck")?.checked !== true) {
+    showMessage(target, "Sonuçları karşılaştırmadan önce tabloyu resmî kaynakla kontrol edin ve onay kutusunu işaretleyin. OCR metni taslaktır.", "error");
+    return;
+  }
   const resultText = $("sonucluBultenInput").value.trim();
   if (resultText || storedResultImage) archiveBulletin("result", { text: resultText, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
   const parsed = parseRaces(resultText);
@@ -1650,6 +1655,7 @@ function compareResults() {
       const singleGap = rankedUnits.length > 1 ? rankedUnits[0].score - rankedUnits[1].score : 0;
       const singleCandidate = singleGap >= SINGLE_GAP_THRESHOLD && rankedUnits[0].independentCoverage >= MIN_SINGLE_COVERAGE;
       outcomes.push({
+        reviewedByUser: true,
         city: prediction.city || "",
         raceNo: race.no,
         predictionRunId: prediction.runId || null,
@@ -1734,7 +1740,7 @@ function handleCompareResults() {
 }
 function scheduleResultComparison() {
   clearTimeout(resultCompareTimer);
-  if (!$('sonucluBultenInput')?.value.trim()) return;
+  if (!$("sonucluBultenInput")?.value.trim() || $("resultsReviewedCheck")?.checked !== true) return;
   resultCompareTimer = window.setTimeout(handleCompareResults, 900);
 }
 const COUPON_STATUS_LABELS = { pending: "Sonuç bekleniyor", won: "Ödeme aldı", lost: "İsabetsiz", carryover: "Devretti" };
@@ -2041,6 +2047,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
     scheduleResultComparison();
   });
+  $("resultsReviewedCheck")?.addEventListener("change", scheduleResultComparison);
   $("loadOfficialResultsButton")?.addEventListener("click", loadOfficialResults);
   $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
@@ -2048,6 +2055,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("butceInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), budget: $("butceInput").value }));
   $("birimInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), unit: $("birimInput").value }));
   $("sonucluBultenInput")?.addEventListener("input", () => {
+    $("resultsReviewedCheck").checked = false;
     saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
     scheduleResultComparison();
   });

@@ -42,6 +42,15 @@ test('ambiguous, missing-winner, and unmatched race results are excluded from tr
   assert.equal(raceToTrainingExample({ ...base, results: { runners: [{ no: 1, finishPosition: 1 }, { no: 2, finishPosition: 1 }] } }), null);
 });
 
+test('archive training refuses races with missing or invalid finishing positions', () => {
+  const row = {
+    raceDate: '2026-11-20',
+    program: { runners: [{ no: 1, name: 'A' }, { no: 2, name: 'B' }] },
+    results: { runners: [{ no: 1, finishPosition: null }, { no: 2, finishPosition: 2 }] }
+  };
+  assert.equal(raceToTrainingExample(row), null);
+});
+
 test('archive training examples include prior venue, weather, and track performance only', () => {
   const previous = {
     race_date: '2026-11-01', city: 'Ankara',
