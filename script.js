@@ -880,6 +880,20 @@ function setTab(name) {
   target?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function normalize(text) { return text.toLocaleUpperCase("en-US").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "I"); }
+const TURKISH_RACECOURSES = ["Adana", "Ankara", "Antalya", "Bursa", "Diyarbakır", "Elazığ", "İstanbul", "İzmir", "Kocaeli", "Şanlıurfa"];
+function inferRacecourseFromBulletin(text) {
+  const headerLines = String(text || "").split(/\r?\n/).slice(0, 8).map((line) => normalize(line));
+  return TURKISH_RACECOURSES.find((city) => {
+    const normalizedCity = normalize(city);
+    const pattern = new RegExp(`(^|[^A-Z])${normalizedCity}([^A-Z]|$)`);
+    return headerLines.some((line) => {
+      const identifiesRaceDay = line.trim() === normalizedCity
+        || /HIPODROM|YARIS PROGRAMI/.test(line)
+        || /\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/.test(line);
+      return identifiesRaceDay && pattern.test(line);
+    });
+  }) || "";
+}
 function parseNumber(value) { const result = Number(String(value || "").replace(",", ".")); return Number.isFinite(result) ? result : null; }
 function parseRaces(text) {
   const parsedRaces = window.RaceParser.parseRaces(text);
@@ -1186,7 +1200,11 @@ async function runAnalysis() {
   $("kuponAlani").innerHTML = "";
   $("kosuSonucAlani").innerHTML = "";
   if (!input) { showMessage(warning, "Önce analiz etmek istediğiniz bülteni yapıştırın.", "error"); return; }
-  const archivedBulletin = archiveBulletin("program", { text: input, date: $("couponDateInput")?.value || new Date().toISOString().slice(0, 10), city: $("couponCityInput")?.value.trim().slice(0, 80) || "", budget: $("butceInput")?.value || "", unit: $("birimInput")?.value || "", analystNotes: $("analystSignalInput")?.value || "" });
+  const cityInput = $("couponCityInput");
+  const inferredCity = inferRacecourseFromBulletin(input);
+  if (!cityInput?.value.trim() && inferredCity) cityInput.value = inferredCity;
+  const couponCity = (cityInput?.value.trim() || inferredCity).slice(0, 80);
+  const archivedBulletin = archiveBulletin("program", { text: input, date: $("couponDateInput")?.value || new Date().toISOString().slice(0, 10), city: couponCity, budget: $("butceInput")?.value || "", unit: $("birimInput")?.value || "", analystNotes: $("analystSignalInput")?.value || "" });
   const parsed = parseRaces(input);
   if (!parsed.races.length) {
     state.bulletins = state.bulletins.map((item) => item.id === archivedBulletin.id ? { ...item, analysisStatus: "parse-failed", analyzedAt: new Date().toISOString() } : item);
@@ -1195,7 +1213,6 @@ async function runAnalysis() {
     return;
   }
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
-  const couponCity = $("couponCityInput")?.value.trim().slice(0, 80) || "";
   const externalSignals = window.TipSignals.parseAnalystSignals($("analystSignalInput")?.value || "");
   parsed.races.forEach((race) => { race.externalSignals = externalSignals[race.no] || null; });
   scoreCache = new WeakMap();
@@ -1786,18 +1803,45 @@ function resultPersistenceNote(persistence) {
 }
 async function compareResults() {
   const target = $("ogrenmeLogAlani");
-  if ($("resultsReviewedCheck")?.checked !== true) {
-    showMessage(target, "Sonuçları karşılaştırmadan önce tabloyu kendi kaynağınızla kontrol edin ve onay kutusunu işaretleyin. OCR metni yalnızca taslaktır.", "error");
-    return;
-  }
   const resultText = $("sonucluBultenInput").value.trim();
-  if (!window.ResultEvidence.hasFinishOrder(resultText)) {
-    showMessage(target, "Bu metinde sonuç tablosunu doğrulayan açık bir At No/At Adı ve Sıra/Rank/Position sütun başlığı bulunamadı. Normal yarış bültenini bu alana koymayın; sonuç tablosunu ekleyin veya gazete tahminlerini Hafıza > Uzman notları bölümüne aktarın. Öğrenme başlatılmadı.", "error");
+  if (!resultText && !storedResultImage?.dataUrl && !storedResultImage?.pathname) {
+    showMessage(target, "Arşivlemek için sonuç metni girin veya bir fotoğraf yükleyin.", "error");
     return;
   }
+  let archivedSubmission = state.bulletins
+    .filter((item) => item.kind === "result" && item.text === resultText && (!storedResultImage
+      || item.image?.savedAt === storedResultImage.savedAt
+      || (item.image?.pathname && item.image.pathname === storedResultImage.pathname)))
+    .sort((a, b) => String(b.savedAt || b.updatedAt || "").localeCompare(String(a.savedAt || a.updatedAt || "")))[0];
+  if (!archivedSubmission) {
+    archivedSubmission = archiveBulletin("result", {
+      text: resultText,
+      date: "",
+      city: "",
+      matchingStatus: "awaiting_review",
+      ...(storedResultImage ? { image: storedResultImage } : {})
+    });
+    saveBulletinDraft("result", {
+      text: resultText,
+      date: $("resultsDateInput").value,
+      city: $("resultsCityInput").value.trim(),
+      ...(storedResultImage ? { image: storedResultImage } : {})
+    });
+  }
+  if ($("resultsReviewedCheck")?.checked !== true) {
+    const persistence = await persistCurrentMemory();
+    showMessage(target, `Girdiğiniz içerik arşive kaydedildi. Sonuçları kendi kaynağınızla doğrulayıp onaylarsanız sistem kayıtlı analizlerle eşleştirmeyi dener; belirsiz eşleşmeler öğrenmeye alınmaz. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
+    return;
+  }
+  archivedSubmission = { ...archivedSubmission, reviewedByUser: true, reviewedAt: new Date().toISOString() };
+  state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
   const parsed = parseRaces(resultText);
   if (!parsed.races.length) {
-    showMessage(target, "Sonuç bülteninde koşu ve at sonuç satırları bulunamadı. At numarası ve Sıra/Rank/Position bilgisini içeren tabloyu ekleyin.", "error");
+    archivedSubmission = { ...archivedSubmission, matchingStatus: "awaiting_structured_result", matchingNote: "Metin arşivlendi; koşu ve sonuç satırları güvenilir biçimde ayrıştırılamadı." };
+    state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
+    const persistence = await persistCurrentMemory();
+    showMessage(target, `İçerik arşivlendi ancak koşu/at sonuçları güvenilir biçimde ayrıştırılamadı. Kayıt saklandı; öğrenme güncellenmedi. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
+    updateMemory();
     return;
   }
   if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) { showMessage(target, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu kaldırıp yeniden deneyin.", "error"); return; }
@@ -1814,16 +1858,22 @@ async function compareResults() {
   const resultDate = manuallySelected ? selectedContext.dataset.date : inferredContext?.date || "";
   const resultCity = manuallySelected ? normalize(selectedContext.dataset.city) : normalize(inferredContext?.city || "");
   if (!resultDate) {
+    archivedSubmission = { ...archivedSubmission, matchingStatus: "awaiting_match", matchingNote: "Sonuç metni arşivlendi; tahminlerle eşleşen tarih ve hipodrom henüz doğrulanamadı." };
+    state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
+    const persistence = await persistCurrentMemory();
     const resultsHelp = state.predictions.length
-      ? "Bu sonuçlardaki kazanan at adı/numarası kayıtlı tahminlerle eşleşmedi. Analiz hafızasının bulunduğu cihazda veya hesapta olduğunuzu doğrulayın; gerekirse yukarıdaki elle seçim alanını açın."
-      : "Bu cihazda kayıtlı tahmin bulunamadı. Analizin yapıldığı hesapla giriş yapın veya yedeği yükleyin.";
-    showMessage(target, resultsHelp, "error");
+      ? "İçerik arşivlendi ancak kazanan at adı/numarası kayıtlı tahminlerle eşleşmedi. Analiz hafızasının bulunduğu cihazda/hesapta olduğunuzu doğrulayın veya Eşleşme belirsizse bölümünden doğru analizi seçin."
+      : "İçerik arşivlendi ancak bu cihazda kayıtlı tahmin bulunamadı. Analizin yapıldığı hesapla giriş yapın veya yedeği yükleyin.";
+    showMessage(target, `${resultsHelp} ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
+    updateMemory();
     return;
   }
   $("resultsDateInput").value = resultDate;
   $("resultsCityInput").value = inferredContext?.city || selectedContext?.dataset.city || "";
   renderResultsContextOptions(resultDate, $("resultsCityInput").value);
-  archiveBulletin("result", { text: resultText, date: resultDate, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
+  archivedSubmission = { ...archivedSubmission, date: resultDate, city: $("resultsCityInput").value.trim(), matchingStatus: "awaiting_prediction_match" };
+  state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
+  await saveState();
   const matchingPredictions = state.predictions.filter((item) => item.date === resultDate && normalize(item.city || "") === resultCity);
   if (!matchingPredictions.length) {
     const persistence = await persistCurrentMemory();
@@ -1893,6 +1943,8 @@ async function compareResults() {
   }
   const merged = window.RaceLearningEvaluation.mergeOutcomes(state.outcomes, outcomes);
   state.outcomes = merged.outcomes;
+  archivedSubmission = { ...archivedSubmission, matchingStatus: "matched", matchingNote: "Doğrulanmış sonuçlar kayıtlı tahminlerle eşleştirildi.", matchedAt: new Date().toISOString() };
+  state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
   if (merged.added || merged.corrected) trainModel();
   const persistence = await persistCurrentMemory();
   const saved = persistence.saved;
