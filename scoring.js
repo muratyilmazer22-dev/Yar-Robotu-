@@ -61,10 +61,13 @@
 
   const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, groupFit: 0.05, classHistory: 0.08, timeFit: 0.06, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.015, distanceFit: 0.015, restFit: 0.01, weightFit: 0.01 };
   function softmaxScores(horses, weights) {
+    const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0) || 1;
     const scores = horses.map((horse) => {
       const available = Object.entries(horse.features || {}).filter(([key, value]) => Number.isFinite(value) && weights[key] !== 0);
       const weightTotal = available.reduce((sum, [key]) => sum + weights[key], 0);
-      return weightTotal ? available.reduce((sum, [key, value]) => sum + value * weights[key], 0) / weightTotal : 50;
+      const rawScore = weightTotal ? available.reduce((sum, [key, value]) => sum + value * weights[key], 0) / weightTotal : 50;
+      const coverage = Math.max(0, Math.min(1, weightTotal / totalWeight));
+      return 50 + (rawScore - 50) * coverage;
     });
     const logits = scores.map((score) => score / 12.5);
     const maximum = Math.max(...logits);
@@ -137,20 +140,26 @@
         weightFit: horse.weightFit !== null && horse.weightFit !== undefined && Number.isFinite(Number(horse.weightFit)) ? Number(horse.weightFit) : null
       };
       const availableWeight = Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : weights[key]), 0);
-      const score = availableWeight ? Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : value * weights[key]), 0) / availableWeight : null;
+      const rawScore = availableWeight ? Object.entries(features).reduce((sum, [key, value]) => sum + (value === null || weights[key] === 0 ? 0 : value * weights[key]), 0) / availableWeight : 50;
       const independentKeys = ["rating", "form", "pedigree", "groupFit", "classHistory", "timeFit"].filter((key) => features[key] !== null);
       const independentWeight = independentKeys.reduce((sum, key) => sum + weights[key], 0);
       const performanceScore = independentWeight ? independentKeys.reduce((sum, key) => sum + features[key] * weights[key], 0) / independentWeight : null;
       const independentCoverage = Math.round(independentWeight / (totalWeight - weights.market || 1) * 100);
       const coverage = Math.round(availableWeight / totalWeight * 100);
-      const signal = performanceScore === null || features.market === null
+      const confidence = coverage >= 70 && independentCoverage >= 60
+        ? "Yüksek"
+        : coverage >= 50 && independentCoverage >= 35
+          ? "Orta"
+          : "Düşük";
+      const score = 50 + (rawScore - 50) * coverage / 100;
+      const signal = independentKeys.length < 2 || independentCoverage < 35 || coverage < 40 || performanceScore === null || features.market === null
         ? "Veri yetersiz"
         : performanceScore - features.market >= 12
           ? "Sürpriz adayı"
           : features.market - performanceScore >= 15
             ? "Favori riski"
             : "Sinyaller uyumlu";
-      return { ...horse, score: score === null ? 50 : Math.round(score * 10) / 10, features, performanceScore, marketScore: features.market, coverage, independentCoverage, signal };
+      return { ...horse, score: Math.round(score * 10) / 10, rawScore: Math.round(rawScore * 10) / 10, features, performanceScore, marketScore: features.market, coverage, independentCoverage, confidence, signal };
     });
     const shares = softmaxScores(ranked, weights);
     return ranked.map((horse, index) => ({ ...horse, modelShare: shares[index] })).sort((a, b) => b.modelShare - a.modelShare);

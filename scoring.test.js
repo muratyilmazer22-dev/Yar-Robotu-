@@ -65,6 +65,28 @@ test('the single model ranks by the active weighted signals', () => {
   assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
 });
 
+test('incomplete signals shrink scores toward neutral and cannot create a false leader', () => {
+  const race = {
+    distance: 1400,
+    surface: 'Kum',
+    type: 'HANDIKAP',
+    horses: [
+      { number: 2, hp: 32 },
+      { number: 4, hp: 29, agf: 42, odds: 2, last6: '121213' },
+      { number: 3, hp: 27, agf: 18, odds: 5, last6: '123214', classHistoryScore: 75 }
+    ]
+  };
+  const ranked = analyzeRace(race);
+  const sparseRunner = ranked.find((horse) => horse.number === 2);
+
+  assert.equal(sparseRunner.signal, 'Veri yetersiz');
+  assert.equal(sparseRunner.confidence, 'Düşük');
+  assert.ok(sparseRunner.score < sparseRunner.rawScore);
+  assert.ok(sparseRunner.score < 80);
+  assert.equal(ranked[0].number, 4);
+  assert.ok(Math.abs(ranked.reduce((sum, horse) => sum + horse.modelShare, 0) - 1) < 1e-12);
+});
+
 test('historical race-time performance influences ranking when available', () => {
   const race = {
     distance: 1400,
