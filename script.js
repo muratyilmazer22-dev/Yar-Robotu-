@@ -54,7 +54,7 @@
 
   async function loadSummary() {
     try {
-      const response = await fetch('/api/history/', { headers: { Accept: 'application/json' } });
+      const response = await window.RaceRobotRecovery.createRecoveryFetch()('/api/history/', { headers: { Accept: 'application/json' } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Arşiv bilgisi alınamadı.');
       const auditedCount = Number(data.qualitySummary?.auditedCount || 0);
@@ -162,7 +162,7 @@
     backtestSummary.textContent = 'Geriye dönük test hesaplanıyor…';
     try {
       const query = new URLSearchParams({ from: backtestStartInput.value, to: backtestEndInput.value });
-      const response = await fetch(`/api/backtest?${query}`, { headers: { Accept: 'application/json' } });
+      const response = await window.RaceRobotRecovery.createRecoveryFetch()(`/api/backtest?${query}`, { headers: { Accept: 'application/json' } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Test çalıştırılamadı.');
       const metrics = document.createElement('div');
@@ -367,6 +367,32 @@ let firebaseSyncReady = false;
   let bulletinSaveTimer = null;
   let firebaseSyncChain = Promise.resolve();
 const $ = (id) => document.getElementById(id);
+const recoveryDiagnostics = [];
+function recordRecoveryDiagnostic(type, detail = {}) {
+  recoveryDiagnostics.push({ type, path: detail.path || null, attempts: detail.attempts || 0, status: detail.status || null, at: new Date().toISOString() });
+  if (recoveryDiagnostics.length > 20) recoveryDiagnostics.shift();
+}
+window.RaceRobotDiagnostics = Object.freeze({ recent: () => recoveryDiagnostics.map((entry) => ({ ...entry })) });
+function showRecoveryStatus(message, isError) {
+  const status = $("appStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle("error", isError);
+  status.title = isError ? "Geçici servis sorunu. Yerel analiz ve kayıtlar kullanılabilir; sonra yeniden deneyin." : "";
+  if (!isError) window.setTimeout(() => {
+    if (status.textContent === message) status.textContent = "● Hazır";
+  }, 5000);
+}
+window.addEventListener("racerobot:recovery-succeeded", (event) => {
+  recordRecoveryDiagnostic("recovered", event.detail);
+  showRecoveryStatus("● Bağlantı toparlandı", false);
+});
+window.addEventListener("racerobot:recovery-failed", (event) => {
+  recordRecoveryDiagnostic("recovery-exhausted", event.detail);
+  showRecoveryStatus("● Servis geçici olarak kullanılamıyor", true);
+});
+window.addEventListener("error", () => recordRecoveryDiagnostic("runtime-error"));
+window.addEventListener("unhandledrejection", () => recordRecoveryDiagnostic("unhandled-rejection"));
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 function persistStateLocally() {
   if (stateDb) {
@@ -594,7 +620,7 @@ async function loadResultImageData(image) {
   if (!image?.pathname || !firebaseSdk) return "";
   const idToken = await firebaseSdk.getIdToken();
   if (!idToken) return "";
-  const response = await fetch(`/api/result-image?pathname=${encodeURIComponent(image.pathname)}`, { headers: { Authorization: `Bearer ${idToken}` } });
+  const response = await window.RaceRobotRecovery.createRecoveryFetch()(`/api/result-image?pathname=${encodeURIComponent(image.pathname)}`, { headers: { Authorization: `Bearer ${idToken}` } });
   if (!response.ok) throw new Error("Kaydedilmiş görsele erişilemedi.");
   const blob = await response.blob();
   return await new Promise((resolve, reject) => {
@@ -700,7 +726,7 @@ async function loadOfficialResults() {
   status.textContent = "TJK arşivindeki sonuçlar aranıyor…";
   try {
     const query = new URLSearchParams({ date, city });
-    const response = await fetch(`/api/race-history?${query}`, { headers: { Accept: "application/json" }, cache: "no-store" });
+    const response = await window.RaceRobotRecovery.createRecoveryFetch()(`/api/race-history?${query}`, { headers: { Accept: "application/json" }, cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "TJK arşivi okunamadı.");
     const races = Array.isArray(data) ? data : [];
@@ -734,6 +760,48 @@ function restoreLatestPredictionTarget() {
   $("resultsDateInput").value = latestPrediction.date;
   $("resultsCityInput").value = latestPrediction.city || "";
   renderResultsContextOptions();
+}
+function restoreStoredAnalysis() {
+  const latestPrediction = [...state.predictions].sort((a, b) => `${a.date || ""}${a.predictionCreatedAt || ""}`.localeCompare(`${b.date || ""}${b.predictionCreatedAt || ""}`)).at(-1);
+  if (!latestPrediction) return;
+
+  const archivedBulletin = state.bulletins
+    .filter((item) => item.kind === "program" && item.status === "saved" && item.text
+      && item.date === latestPrediction.date && normalize(item.city || "") === normalize(latestPrediction.city || ""))
+    .sort((a, b) => String(b.analyzedAt || b.savedAt || "").localeCompare(String(a.analyzedAt || a.savedAt || "")))[0];
+  const source = archivedBulletin || state.bulletins.find((item) => item.id === "draft-program" && item.text
+    && item.date === latestPrediction.date && normalize(item.city || "") === normalize(latestPrediction.city || ""));
+  if (!source) return;
+
+  const parsed = parseRaces(source.text);
+  if (!parsed.races.length) return;
+  const predictionsForRun = state.predictions.filter((item) => latestPrediction.runId
+    ? item.runId === latestPrediction.runId
+    : item.date === latestPrediction.date && normalize(item.city || "") === normalize(latestPrediction.city || ""));
+  parsed.races.forEach((race) => {
+    race.externalSignals = predictionsForRun.find((item) => Number(item.no) === Number(race.no))?.externalSignals || null;
+  });
+  scoreCache = new WeakMap();
+  lastAnalysis = predictionsForRun;
+  $("analysisEmptyState")?.remove();
+  renderAnalysis(parsed.races);
+
+  const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
+  const poolStarts = sortedRaces.length ? [sortedRaces[0].no] : [];
+  const secondPoolStart = sortedRaces.length ? sortedRaces[sortedRaces.length - 1].no - 5 : 0;
+  if (secondPoolStart > poolStarts[0]) poolStarts.push(secondPoolStart);
+  const budget = parseNumber(source.budget || $("butceInput")?.value) || 80;
+  const unit = parseNumber(source.unit || $("birimInput")?.value) || 1.25;
+  lastCoupons = {};
+  $("kuponAlani").innerHTML = poolStarts.map((start, index) => {
+    const legs = sortedRaces.filter((race) => race.no >= start && race.no < start + 6);
+    const complete = Array.from({ length: 6 }, (_, offset) => legs.some((race) => race.no === start + offset)).every(Boolean);
+    const title = `${POOL_ORDINALS[index] || `Altılı ${index + 1}`} altılı · ${start}–${start + 5}. koşular`;
+    if (!complete) return formatIncompletePool(legs, start, title);
+    const coupon = buildCoupon(legs, budget, unit);
+    lastCoupons[getPoolKey(index)] = coupon;
+    return formatCoupon(coupon, title);
+  }).join("");
 }
 function compactResultsTools() {
   const panel = $("panel-ogrenme");
@@ -1425,7 +1493,7 @@ async function refreshRemoteMemory() {
   const target = $("cloudMemoryArea");
   if (!target) return;
   try {
-    const response = await fetch("/api/model-memory", { headers: { Accept: "application/json" } });
+    const response = await window.RaceRobotRecovery.createRecoveryFetch()("/api/model-memory", { headers: { Accept: "application/json" } });
     const memory = await response.json();
     if (!response.ok) throw new Error(memory.error || "Neon hafızası alınamadı.");
   sharedAutomaticModel = memory.automaticModel && typeof memory.automaticModel === "object" ? memory.automaticModel : null;
@@ -1462,7 +1530,7 @@ async function syncHistoricalArchive() {
     const archive = [];
     const pageSize = 5000;
     for (let offset = 0; offset < 100000; offset += pageSize) {
-      const response = await fetch(`/api/race-history?limit=${pageSize}&offset=${offset}`, { headers: { Accept: "application/json" } });
+      const response = await window.RaceRobotRecovery.createRecoveryFetch()(`/api/race-history?limit=${pageSize}&offset=${offset}`, { headers: { Accept: "application/json" } });
       const page = await response.json();
       if (!response.ok) throw new Error(page.error || "Arşiv hizmetine ulaşılamadı.");
       if (!Array.isArray(page)) throw new Error("Arşiv yanıt biçimi beklenmiyor.");
@@ -2057,6 +2125,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     applySavedResultDraftImage();
   }
   restoreLatestPredictionTarget();
+  restoreStoredAnalysis();
   $("resultsContextInput")?.addEventListener("change", () => {
     const selected = $("resultsContextInput").selectedOptions[0];
     if (!selected?.dataset.date) return;
