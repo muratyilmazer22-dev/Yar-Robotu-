@@ -357,7 +357,7 @@ function sharedModelReportText() {
 }
 let lastAnalysis = [];
 let lastCoupons = {};
-let pendingResultImport = null;
+let resultCompareTimer = null;
 let deferredInstallPrompt = null;
 let singleEvidenceCache = null;
 let firebaseSdk = null;
@@ -632,16 +632,23 @@ function saveBulletinDraft(kind, details = {}) {
 function archiveBulletin(kind, details = {}) {
   const draftId = `draft-${kind}`;
   const draft = state.bulletins.find((item) => item.id === draftId);
+  const resultDate = String(details.date ?? draft?.date ?? "");
+  const resultCity = normalize(details.city ?? draft?.city ?? "").replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "unspecified";
+  const recordId = kind === "result" && resultDate
+    ? `result-${resultDate}-${resultCity}`
+    : window.crypto?.randomUUID?.() || `bulletin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const previousRecord = state.bulletins.find((item) => item.id === recordId);
   const record = {
+    ...(previousRecord || {}),
     ...(draft || {}),
     ...details,
     ...(details.image ? { image: imageForMemory(details.image) } : {}),
-    id: window.crypto?.randomUUID?.() || `bulletin-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: recordId,
     kind,
     status: "saved",
     savedAt: new Date().toISOString()
   };
-  state.bulletins = [...state.bulletins.filter((item) => item.id !== draftId), record];
+  state.bulletins = [...state.bulletins.filter((item) => item.id !== draftId && item.id !== recordId), record];
   clearTimeout(bulletinSaveTimer);
   saveState();
   return record;
@@ -1392,7 +1399,8 @@ async function extractResultsFromImage() {
     textarea.value = [textarea.value.trim(), recognizedText].filter(Boolean).join("\n\n");
     saveBulletinDraft("result", { text: textarea.value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
     textarea.focus();
-    setResultImageStatus("Metin ve fotoğraf otomatik hafızaya kaydedildi. Sıra bilgileri metinde varsa sonuçlar otomatik eşleşir.");
+    setResultImageStatus("Metin ve fotoğraf otomatik hafızaya kaydedildi. Sonuçlar kısa süre içinde otomatik karşılaştırılacak.");
+    scheduleResultComparison();
   } catch (error) {
     setResultImageStatus(error instanceof Error ? error.message : "Görsel işlenemedi. Lütfen yeniden deneyin.", true);
   } finally {
@@ -1401,7 +1409,6 @@ async function extractResultsFromImage() {
   }
 }
 function compareResults() {
-  pendingResultImport = null;
   const target = $("ogrenmeLogAlani");
   const resultText = $("sonucluBultenInput").value.trim();
   if (resultText || storedResultImage) archiveBulletin("result", { text: resultText, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
@@ -1470,37 +1477,25 @@ function compareResults() {
     });
   }
   if (!outcomes.length) {
-    showMessage(target, `Bülten hafızaya kaydedildi ancak otomatik bitiriş sırası bulunamadığı veya kayıtlı tahminle eşleşmediği için öğrenmeye uygun sonuç çıkarılamadı. Kazananı elle seçmeden devam edildi; ${racesWithoutWinner} koşuda sıra okunamadı, ${racesWithoutPrediction} koşu tahminle eşleşmedi.`);
+    showMessage(target, `Sonuç bülteni kaydedildi ancak güvenilir bir kazanan/tahmin eşleşmesi bulunamadı. Öğrenme güncellenmedi; ${racesWithoutWinner} koşuda sıra okunamadı, ${racesWithoutPrediction} koşu tahminle eşleşmedi.`);
     return;
   }
-  pendingResultImport = { outcomes, resultDate, resultCity, racesWithoutWinner, racesWithoutPrediction };
-  const existingById = new Map(state.outcomes.map((item) => [window.RaceLearningEvaluation.identity(item), item]));
-  const corrections = outcomes.filter((item) => Number(existingById.get(window.RaceLearningEvaluation.identity(item))?.winner) !== Number(item.winner) && existingById.has(window.RaceLearningEvaluation.identity(item))).length;
-  const newCount = outcomes.filter((item) => !existingById.has(window.RaceLearningEvaluation.identity(item))).length;
-  const skipped = racesWithoutWinner + racesWithoutPrediction;
-  target.setAttribute("role", "status");
-  target.setAttribute("aria-live", "polite");
-  target.innerHTML = `<div class="alert"><b>Kaydetmeden önce kontrol edin · ${escapeHtml(resultDate)} · ${escapeHtml(resultCity)}</b><br>${outcomes.length} eşleşen koşu · ${newCount} yeni sonuç · ${corrections} düzeltme adayı · ${skipped} atlanan koşu (birincisi okunamadı: ${racesWithoutWinner}, tahmini eşleşmedi: ${racesWithoutPrediction}). ${racesWithoutWinner ? `${racesWithoutWinner} koşuda bitiriş sırası okunamadı; bu koşular öğrenmeden otomatik atlandı.` : "Görselden/metinden okunan kazanan numarası ve at adlarını doğrulayın."}</div>${outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · model lideri ${item.top1Hit ? "isabet" : "isabet değil"}</div>`).join("")}<div class="actions"><button class="btn green" id="confirmResultsButton" type="button">Bu sonuçları onayla ve kaydet</button><button class="btn secondary" id="cancelResultsButton" type="button">İptal</button></div>`;
-  $("confirmResultsButton").addEventListener("click", () => {
-    if (!pendingResultImport) return;
-  const merged = window.RaceLearningEvaluation.mergeOutcomes(state.outcomes, pendingResultImport.outcomes);
+  const merged = window.RaceLearningEvaluation.mergeOutcomes(state.outcomes, outcomes);
   state.outcomes = merged.outcomes;
-  const added = merged.added;
-  const corrected = merged.corrected;
-  const duplicates = pendingResultImport.outcomes.length - added - corrected;
-    if (added || corrected) trainModel();
-    saveState();
-    const imported = pendingResultImport;
-    pendingResultImport = null;
-    const report = state.trainingReport || {};
-    target.innerHTML = `<div class="alert success"><b>Sonuçlar onaylandı.</b> ${added} yeni kayıt işlendi · ${corrected} eski sonuç düzeltildi · ${duplicates} yinelenen kayıt değişmedi · ${imported.racesWithoutWinner + imported.racesWithoutPrediction} koşu atlandı. Eğitim: ${report.updated ? "doğrulama geçti, yeni ağırlıklar etkin" : report.verified ? "eşik geçilmedi, son iyi ağırlıklar korundu" : `henüz doğrulanmadı (en az ${MODEL_MIN_RACES} uygun yarış gerekir)`}. Ağırlık sürümü ${(state.modelWeightVersions || []).at(-1)?.version || 0}.</div>`;
-    renderTrainingReport();
-    updateMemory();
-  });
-  $("cancelResultsButton").addEventListener("click", () => {
-    pendingResultImport = null;
-    target.textContent = "Sonuç kaydı iptal edildi; öğrenme hafızası değiştirilmedi.";
-  });
+  if (merged.added || merged.corrected) trainModel();
+  const saved = saveState();
+  const duplicates = outcomes.length - merged.added - merged.corrected;
+  const report = state.trainingReport || {};
+  const learningStatus = report.updated
+    ? "İleri tarih doğrulaması geçti; yeni model ağırlıkları etkinleştirildi."
+    : report.verified
+      ? "Sonuçlar öğrenme arşivine eklendi; doğrulama eşiği geçilmediği için mevcut ağırlıklar korundu."
+      : `Sonuçlar öğrenme arşivine eklendi; model için henüz yeterli doğrulama verisi yok (en az ${MODEL_MIN_RACES} uygun yarış gerekli).`;
+  const outcomeDetails = outcomes.map((item) => `<div class="alert">${item.raceNo}. koşu · Kazanan #${item.winner} ${escapeHtml(item.winnerName)} · model lideri ${item.top1Hit ? "isabet" : "isabet değil"} · ilk 3 tahmin ${item.top3Hit ? "isabet" : "isabet değil"}</div>`).join("");
+  showMessage(target, `${saved ? "Sonuçlar otomatik karşılaştırıldı ve hafızaya kaydedildi." : "Karşılaştırma yapıldı ancak hafızaya kaydetme başarısız oldu."} ${merged.added} yeni sonuç · ${merged.corrected} düzeltilen sonuç · ${duplicates} yinelenen sonuç · ${racesWithoutWinner + racesWithoutPrediction} atlanan koşu. ${learningStatus}`, saved ? "success" : "error");
+  target.insertAdjacentHTML("beforeend", outcomeDetails);
+  renderTrainingReport();
+  updateMemory();
   target.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 function handleCompareResults() {
@@ -1509,6 +1504,11 @@ function handleCompareResults() {
   } catch {
     showMessage($("ogrenmeLogAlani"), "Sonuçlar işlenirken beklenmeyen bir hata oluştu. Girdi alanlarını kontrol edip yeniden deneyin; kayıtlı hafıza korunuyor.", "error");
   }
+}
+function scheduleResultComparison() {
+  clearTimeout(resultCompareTimer);
+  if (!$('sonucluBultenInput')?.value.trim()) return;
+  resultCompareTimer = window.setTimeout(handleCompareResults, 900);
 }
 const COUPON_STATUS_LABELS = { pending: "Sonuç bekleniyor", won: "Ödeme aldı", lost: "İsabetsiz", carryover: "Devretti" };
 function createCouponId() {
@@ -1781,8 +1781,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("couponCityInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("sonucluBultenInput")?.addEventListener("input", () => saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() }));
-  $("resultsDateInput")?.addEventListener("change", () => saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() }));
-  $("resultsCityInput")?.addEventListener("input", () => saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() }));
+  $("sonucluBultenInput")?.addEventListener("paste", scheduleResultComparison);
+  $("resultsDateInput")?.addEventListener("change", () => {
+    saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
+    scheduleResultComparison();
+  });
+  $("resultsCityInput")?.addEventListener("input", () => {
+    saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
+    scheduleResultComparison();
+  });
   $("manualCouponForm")?.addEventListener("submit", addManualCoupon);
   $("couponHistoryArea")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-update-coupon]");
