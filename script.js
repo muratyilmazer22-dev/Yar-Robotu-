@@ -870,8 +870,9 @@ function showMessage(target, text, type = "") {
   target.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 function setTab(name) {
-  document.querySelectorAll(".tab").forEach((button) => { const active = (button.dataset.tab || button.dataset.panel) === name; button.setAttribute("aria-selected", String(active)); button.tabIndex = active ? 0 : -1; });
-  document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === `panel-${name}`));
+  const target = document.getElementById(`panel-${name}`);
+  document.querySelectorAll(".panel-details").forEach((panel) => { panel.open = panel === target; });
+  target?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function normalize(text) { return text.toLocaleUpperCase("en-US").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "I"); }
 function parseNumber(value) { const result = Number(String(value || "").replace(",", ".")); return Number.isFinite(result) ? result : null; }
@@ -2180,7 +2181,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     $("installAppBtn").hidden = true;
   });
   window.addEventListener("appinstalled", () => { $("installAppBtn").hidden = true; });
-  document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => setTab(button.dataset.tab || button.dataset.panel)));
   $("goToBulletinButton")?.addEventListener("click", () => setTab("bulten"));
   const todayLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   $("couponDateInput").value = todayLocal;
@@ -2289,12 +2289,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     event.target.value = "";
   });
   $("resetBtn")?.addEventListener("click", resetHistory);
-  document.querySelectorAll(".tab").forEach((button, index, buttons) => button.addEventListener("keydown", (event) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
-    buttons[next].focus(); buttons[next].click();
-  }));
   if (state.predictions?.length) lastAnalysis = state.predictions;
   updateMemory();
   renderTrainingReport();
