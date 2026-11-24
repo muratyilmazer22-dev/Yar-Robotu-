@@ -1570,33 +1570,58 @@ async function extractResultsFromImage() {
     button.textContent = "Görselden metni oku";
   }
 }
+function inferResultPredictionContext(races) {
+  const contexts = new Map();
+  for (const prediction of state.predictions) {
+    if (!prediction.date || !Array.isArray(prediction.horses)) continue;
+    const key = resultsContextKey(prediction.date, prediction.city || "");
+    const context = contexts.get(key) || { date: prediction.date, city: prediction.city || "", predictions: [], nameMatches: 0, numberMatches: 0, latestAt: "" };
+    context.predictions.push(prediction);
+    context.latestAt = String(prediction.predictionCreatedAt || "") > context.latestAt ? String(prediction.predictionCreatedAt || "") : context.latestAt;
+    contexts.set(key, context);
+  }
+  for (const context of contexts.values()) {
+    for (const race of races) {
+      const winner = race.horses.find((horse) => Number(horse.place) === 1);
+      if (!winner) continue;
+      const runs = context.predictions.filter((prediction) => Number(prediction.no) === Number(race.no));
+      const matchingHorse = runs.flatMap((prediction) => prediction.horses || []).find((horse) => Number(horse.number) === Number(winner.number));
+      if (!matchingHorse) continue;
+      context.numberMatches += 1;
+      if (winner.name && normalize(matchingHorse.name || "") === normalize(winner.name)) context.nameMatches += 1;
+    }
+  }
+  return [...contexts.values()].filter((context) => context.numberMatches > 0)
+    .sort((a, b) => b.nameMatches - a.nameMatches || b.numberMatches - a.numberMatches || b.latestAt.localeCompare(a.latestAt))[0] || null;
+}
 function compareResults() {
   const target = $("ogrenmeLogAlani");
   const resultText = $("sonucluBultenInput").value.trim();
   if (resultText || storedResultImage) archiveBulletin("result", { text: resultText, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
   const parsed = parseRaces(resultText);
   if (!parsed.races.length) {
-    showMessage(target, "Sonuç bülteninde koşu ve at sonuç satırları bulunamadı. Ekran görüntüsündeki metin bir web menüsü/başlık içeriği; sonuç tablosunu, at numarası ve Sıra/Rank/Position bilgileriyle birlikte kopyalayın.", "error");
+    showMessage(target, "Sonuç bülteninde koşu ve at sonuç satırları bulunamadı. At numarası ve Sıra/Rank/Position bilgisini içeren tabloyu ekleyin.", "error");
     return;
   }
-  const resultDate = $("resultsDateInput").value;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(resultDate) || Number.isNaN(Date.parse(`${resultDate}T00:00:00Z`)) || new Date(`${resultDate}T00:00:00Z`).toISOString().slice(0, 10) !== resultDate) { showMessage(target, "Sonuç bülteninin geçerli tarihini seçin.", "error"); return; }
   if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) { showMessage(target, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu kaldırıp yeniden deneyin.", "error"); return; }
-  const datePredictions = state.predictions.filter((item) => item.date === resultDate);
-  if (!datePredictions.length) {
-    const savedDates = [...new Set(state.predictions.map((item) => item.date).filter(Boolean))].sort().reverse().slice(0, 5);
-    const dateHint = savedDates.length ? ` Hafızadaki son tahmin tarihleri: ${savedDates.join(", ")}.` : " Bu tarayıcı hafızasında henüz tahmin kaydı yok.";
-    showMessage(target, `${resultDate} tarihi için kişisel tahmin kaydı bulunamadı. Seçicideki kayıtlı günü kontrol edin.${dateHint} Başka cihazdaki tahminler için aynı hesapla giriş yapın veya yedeği geri yükleyin.`, "error");
+  const inferredContext = inferResultPredictionContext(parsed.races);
+  const selectedContext = $("resultsContextInput")?.selectedOptions[0];
+  const manuallySelected = Boolean(selectedContext?.dataset.date && $("resultsContextInput").closest("details")?.open);
+  const resultDate = manuallySelected ? selectedContext.dataset.date : inferredContext?.date || "";
+  const resultCity = manuallySelected ? normalize(selectedContext.dataset.city) : normalize(inferredContext?.city || "");
+  if (!resultDate) {
+    const resultsHelp = state.predictions.length
+      ? "Bu sonuçlardaki kazanan at adı/numarası kayıtlı tahminlerle eşleşmedi. Analiz hafızasının bulunduğu cihazda veya hesapta olduğunuzu doğrulayın; gerekirse yukarıdaki elle seçim alanını açın."
+      : "Bu cihazda kayıtlı tahmin bulunamadı. Analizin yapıldığı hesapla giriş yapın veya yedeği yükleyin.";
+    showMessage(target, resultsHelp, "error");
     return;
   }
-  const matchingCities = [...new Set(datePredictions.map((item) => normalize(item.city || "")))];
-  let resultCity = normalize($("resultsCityInput").value.trim());
-  if (!resultCity && matchingCities.length > 1) { showMessage(target, "Aynı tarihte birden fazla hipodrom kaydı var. Hafızadaki analiz listesinden doğru hipodromu seçin.", "error"); return; }
-  if (!resultCity) resultCity = matchingCities[0] || "";
-  const matchingPredictions = datePredictions.filter((item) => normalize(item.city || "") === resultCity);
+  $("resultsDateInput").value = resultDate;
+  $("resultsCityInput").value = inferredContext?.city || selectedContext?.dataset.city || "";
+  renderResultsContextOptions(resultDate, $("resultsCityInput").value);
+  const matchingPredictions = state.predictions.filter((item) => item.date === resultDate && normalize(item.city || "") === resultCity);
   if (!matchingPredictions.length) {
-    const savedCities = [...new Set(datePredictions.map((item) => item.city).filter(Boolean))];
-    showMessage(target, `${$("resultsCityInput").value.trim() || "Seçilen hipodrom"} için ${resultDate} tarihinde kayıtlı tahmin yok. Hafızadaki hipodromlar: ${savedCities.join(", ") || "yok"}. Bu cihazda görünmeyen tahminler için aynı hesapla giriş yapın veya yedeği geri yükleyin.`, "error");
+    showMessage(target, "Seçilen analiz için kayıtlı tahmin bulunamadı. Elle analiz seçimini kontrol edin.", "error");
     return;
   }
   const timestamp = new Date().toISOString();
@@ -2022,7 +2047,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("couponCityInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("butceInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), budget: $("butceInput").value }));
   $("birimInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), unit: $("birimInput").value }));
-  $("sonucluBultenInput")?.addEventListener("input", () => saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() }));
+  $("sonucluBultenInput")?.addEventListener("input", () => {
+    saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
+    scheduleResultComparison();
+  });
   $("sonucluBultenInput")?.addEventListener("paste", scheduleResultComparison);
   $("resultsDateInput")?.addEventListener("change", () => {
     saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
