@@ -457,25 +457,33 @@ async function initializeFirebaseMemory() {
     return;
   }
   firebaseSdk = api;
-  $("firebaseAuthForm")?.querySelectorAll("input, button").forEach((element) => { element.disabled = false; });
-  $("firebaseAuthForm")?.addEventListener("submit", async (event) => {
+  const authForm = $("firebaseAuthForm");
+  const emailInput = $("firebaseEmail");
+  const submitButton = authForm?.querySelector('button[type="submit"]');
+  const emailLinkInUrl = api.isEmailSignInLink(window.location.href);
+  const savedEmail = window.sessionStorage.getItem("firebaseEmailForSignIn") || "";
+  if (savedEmail) emailInput.value = savedEmail;
+  if (emailLinkInUrl) submitButton.textContent = "Giriş bağlantısını doğrula";
+  authForm?.querySelectorAll("input, button").forEach((element) => { element.disabled = false; });
+  authForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const email = emailInput.value.trim();
     try {
-      await api.signIn($("firebaseEmail").value.trim(), $("firebasePassword").value);
-      setFirebaseStatus("Giriş başarılı; Firebase hafızası yükleniyor…");
+      if (api.isEmailSignInLink(window.location.href)) {
+        await api.completeEmailSignIn(email, window.location.href);
+        window.sessionStorage.removeItem("firebaseEmailForSignIn");
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setFirebaseStatus("Giriş başarılı; hafızanız otomatik eşitleniyor…");
+      } else {
+        await api.sendEmailSignInLink(email, `${window.location.origin}${window.location.pathname}`);
+        window.sessionStorage.setItem("firebaseEmailForSignIn", email);
+        setFirebaseStatus("E-posta kutunuzu kontrol edin. Bağlantıyı açınca giriş ve eşitleme otomatik tamamlanır.");
+      }
     } catch {
-      setFirebaseStatus("Giriş başarısız. E-posta ve parolayı, ayrıca Firebase Authentication e-posta/parola sağlayıcısını kontrol edin.", true);
+      setFirebaseStatus("Giriş bağlantısı gönderilemedi veya doğrulanamadı. E-postayı ve Firebase e-posta bağlantısı ayarını kontrol edin.", true);
     }
   });
-  $("firebaseCreateAccountButton")?.addEventListener("click", async () => {
-    if (!$("firebaseAuthForm").reportValidity()) return;
-    try {
-      await api.createAccount($("firebaseEmail").value.trim(), $("firebasePassword").value);
-      setFirebaseStatus("Hesap oluşturuldu; hafıza hesabınıza aktarılıyor…");
-    } catch {
-      setFirebaseStatus("Hesap oluşturulamadı. Parolanın en az 6 karakter olduğunu ve e-posta/parola sağlayıcısının açık olduğunu kontrol edin.", true);
-    }
-  });
+
   $("firebaseSignOutButton")?.addEventListener("click", async () => {
     if (!firebaseAccount || !firebaseSyncReady) return;
     try {
@@ -495,10 +503,15 @@ async function initializeFirebaseMemory() {
     firebaseAccount = user || null;
     firebaseSyncReady = false;
     $("firebaseSignOutButton").hidden = !user;
-    $("firebaseAuthForm").hidden = Boolean(user);
-    $("firebaseCreateAccountButton").hidden = Boolean(user);
+    $("firebaseAuthForm").hidden = Boolean(user) && !(emailLinkInUrl && !savedEmail);
     if (!user) {
-      setFirebaseStatus("Oturum açmadan bu tarayıcıda kullanabilirsiniz; giriş yaptığınızda kişisel hafıza hesabınızla eşitlenir.");
+      if (emailLinkInUrl && !savedEmail) {
+        setFirebaseStatus("Bağlantıyı açtığınız e-posta adresini girip doğrulama düğmesine basın.");
+      } else if (emailLinkInUrl) {
+        setFirebaseStatus("E-posta bağlantısı doğrulanıyor…");
+      } else {
+        setFirebaseStatus("Parola gerekmez. E-posta bağlantısıyla giriş yapınca kişisel hafızanız otomatik eşitlenir.");
+      }
       return;
     }
     setFirebaseStatus("Firebase hafızası okunuyor…");
@@ -526,6 +539,14 @@ async function initializeFirebaseMemory() {
       setFirebaseStatus("Firebase verisi okunamadı. Yerel kayıtlar korundu; Firestore kurallarına users/{uid} için yalnızca aynı kullanıcı erişimini ekleyin.", true);
     }
   });
+  if (emailLinkInUrl && savedEmail) {
+    api.completeEmailSignIn(savedEmail, window.location.href).then(() => {
+      window.sessionStorage.removeItem("firebaseEmailForSignIn");
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }).catch(() => {
+      setFirebaseStatus("Bağlantı doğrulanamadı. E-posta adresinizi girip yeniden deneyin.", true);
+    });
+  }
 }
 function saveState() {
   singleEvidenceCache = null;
@@ -1254,7 +1275,7 @@ async function refreshRemoteMemory() {
         ? " · resmi TJK arşivinden aday model doğrulamayı geçemedi (kişisel model etkilenmedi)"
         : " · ortak model henüz doğrulanmadı; kişisel öğrenme kendi bülten sonuçlarını kullanır";
     const learnedContexts = Object.keys(automated?.contextWeights || {}).length;
-    target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu TJK koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Öğrenme hedefi: tüm mevcut yarış sinyallerinde ve hipodrom/zemin/tür/mesafe kesişimlerinde daha iyi ileri-tarih tahminleri bulmak; yalnızca doğrulama kazanan değişiklikleri etkinleştirmek. ${learnedContexts} doğrulanmış bağlam modeli ortak hafızada. Bu resmi arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi bu cihazda kalır.`;
+    target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu TJK koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Öğrenme hedefi: tüm mevcut yarış sinyallerinde ve hipodrom/zemin/tür/mesafe kesişimlerinde daha iyi ileri-tarih tahminleri bulmak; yalnızca doğrulama kazanan değişiklikleri etkinleştirmek. ${learnedContexts} doğrulanmış bağlam modeli ortak hafızada. Bu resmi arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi hesabınızla giriş yaptıysanız otomatik eşitlenir, aksi halde bu cihazda kalır.`;
     return memory;
   } catch {
     target.textContent = "Neon kalıcı hafızasına şu an ulaşılamıyor; bu cihazdaki kayıtlar korunuyor.";
