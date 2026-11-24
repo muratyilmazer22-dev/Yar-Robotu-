@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluateForwardComparison, mergeOutcome, mergeOutcomes } = require('./lib/learning-evaluation');
+const { evaluateForwardComparison, isPersonalBulletinOutcome, mergeOutcome, mergeOutcomes } = require('./lib/learning-evaluation');
 
 function outcome(date, winner = 1) {
   return {
@@ -23,10 +23,26 @@ test('compares stored model, market favorite, and fixed baseline on the same for
   assert.equal(report.byContext.find((item) => item.kind === 'surface').eligible, false);
 });
 
-test('excludes archive-derived races from prediction-time forward comparison', () => {
-  const archiveOutcomes = Array.from({ length: 10 }, (_, index) => ({ ...outcome(`2026-02-${String(index + 1).padStart(2, '0')}`), sourceKey: `tjk:2026-02-${String(index + 1).padStart(2, '0')}:İstanbul:1` }));
+test('only user bulletin outcomes are eligible for personal learning', () => {
+  const personal = outcome('2026-02-01');
+  const archive = { ...outcome('2026-02-02'), sourceKey: 'tjk:2026-02-02:İstanbul:1' };
 
-  assert.equal(evaluateForwardComparison(archiveOutcomes, { rating: 1 }).validated, false);
+  assert.equal(isPersonalBulletinOutcome(personal), true);
+  assert.equal(isPersonalBulletinOutcome(archive), false);
+  assert.equal(evaluateForwardComparison([archive], { rating: 1 }).validated, false);
+});
+
+test('user bulletin outcomes take precedence over official archive duplicates', () => {
+  const personal = outcome('2026-02-01', 2);
+  const archive = { ...outcome('2026-02-01', 1), sourceKey: 'tjk:2026-02-01:İstanbul:1' };
+  const archiveFirst = mergeOutcome([archive], personal);
+  const personalFirst = mergeOutcome([personal], archive);
+
+  assert.equal(archiveFirst.outcomes[0].winner, 2);
+  assert.equal(archiveFirst.outcomes[0].sourceKey, undefined);
+  assert.equal(archiveFirst.added, true);
+  assert.equal(personalFirst.outcomes[0].winner, 2);
+  assert.equal(personalFirst.corrected, false);
 });
 
 test('does not claim a forward comparison without five distinct dates', () => {
@@ -46,7 +62,8 @@ test('uses race identity for deduplication and replaces a corrected winner', () 
   assert.equal(duplicate.added, false);
   assert.equal(duplicate.corrected, false);
   assert.equal(correction.corrected, true);
-  assert.equal(archiveCorrection.corrected, true);
+  assert.equal(archiveCorrection.corrected, false);
+  assert.equal(archiveCorrection.outcomes[0].winner, 1);
   assert.equal(archiveCorrection.outcomes.length, 1);
   assert.equal(correction.outcomes[0].winner, 2);
 });
