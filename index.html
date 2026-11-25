@@ -41,6 +41,190 @@
     .memory-actions{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}.memory-stats{grid-template-columns:repeat(2,minmax(0,1fr));margin:14px 0}.memory-note-list{display:grid;gap:10px;margin-top:14px}.memory-note{padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--surface2)}.memory-note-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.memory-note-heading strong{font-size:13px}.memory-note-heading time{color:var(--muted);font-size:12px;white-space:nowrap}.memory-note details{margin-top:8px}.memory-note details summary{cursor:pointer;color:var(--accent);font-size:13px;font-weight:650}.memory-note-content{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}.memory-note-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.memory-note-buttons .btn{padding:7px 10px;font-size:12px}.memory-status{min-height:22px;margin:8px 0 0}.memory-status:empty{display:none}.memory-char-count{text-align:right;font-variant-numeric:tabular-nums}.memory-file-input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.memory-bank-card select{width:100%;border:1px solid #31435b;background:#0b1525;color:var(--text);border-radius:10px;padding:11px 12px}.memory-tools>summary{cursor:pointer;color:var(--accent);font-weight:700;padding:12px 0}.memory-tools[open]>summary{margin-bottom:8px}
     @media(max-width:520px){.memory-actions{flex-direction:column}.memory-actions .btn{width:100%}.memory-note-heading{flex-direction:column;gap:2px}}@media(max-width:650px){input,select,textarea{font-size:16px}}
   </style>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f6f4;
+      --surface: #ffffff;
+      --surface2: #eaf0ee;
+      --text: #22333c;
+      --muted: color-mix(in srgb, var(--text) 68%, transparent);
+      --line: color-mix(in srgb, var(--text) 14%, transparent);
+      --accent: #0b7f87;
+      --green: #287a59;
+      --amber: var(--accent);
+      --red: var(--accent);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .shell {
+      max-width: 920px;
+      padding-top: 24px;
+    }
+
+    .topbar {
+      margin-bottom: 12px;
+    }
+
+    .mark {
+      border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+      background: color-mix(in srgb, var(--accent) 10%, white);
+      color: var(--accent);
+    }
+
+    .intro {
+      max-width: 720px;
+      line-height: 1.55;
+    }
+
+    .section-nav {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+      padding: 7px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: color-mix(in srgb, var(--surface) 94%, var(--bg));
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--text) 5%, transparent);
+    }
+
+    .section-tab {
+      min-height: 44px;
+      padding: 9px 8px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      color: var(--muted);
+      font-size: 13px;
+      transition: background-color 160ms ease, color 160ms ease;
+    }
+
+    .section-tab:hover:not([aria-selected="true"]) {
+      background: var(--surface2);
+      color: var(--text);
+    }
+
+    .section-tab[aria-selected="true"] {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: var(--surface);
+    }
+
+    .card,
+    .bulletin-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 4%, transparent);
+    }
+
+    .bulletin-card {
+      padding: 22px;
+    }
+
+    .card h2,
+    .bulletin-card h2 {
+      color: var(--text);
+      line-height: 1.35;
+    }
+
+    .field-label {
+      color: var(--text);
+    }
+
+    textarea,
+    input,
+    select,
+    .results-context-select,
+    .coupon-record select,
+    .coupon-record input,
+    .controls select,
+    .memory-bank-card select {
+      border-color: var(--line);
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    textarea::placeholder,
+    input::placeholder {
+      color: var(--muted);
+    }
+
+    textarea:focus,
+    input:focus,
+    select:focus-visible {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+
+    .status {
+      border-color: color-mix(in srgb, var(--green) 30%, transparent);
+      background: color-mix(in srgb, var(--green) 9%, white);
+      color: var(--green);
+      font-weight: 650;
+    }
+
+    .stat,
+    .memory-note,
+    .coupon-leg,
+    .result-image-import {
+      border-color: var(--line);
+      background: var(--surface2);
+    }
+
+    .horse-number {
+      background: var(--surface2);
+      color: var(--text);
+    }
+
+    .leader-label,
+    .coupon-net,
+    .coupon-leg-summary {
+      color: var(--green);
+    }
+
+    .section-tab:focus-visible,
+    button:focus-visible,
+    summary:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    @media (max-width: 650px) {
+      .shell {
+        padding: 14px 12px 32px;
+      }
+
+      .topbar {
+        gap: 9px;
+      }
+
+      .bulletin-card {
+        padding: 16px;
+      }
+
+      .section-nav {
+        top: 0;
+        gap: 4px;
+        padding: 5px;
+      }
+
+      .section-tab {
+        min-height: 42px;
+        padding: 8px 5px;
+        font-size: 12px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
 </head>
 <body>
   <main class="shell">
