@@ -135,6 +135,7 @@ module.exports = async function handler(req, res) {
         winner: Number(winnerEntry.horse.number),
         horses: scores.map((horse) => ({
           number: Number(horse.number),
+          finishPosition: finishById.get(identity(horse)) ?? null,
           agf: Number.isFinite(horse.agf) ? horse.agf : null,
           features: horse.features,
           marketAgreement: horse.marketAgreement
@@ -296,7 +297,7 @@ module.exports = async function handler(req, res) {
         averageTopThreeHits: Number((group.totalTopThreeHits / group.races).toFixed(2)),
         winnerHitRate: rate(group.winnerHits, group.races)
       })),
-      method: 'Ana rapor sabit temel ağırlıklarla form, piyasa, HP, pedigri, grup seviyesi/bitiriş, sınıf geçmişi, hipodrom, hava, pist ve derece sinyallerini değerlendirir. Ayrı otomatik-model karşılaştırması yalnızca modelin eğitiminde kullanılmamış, kabul edilmiş ileri tarih doğrulama aralığını kullanır. Tüm arşiv indeksleri hedef tarihten önceki yarışlarla sınırlandırılır. 30’dan az eşik adayı sonuçları yön gösterici sayılmamalıdır. Sonuçlar kazanma garantisi değildir.'
+      method: 'Ana rapor sabit temel ağırlıklarla form, piyasa, HP, pedigri, grup seviyesi/bitiriş, sınıf geçmişi, hipodrom, hava, pist ve derece sinyallerini değerlendirir. Ayrı otomatik-model karşılaştırması yalnızca modelin eğitiminde kullanılmamış, kabul edilmiş ileri tarih doğrulama aralığını kullanır. Walk-forward bölümündeki Plackett–Luce sıralama ölçümleri, mevcut kazanma olasılıklarını at gücü kabul ederek koşullu ilk-üç sıralama olasılığı üretir; ayrı eğitilmiş model değildir ve ana tahmini değiştirmez. Tüm arşiv indeksleri hedef tarihten önceki yarışlarla sınırlandırılır. 30’dan az eşik adayı sonuçları yön gösterici sayılmamalıdır. Sonuçlar kazanma garantisi değildir.'
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected server error.';

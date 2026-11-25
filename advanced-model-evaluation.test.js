@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { BASE_WEIGHTS } = require('./lib/automatic-learning');
-const { normalizeProbabilities, marketProbabilities, summarizeProbabilities, selectMarketBlend, evaluateWalkForward } = require('./lib/advanced-model-evaluation');
+const { normalizeProbabilities, marketProbabilities, summarizeProbabilities, summarizePlackettLuceRanking, selectMarketBlend, evaluateWalkForward } = require('./lib/advanced-model-evaluation');
 
 test('probability normalization rejects invalid or degenerate inputs', () => {
   assert.deepEqual(normalizeProbabilities([2, 2]), [0.5, 0.5]);
@@ -27,6 +27,27 @@ test('probability report calculates multiclass Brier, log-loss, top-one and cali
   assert.ok(report.logLoss > 0 && report.logLoss < 1);
   assert.ok(report.calibration.length > 0);
   assert.ok(report.calibrationError >= 0 && report.calibrationError <= 1);
+});
+
+test('Plackett-Luce ranking report evaluates NDCG@3 and ordered top-three likelihood', () => {
+  const race = {
+    horses: [
+      { number: 1, finishPosition: 1 },
+      { number: 2, finishPosition: 2 },
+      { number: 3, finishPosition: 3 }
+    ],
+    strengths: [0.6, 0.3, 0.1]
+  };
+  const report = summarizePlackettLuceRanking([race], 'strengths');
+  const reversed = summarizePlackettLuceRanking([{ ...race, strengths: [0.1, 0.3, 0.6] }], 'strengths');
+
+  assert.equal(report.races, 1);
+  assert.equal(report.ndcgAt3, 1);
+  assert.equal(report.topThreeSequenceRaces, 1);
+  assert.equal(report.exactTopThreeHits, 1);
+  assert.ok(Math.abs(report.topThreeSequenceLogLoss - -Math.log(0.45)) < 1e-4);
+  assert.ok(reversed.ndcgAt3 < report.ndcgAt3);
+  assert.ok(reversed.topThreeSequenceLogLoss > report.topThreeSequenceLogLoss);
 });
 
 test('market blend weight is chosen only with enough earlier calibration races', () => {

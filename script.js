@@ -231,6 +231,13 @@
       walkForwardNote.textContent = walkForward.validated
         ? `${walkForward.from} – ${walkForward.to} arasında ${walkForward.folds} tarih dilimi ve ${walkForward.races} geleceğe dönük yarış. Düşük Brier, log-loss ve kalibrasyon hatası daha iyidir. Sabit: ${formatProbabilityMetrics(walkForwardModels.fixed)}. Otomatik: ${formatProbabilityMetrics(walkForwardModels.learned)}. Normalize AGF piyasası: ${formatProbabilityMetrics(walkForwardModels.market)}. Otomatik + AGF kalibrasyonu: ${formatProbabilityMetrics(walkForwardModels.marketBlend)}.`
         : `${walkForward.reason || 'Walk-forward doğrulaması için yeterli veri yok.'} ${walkForward.folds || 0} tarih dilimi, ${walkForward.races || 0} yarış; aşağıdaki ölçümler keşif amaçlıdır, modeli terfi ettirmek için kanıt sayılmaz. Sabit: ${formatProbabilityMetrics(walkForwardModels.fixed)}. Otomatik: ${formatProbabilityMetrics(walkForwardModels.learned)}. Normalize AGF piyasası: ${formatProbabilityMetrics(walkForwardModels.market)}. Otomatik + AGF kalibrasyonu: ${formatProbabilityMetrics(walkForwardModels.marketBlend)}.`;
+      const plRanking = walkForward.plackettLuceRanking || {};
+      const formatRankingMetrics = (metric) => metric?.races
+        ? `${metric.races} yarış · NDCG@3 ${metric.ndcgAt3.toFixed(3)} · sıralı ilk-3 log-loss ${metric.topThreeSequenceLogLoss?.toFixed(3) ?? '—'}`
+        : 'tam sıralama verisi yetersiz';
+      const plRankingNote = document.createElement('p');
+      plRankingNote.className = 'sub';
+      plRankingNote.textContent = `Plackett–Luce gölge kıyası (mevcut kazanma olasılıklarını at gücü kabul eder; ana tahmini değiştirmez). NDCG@3 yüksek, sıralı ilk-3 log-loss düşük olması daha iyidir. Sabit: ${formatRankingMetrics(plRanking.fixed)}. Otomatik: ${formatRankingMetrics(plRanking.learned)}. Piyasa: ${formatRankingMetrics(plRanking.market)}.`;
       const calibrationList = document.createElement('ul');
       for (const [modelName, metric] of Object.entries(walkForwardModels)) {
         const row = document.createElement('li');
@@ -238,7 +245,7 @@
         row.textContent = `${modelName === 'fixed' ? 'Sabit model' : modelName === 'learned' ? 'Otomatik model' : modelName === 'marketBlend' ? 'Otomatik + AGF' : 'AGF piyasası'} kalibrasyonu: ${bins || 'yetersiz veri'}`;
         calibrationList.append(row);
       }
-      walkForwardBlock.append(walkForwardTitle, walkForwardNote, calibrationList);
+      walkForwardBlock.append(walkForwardTitle, walkForwardNote, plRankingNote, calibrationList);
       const note = document.createElement('p');
       note.className = 'sub';
       note.textContent = `Tek günlük veya küçük örnek sonuçları genellemez. Kaydedilmiş ${Number(data.storedRaces || 0).toLocaleString('tr-TR')} koşudan ${Number(data.omittedRaces || 0).toLocaleString('tr-TR')} tanesi gerekli program/sonuç eşleşmesi olmadığı için test dışı kaldı. Ana metrikler sabit başlangıç modeline aittir; doğrulanmış otomatik model, ağırlıkların eğitiminde kullanılmamış ayrı tarih diliminde yukarıda ayrıca karşılaştırılır. ${data.method} ${data.returnMetrics?.basis || ''}`;
