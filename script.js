@@ -218,6 +218,27 @@
         ? `${automaticValidation.from} – ${automaticValidation.to || '—'} arasında ${Number(automaticValidation.races || 0).toLocaleString('tr-TR')} koşu. Otomatik model lider isabeti: ${automaticValidation.modelTop1HitRate ?? '—'}%; piyasa favorisi: ${automaticValidation.marketFavoriteHitRate ?? '—'}%. Aynı koşulardaki Brier skoru: temel ${automaticValidation.baselineBrier?.toFixed(3) ?? '—'}, öğrenilmiş ${automaticValidation.learnedBrier?.toFixed(3) ?? '—'}; düşük değer daha iyi olasılık kalibrasyonu demektir. Eğitim raporu: ${automaticValidation.trainingReport?.trainingRaces ?? '—'} eğitim / ${automaticValidation.trainingReport?.validationRaces ?? '—'} doğrulama koşusu, ${automaticValidation.contextModelCount || 0} bağlam modeli. Bu doğrulama dilimi model ağırlıklarının eğitiminde kullanılmadı. Bağımsız son holdout (${automaticValidation.holdoutFrom || '—'} – ${automaticValidation.holdoutTo || '—'}): öğrenilmiş ${formatHoldout(holdout?.learned)}, sabit ${formatHoldout(holdout?.fixed)}, piyasa favorisi ${formatHoldout(holdout?.favorite)}.`
         : automaticValidation.reason || 'Henüz ileri tarih diliminde doğrulanmış otomatik model bulunmuyor.';
       automaticValidationBlock.append(automaticValidationTitle, automaticValidationNote);
+      const walkForward = data.walkForwardValidation || {};
+      const walkForwardBlock = document.createElement('section');
+      const walkForwardTitle = document.createElement('h3');
+      walkForwardTitle.textContent = 'Walk-forward: sabit model / otomatik model / piyasa';
+      const walkForwardNote = document.createElement('p');
+      walkForwardNote.className = 'sub';
+      const walkForwardModels = walkForward.byModel || {};
+      const formatProbabilityMetrics = (metric) => metric && metric.races
+        ? `${metric.races} yarış · ilk seçim %${(metric.topOneHitRate * 100).toFixed(1)} · Brier ${metric.brier.toFixed(3)} · log-loss ${metric.logLoss.toFixed(3)} · kalibrasyon hatası ${metric.calibrationError.toFixed(3)}`
+        : 'ölçüm için yeterli veri yok';
+      walkForwardNote.textContent = walkForward.validated
+        ? `${walkForward.from} – ${walkForward.to} arasında ${walkForward.folds} tarih dilimi ve ${walkForward.races} geleceğe dönük yarış. Düşük Brier, log-loss ve kalibrasyon hatası daha iyidir. Sabit: ${formatProbabilityMetrics(walkForwardModels.fixed)}. Otomatik: ${formatProbabilityMetrics(walkForwardModels.learned)}. Normalize AGF piyasası: ${formatProbabilityMetrics(walkForwardModels.market)}. Otomatik + AGF kalibrasyonu: ${formatProbabilityMetrics(walkForwardModels.marketBlend)}.`
+        : `${walkForward.reason || 'Walk-forward doğrulaması için yeterli veri yok.'} ${walkForward.folds || 0} tarih dilimi, ${walkForward.races || 0} yarış; aşağıdaki ölçümler keşif amaçlıdır, modeli terfi ettirmek için kanıt sayılmaz. Sabit: ${formatProbabilityMetrics(walkForwardModels.fixed)}. Otomatik: ${formatProbabilityMetrics(walkForwardModels.learned)}. Normalize AGF piyasası: ${formatProbabilityMetrics(walkForwardModels.market)}. Otomatik + AGF kalibrasyonu: ${formatProbabilityMetrics(walkForwardModels.marketBlend)}.`;
+      const calibrationList = document.createElement('ul');
+      for (const [modelName, metric] of Object.entries(walkForwardModels)) {
+        const row = document.createElement('li');
+        const bins = (metric?.calibration || []).map((bin) => `${Math.round(bin.lower * 100)}–${Math.round(bin.upper * 100)}%: tahmin ${(bin.meanPredicted * 100).toFixed(1)}%, gerçekleşen ${(bin.observedRate * 100).toFixed(1)}% (${bin.count} at)`).join(' · ');
+        row.textContent = `${modelName === 'fixed' ? 'Sabit model' : modelName === 'learned' ? 'Otomatik model' : modelName === 'marketBlend' ? 'Otomatik + AGF' : 'AGF piyasası'} kalibrasyonu: ${bins || 'yetersiz veri'}`;
+        calibrationList.append(row);
+      }
+      walkForwardBlock.append(walkForwardTitle, walkForwardNote, calibrationList);
       const note = document.createElement('p');
       note.className = 'sub';
       note.textContent = `Tek günlük veya küçük örnek sonuçları genellemez. Kaydedilmiş ${Number(data.storedRaces || 0).toLocaleString('tr-TR')} koşudan ${Number(data.omittedRaces || 0).toLocaleString('tr-TR')} tanesi gerekli program/sonuç eşleşmesi olmadığı için test dışı kaldı. Ana metrikler sabit başlangıç modeline aittir; doğrulanmış otomatik model, ağırlıkların eğitiminde kullanılmamış ayrı tarih diliminde yukarıda ayrıca karşılaştırılır. ${data.method} ${data.returnMetrics?.basis || ''}`;
@@ -252,7 +273,7 @@
         breakdownList.append(item);
       }
       breakdown.append(breakdownTitle, breakdownList);
-      backtestSummary.replaceChildren(metrics, validationBlock, automaticValidationBlock, note, rankBreakdown, breakdown);
+      backtestSummary.replaceChildren(metrics, validationBlock, automaticValidationBlock, walkForwardBlock, note, rankBreakdown, breakdown);
     } catch (error) {
       backtestSummary.textContent = error.message || 'Geriye dönük test çalıştırılamadı.';
     } finally {

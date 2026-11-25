@@ -104,3 +104,24 @@ test('model fitter preserves trusted weights until it has a forward validation s
   assert.equal(report.verified, false);
   assert.deepEqual(report.weights, protectedWeights);
 });
+
+test('automatic model refuses promotion before 18 distinct race dates', () => {
+  const protectedWeights = { ...BASE_WEIGHTS, market: 0.4 };
+  const races = Array.from({ length: 17 }, (_, dayIndex) => {
+    const date = `2026-02-${String(dayIndex + 1).padStart(2, '0')}`;
+    return Array.from({ length: 5 }, () => ({
+      date,
+      winner: 1,
+      horses: [
+        { number: 1, features: Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, 90])) },
+        { number: 2, features: Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, 20])) }
+      ]
+    }));
+  }).flat();
+  const report = fitModel(races, protectedWeights);
+
+  assert.equal(report.verified, false);
+  assert.equal(report.trainingDates, 17);
+  assert.equal(report.updated, false);
+  assert.deepEqual(report.weights, protectedWeights);
+});
