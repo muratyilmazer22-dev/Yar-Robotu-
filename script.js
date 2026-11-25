@@ -807,7 +807,7 @@ function restoreStoredAnalysis() {
 }
 function compactResultsTools() {
   const panel = $("panel-ogrenme");
-  const cards = [...panel.querySelectorAll(":scope > .card")].slice(1);
+  const cards = [...panel.querySelectorAll(":scope > .panel-detail-content > .card")].slice(1);
   if (!cards.length) return;
   const details = document.createElement("details");
   details.className = "card results-tools";
@@ -2457,7 +2457,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     event.target.value = "";
   });
   $("resetBtn")?.addEventListener("click", resetHistory);
+  document.querySelector(".section-nav")?.addEventListener("click", (event) => {
+    const link = event.target.closest("a[href^='#panel-']");
+    const panel = link ? document.querySelector(link.getAttribute("href")) : null;
+    if (panel instanceof HTMLDetailsElement) panel.open = true;
+  });
   if (state.predictions?.length) lastAnalysis = state.predictions;
+  compactResultsTools();
   updateMemory();
   renderTrainingReport();
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js").catch(() => {});
