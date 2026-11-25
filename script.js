@@ -871,10 +871,22 @@ function showMessage(target, text, type = "") {
   target.innerHTML = `<div class="alert ${type}">${escapeHtml(text)}</div>`;
   target.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
-function setTab(name) {
+function setTab(name, { focus = false, scroll = true } = {}) {
   const target = document.getElementById(`panel-${name}`);
-  if (target instanceof HTMLDetailsElement) target.open = true;
-  target?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const tabs = [...document.querySelectorAll('.section-nav [role="tab"]')];
+  if (!target || !tabs.length) return;
+  document.querySelectorAll(".panel").forEach((panel) => {
+    const active = panel === target;
+    panel.classList.toggle("active", active);
+    if (panel instanceof HTMLDetailsElement) panel.open = active;
+  });
+  tabs.forEach((tab) => {
+    const selected = tab.getAttribute("aria-controls") === target.id;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    if (selected && focus) tab.focus();
+  });
+  if (scroll) window.scrollTo({ top: 0, behavior: "smooth" });
 }
 function normalize(text) { return text.toLocaleUpperCase("en-US").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "I"); }
 const TURKISH_RACECOURSES = ["Adana", "Ankara", "Antalya", "Bursa", "Diyarbakır", "Elazığ", "İstanbul", "İzmir", "Kocaeli", "Şanlıurfa"];
@@ -2320,6 +2332,12 @@ function resetHistory() {
   showMessage($("ogrenmeLogAlani"), "Öğrenme geçmişi varsayılanlara döndürüldü.", "success");
 }
 document.addEventListener("DOMContentLoaded", async () => {
+  const memoryPanel = $("panel-hafiza");
+  const learningContent = $("panel-ogrenme")?.querySelector(".panel-detail-content");
+  if (memoryPanel && learningContent) {
+    memoryPanel.classList.remove("panel", "panel-details");
+    learningContent.prepend(memoryPanel);
+  }
   state = await restoreState();
   initializeMemoryNotes();
   window.addEventListener("beforeinstallprompt", (event) => {
@@ -2457,10 +2475,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     event.target.value = "";
   });
   $("resetBtn")?.addEventListener("click", resetHistory);
-  document.querySelector(".section-nav")?.addEventListener("click", (event) => {
-    const link = event.target.closest("a[href^='#panel-']");
-    const panel = link ? document.querySelector(link.getAttribute("href")) : null;
-    if (panel instanceof HTMLDetailsElement) panel.open = true;
+  const sectionNav = document.querySelector(".section-nav");
+  sectionNav?.addEventListener("click", (event) => {
+    const tab = event.target.closest('[role="tab"]');
+    if (!tab) return;
+    const panelName = tab.getAttribute("aria-controls")?.replace(/^panel-/, "");
+    if (panelName) setTab(panelName);
+  });
+  sectionNav?.addEventListener("keydown", (event) => {
+    const currentTab = event.target.closest('[role="tab"]');
+    if (!currentTab) return;
+    const tabs = [...sectionNav.querySelectorAll('[role="tab"]')];
+    const currentIndex = tabs.indexOf(currentTab);
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    const panelName = tabs[nextIndex].getAttribute("aria-controls")?.replace(/^panel-/, "");
+    if (panelName) setTab(panelName, { focus: true });
   });
   if (state.predictions?.length) lastAnalysis = state.predictions;
   compactResultsTools();
