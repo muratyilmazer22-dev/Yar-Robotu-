@@ -584,7 +584,6 @@ function saveState() {
   state.localUpdatedAt = new Date().toISOString();
   const localSave = persistStateLocally();
   updateMemory();
-  queueFirebaseMemorySync();
   return localSave;
 }
 function imageForMemory(image) {
@@ -2545,7 +2544,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), image: storedResultImage });
       $("readResultsImageButton").disabled = false;
-      setResultImageStatus(blobSaved ? `${file.name} fotoğrafı özel Blob hafızasına kaydedildi.` : `${file.name} fotoğrafı bu cihazın hafızasına kaydedildi; giriş yaptığınızda Firebase ve Blob ile eşitlenir.`);
+      setResultImageStatus(blobSaved ? `${file.name} fotoğrafı özel Blob hafızasına kaydedildi.` : `${file.name} fotoğrafı bu cihazın hafızasına kaydedildi.`);
     } catch (error) {
       selectedResultImage = null;
       storedResultImage = null;
