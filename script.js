@@ -1247,21 +1247,16 @@ async function runAnalysis() {
   saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: couponDate, city: couponCity });
   clearTimeout(bulletinSaveTimer);
   const locallySaved = await saveState();
-  const cloudSaved = locallySaved && firebaseAccount && firebaseSyncReady ? await queueFirebaseMemorySync(true) : null;
   $("analysisEmptyState")?.remove();
   renderAnalysis(parsed.races);
   const completedCount = parsed.races.filter((race) => race.finished).length;
   const memoryStatus = !locallySaved
     ? "HATA: Analiz üretildi ancak tarayıcı hafızasına yazma doğrulanamadı; yedeği hemen indirin."
-    : firebaseAccount && firebaseSyncReady
-      ? cloudSaved
-        ? "Bülten ve tahminler tarayıcıya ve Firebase hesabınıza kalıcı olarak kaydedildi."
-        : "Bülten ve tahminler bu tarayıcıya kaydedildi; Firebase eşitlemesi başarısız, hesap yedeği doğrulanamadı."
-      : "Bülten ve tahminler bu tarayıcının kalıcı hafızasına kaydedildi. Cihazlar arası yedek için Hesap bölümünde oturum açın.";
+    : "Bülten ve tahminler bu cihazda saklandı. Başka cihaza aktarmak için yedeği indirip orada geri yükleyin.";
   const statusMessage = openRaces.length
     ? `${openRaces.length} açık koşu analiz edildi; ${completedCount} koşulmuş ayak tahmin dışında bırakıldı. ${memoryStatus}`
     : `${completedCount} koşunun tamamı koşulmuş; tahmin üretilmedi. ${memoryStatus}`;
-  const persistenceFailed = !locallySaved || Boolean(firebaseAccount && firebaseSyncReady && !cloudSaved);
+  const persistenceFailed = !locallySaved;
   const dataHandlingMessage = "Eksik bilgiler tahmin edilmedi; seyrek veya birbiriyle uyuşmayan sinyallerin etkisi otomatik azaltıldı.";
   showMessage(warning, `${statusMessage} ${dataHandlingMessage}`, persistenceFailed ? "error" : "success");
   const budget = parseNumber($("butceInput").value);
@@ -1295,18 +1290,14 @@ async function runAnalysis() {
   $("kuponAlani").innerHTML = poolCards.join("");
   if (autoSavedCouponCount) {
     const couponsPersisted = await saveState();
-    const couponsCloudSaved = couponsPersisted && firebaseAccount && firebaseSyncReady ? await queueFirebaseMemorySync(true) : null;
     renderCouponHistory();
     const note = document.createElement("p");
-    const memoryConfirmed = couponsPersisted && (!firebaseAccount || !firebaseSyncReady || couponsCloudSaved);
-    note.className = memoryConfirmed ? "alert success" : "alert error";
+    note.className = couponsPersisted ? "alert success" : "alert error";
     note.setAttribute("role", "status");
     note.setAttribute("aria-live", "polite");
     note.textContent = !couponsPersisted
       ? "Kupon önerileri oluşturuldu ancak yerel hafızaya yazma doğrulanamadı; yedeği indirip tekrar deneyin."
-      : firebaseAccount && firebaseSyncReady && !couponsCloudSaved
-        ? "Kupon önerileri bu cihaza kaydedildi ancak hesap eşitlemesi doğrulanamadı."
-        : `${autoSavedCouponCount} kupon önerisi hafızaya otomatik kaydedildi. Öneriler oynanmadı olarak işaretli; 6/6 performans analizine girer, gerçek ödeme/getiri hesabına girmez.`;
+      : `${autoSavedCouponCount} kupon önerisi bu cihazın hafızasına kaydedildi. Öneriler oynanmadı olarak işaretli; 6/6 performans analizine girer, gerçek ödeme/getiri hesabına girmez.`;
     warning.append(note);
   }
   setTab("analiz");
@@ -1790,16 +1781,11 @@ function inferResultPredictionContext(races) {
 }
 async function persistCurrentMemory() {
   const localSaved = await saveState();
-  const cloudSaved = firebaseAccount
-    ? firebaseSyncReady && localSaved ? await queueFirebaseMemorySync(true) : false
-    : null;
-  return { localSaved, cloudSaved, saved: localSaved && (!firebaseAccount || cloudSaved === true) };
+  return { localSaved, saved: localSaved };
 }
 function resultPersistenceNote(persistence) {
   if (!persistence.localSaved) return "Tarayıcı hafızasına yazılamadı; yedeği indirip saklayın.";
-  if (firebaseAccount && !persistence.cloudSaved) return "Yerel kayıt korundu ancak Firebase eşitlemesi doğrulanamadı.";
-  if (persistence.cloudSaved) return "Firebase hesabınızla eşitleme doğrulandı.";
-  return "Bu cihazda kaydedildi; hesaplar arası eşitleme için giriş yapın.";
+  return "Bu cihazda kaydedildi; başka cihaza aktarmak için yedeği indirip orada geri yükleyin.";
 }
 async function compareResults() {
   const target = $("ogrenmeLogAlani");
@@ -1816,8 +1802,8 @@ async function compareResults() {
   if (!archivedSubmission) {
     archivedSubmission = archiveBulletin("result", {
       text: resultText,
-      date: "",
-      city: "",
+      date: $("resultsDateInput").value,
+      city: $("resultsCityInput").value.trim(),
       matchingStatus: "awaiting_review",
       ...(storedResultImage ? { image: storedResultImage } : {})
     });
@@ -1828,13 +1814,11 @@ async function compareResults() {
       ...(storedResultImage ? { image: storedResultImage } : {})
     });
   }
-  if ($("resultsReviewedCheck")?.checked !== true) {
-    const persistence = await persistCurrentMemory();
-    showMessage(target, `Girdiğiniz içerik arşive kaydedildi. Sonuçları kendi kaynağınızla doğrulayıp onaylarsanız sistem kayıtlı analizlerle eşleştirmeyi dener; belirsiz eşleşmeler öğrenmeye alınmaz. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
-    return;
+  const reviewedByUser = $("resultsReviewedCheck")?.checked === true;
+  if (reviewedByUser) {
+    archivedSubmission = { ...archivedSubmission, reviewedByUser: true, reviewedAt: new Date().toISOString() };
+    state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
   }
-  archivedSubmission = { ...archivedSubmission, reviewedByUser: true, reviewedAt: new Date().toISOString() };
-  state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
   const parsed = parseRaces(resultText);
   if (!parsed.races.length) {
     archivedSubmission = { ...archivedSubmission, matchingStatus: "awaiting_structured_result", matchingNote: "Metin arşivlendi; koşu ve sonuç satırları güvenilir biçimde ayrıştırılamadı." };
@@ -1941,6 +1925,20 @@ async function compareResults() {
     updateMemory();
     return;
   }
+  if (!reviewedByUser) {
+    archivedSubmission = {
+      ...archivedSubmission,
+      matchingStatus: "compared_pending_review",
+      matchingNote: "Kayıtlı tahminlerle otomatik karşılaştırıldı; kullanıcı sonuç kaynağını doğrulayana kadar öğrenmeye eklenmedi."
+    };
+    state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
+    const persistence = await persistCurrentMemory();
+    const firstChoiceHits = outcomes.filter((item) => item.top1Hit).length;
+    const topThreeHits = outcomes.filter((item) => item.top3Hit).length;
+    showMessage(target, `Sonuç bülteni hafızaya kaydedildi ve ${outcomes.length} tahmin sürümüyle karşılaştırıldı: ilk tercih ${firstChoiceHits}/${outcomes.length}, ilk üç ${topThreeHits}/${outcomes.length} isabet. Kaynağı kontrol edip onay kutusunu işaretlerseniz doğrulanmış sonuçlar öğrenmeye eklenir. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
+    updateMemory();
+    return;
+  }
   const merged = window.RaceLearningEvaluation.mergeOutcomes(state.outcomes, outcomes);
   state.outcomes = merged.outcomes;
   archivedSubmission = { ...archivedSubmission, matchingStatus: "matched", matchingNote: "Doğrulanmış sonuçlar kayıtlı tahminlerle eşleştirildi.", matchedAt: new Date().toISOString() };
@@ -2007,7 +2005,7 @@ async function handleCompareResults() {
 }
 function scheduleResultComparison() {
   clearTimeout(resultCompareTimer);
-  if (!$("sonucluBultenInput")?.value.trim() || $("resultsReviewedCheck")?.checked !== true) return;
+  if (!$("sonucluBultenInput")?.value.trim()) return;
   resultCompareTimer = window.setTimeout(handleCompareResults, 900);
 }
 const COUPON_STATUS_LABELS = { suggested: "Öneri · oynanmadı", pending: "Oynandı · sonuç bekleniyor", won: "Ödeme aldı", lost: "İsabetsiz", carryover: "Devretti" };
@@ -2351,7 +2349,7 @@ function initializeMemoryNotes() {
     }
     input.value = "";
     updateMemoryNoteCharacterCount();
-    status.textContent = firebaseAccount ? "Not kaydedildi ve hesabınızla eşitleniyor." : "Not bu cihazın hafızasına kaydedildi. Hesapla eşitlemek için giriş yapabilirsiniz.";
+    status.textContent = "Not bu cihazın hafızasına kaydedildi.";
   });
   $("memoryNotesList")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-memory-action]");
@@ -2397,7 +2395,7 @@ function updateMemory() {
   const report = state.trainingReport;
   $("modelBadge").textContent = `Uyarlamalı model · v${state.version}`;
   $("statsArea").innerHTML = n
-    ? `<div class="stats"><div class="stat"><b>${n}</b><span>ölçülen koşu</span></div><div class="stat"><b>%${Math.round(top3 / n * 100)}</b><span>ilk 3 içi isabet oranı</span></div><div class="stat"><b>%${Math.round(top1 / n * 100)}</b><span>model lideri isabeti</span></div></div><div class="meter" aria-label="İlk üç isabet oranı"><span style="width:${Math.round(top3 / n * 100)}%"></span></div><p class="hint">Kişisel karşılaştırmalar (girişte Firebase hesabıyla eşitlenir) ve Neon resmi yarış arşivi birlikte değerlendirilir. ${trainable < MODEL_MIN_RACES ? `Ağırlık kalibrasyonu için ${MODEL_MIN_RACES} uygun yarış gerekir; şu an ${trainable} var.` : !report?.validatedAt ? "En az 5 ayrı tarihli eğitim/doğrulama ayrımı henüz oluşmadı; başlangıç ağırlıkları kullanılıyor." : report.updated ? `Ağırlıklar zamana göre ayrılmış doğrulama diliminde iyileşti (Brier ${report.baselineBrier.toFixed(3)} → ${report.validationBrier.toFixed(3)}; doğrulama ${report.validationRaces} koşu).` : "Ayrılmış tarih doğrulamasında en az %2 iyileşme görülmedi; başlangıç ağırlıkları korundu."} Tek seçim eşiği geçmişi: ${singleHits}/${singleResults.length}${singleResults.length < 30 ? " (örnek yetersiz: 30’dan az aday)" : ""}; doğrulanmış pist/koşu türü ağırlığı: ${contextCount}. Yüzdeler geçmiş isabet ölçümüdür, gelecekte kazanma olasılığı değildir.</p>`
+    ? `<div class="stats"><div class="stat"><b>${n}</b><span>ölçülen koşu</span></div><div class="stat"><b>%${Math.round(top3 / n * 100)}</b><span>ilk 3 içi isabet oranı</span></div><div class="stat"><b>%${Math.round(top1 / n * 100)}</b><span>model lideri isabeti</span></div></div><div class="meter" aria-label="İlk üç isabet oranı"><span style="width:${Math.round(top3 / n * 100)}%"></span></div><p class="hint">Kişisel karşılaştırmalar bu cihazdaki kayıtlarla, Neon resmi yarış arşiviyle birlikte değerlendirilir. ${trainable < MODEL_MIN_RACES ? `Ağırlık kalibrasyonu için ${MODEL_MIN_RACES} uygun yarış gerekir; şu an ${trainable} var.` : !report?.validatedAt ? "En az 5 ayrı tarihli eğitim/doğrulama ayrımı henüz oluşmadı; başlangıç ağırlıkları kullanılıyor." : report.updated ? `Ağırlıklar zamana göre ayrılmış doğrulama diliminde iyileşti (Brier ${report.baselineBrier.toFixed(3)} → ${report.validationBrier.toFixed(3)}; doğrulama ${report.validationRaces} koşu).` : "Ayrılmış tarih doğrulamasında en az %2 iyileşme görülmedi; başlangıç ağırlıkları korundu."} Tek seçim eşiği geçmişi: ${singleHits}/${singleResults.length}${singleResults.length < 30 ? " (örnek yetersiz: 30’dan az aday)" : ""}; doğrulanmış pist/koşu türü ağırlığı: ${contextCount}. Yüzdeler geçmiş isabet ölçümüdür, gelecekte kazanma olasılığı değildir.</p>`
     : `<p class="muted">Henüz ölçülmüş sonuç yok. Yüzde hesaplamak için tahminleri gerçek sonuçlarla karşılaştırın.</p>`;
   $("historyArea").innerHTML = n ? `<table class="table"><thead><tr><th>Hipodrom / koşu</th><th>Kazanan</th><th>İlk üç</th><th>Lider</th><th>Tarih</th></tr></thead><tbody>${state.outcomes.slice(-30).reverse().map((item) => `<tr><td>${escapeHtml(item.city || "Manuel")} · ${item.raceNo}</td><td>#${item.winner} ${escapeHtml(item.winnerName)}</td><td>${item.top3Hit ? "Evet" : "Hayır"}</td><td>${item.top1Hit ? "Evet" : "Hayır"}</td><td>${new Date(item.at).toLocaleDateString("tr-TR")}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Karşılaştırma geçmişi henüz yok.</p>`;
   renderMemoryNotes();
@@ -2405,7 +2403,7 @@ function updateMemory() {
 }
 
 function resetHistory() {
-  const scope = firebaseAccount ? "Bu cihazdaki ve Firebase hesabınızdaki" : "Bu tarayıcıdaki";
+  const scope = "Bu tarayıcıdaki";
   if (!window.confirm(`${scope} bülten arşivi, hafıza notları, fotoğraflar, yarış sonuçları ve kupon sonuç kayıtları silinsin mi?`)) return;
   state = { ...DEFAULT_STATE, profiles: { ...DEFAULT_PROFILES }, coupons: [] };
   lastAnalysis = [];
@@ -2417,7 +2415,6 @@ function resetHistory() {
 document.addEventListener("DOMContentLoaded", async () => {
   state = await restoreState();
   initializeMemoryNotes();
-  initializeFirebaseMemory().catch(() => setFirebaseStatus("Firebase bağlantısı başlatılamadı; yerel hafıza korunuyor.", true));
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;
