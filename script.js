@@ -360,7 +360,6 @@ function sharedModelReportText() {
 }
 let lastAnalysis = [];
 let lastCoupons = {};
-let resultCompareTimer = null;
 let resultComparisonInProgress = false;
 let deferredInstallPrompt = null;
 let singleEvidenceCache = null;
@@ -740,10 +739,9 @@ async function loadArchivedResults() {
       return;
     }
     $("sonucluBultenInput").value = resultText;
-    $("resultsReviewedCheck").checked = false;
     saveBulletinDraft("result", { text: resultText, date, city });
     const raceCount = races.filter((race) => Array.isArray(race.results?.runners) && race.results.runners.length > 0).length;
-    status.textContent = `${raceCount} koşu sonucu mevcut arşivden yüklendi; tabloyu kontrol edip onay kutusunu işaretleyin.`;
+    status.textContent = `${raceCount} koşu sonucu mevcut arşivden yüklendi; tahminlerle karşılaştırmak için hafızaya alın.`;
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : "Kayıtlı arşiv okunamadı.";
   } finally {
@@ -1740,10 +1738,9 @@ async function extractResultsFromImage() {
     if (!recognizedText) throw new Error("Görselde okunabilir sonuç metni bulunamadı.");
     const textarea = $("sonucluBultenInput");
     textarea.value = [textarea.value.trim(), recognizedText].filter(Boolean).join("\n\n");
-    $("resultsReviewedCheck").checked = false;
     saveBulletinDraft("result", { text: textarea.value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
     textarea.focus();
-    setResultImageStatus("OCR taslağı eklendi. At adlarını, numaraları ve bitiriş sırasını kaynağıyla kontrol edin; ardından onay kutusunu işaretleyin.");
+    setResultImageStatus("Fotoğraf metne aktarıldı; kayıtlı tahminlerle otomatik karşılaştırılıyor.");
   } catch (error) {
     setResultImageStatus(error instanceof Error ? error.message : "Görsel işlenemedi. Lütfen yeniden deneyin.", true);
   } finally {
@@ -1803,7 +1800,7 @@ async function compareResults() {
       text: resultText,
       date: $("resultsDateInput").value,
       city: $("resultsCityInput").value.trim(),
-      matchingStatus: "awaiting_review",
+      matchingStatus: "awaiting_auto_match",
       ...(storedResultImage ? { image: storedResultImage } : {})
     });
     saveBulletinDraft("result", {
@@ -1813,11 +1810,8 @@ async function compareResults() {
       ...(storedResultImage ? { image: storedResultImage } : {})
     });
   }
-  const reviewedByUser = $("resultsReviewedCheck")?.checked === true;
-  if (reviewedByUser) {
-    archivedSubmission = { ...archivedSubmission, reviewedByUser: true, reviewedAt: new Date().toISOString() };
-    state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
-  }
+  archivedSubmission = { ...archivedSubmission, reviewedByUser: true, reviewedAt: new Date().toISOString() };
+  state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
   const parsed = parseRaces(resultText);
   if (!parsed.races.length) {
     archivedSubmission = { ...archivedSubmission, matchingStatus: "awaiting_structured_result", matchingNote: "Metin arşivlendi; koşu ve sonuç satırları güvenilir biçimde ayrıştırılamadı." };
@@ -1864,6 +1858,11 @@ async function compareResults() {
     showMessage(target, `Sonuç arşivlendi ancak seçilen analiz için kayıtlı tahmin bulunamadı. Öğrenme güncellenmedi. ${note}`, persistence.saved ? "" : "error");
     updateMemory();
     return;
+  }
+  for (const coupon of state.coupons) {
+    if (coupon.date === resultDate && normalize(coupon.city || "") === resultCity) {
+      window.CouponResults.synchronizeCouponResults(coupon, parsed.races);
+    }
   }
   const timestamp = new Date().toISOString();
   const outcomes = [];
@@ -1924,23 +1923,9 @@ async function compareResults() {
     updateMemory();
     return;
   }
-  if (!reviewedByUser) {
-    archivedSubmission = {
-      ...archivedSubmission,
-      matchingStatus: "compared_pending_review",
-      matchingNote: "Kayıtlı tahminlerle otomatik karşılaştırıldı; kullanıcı sonuç kaynağını doğrulayana kadar öğrenmeye eklenmedi."
-    };
-    state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
-    const persistence = await persistCurrentMemory();
-    const firstChoiceHits = outcomes.filter((item) => item.top1Hit).length;
-    const topThreeHits = outcomes.filter((item) => item.top3Hit).length;
-    showMessage(target, `Sonuç bülteni hafızaya kaydedildi ve ${outcomes.length} tahmin sürümüyle karşılaştırıldı: ilk tercih ${firstChoiceHits}/${outcomes.length}, ilk üç ${topThreeHits}/${outcomes.length} isabet. Kaynağı kontrol edip onay kutusunu işaretlerseniz doğrulanmış sonuçlar öğrenmeye eklenir. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
-    updateMemory();
-    return;
-  }
   const merged = window.RaceLearningEvaluation.mergeOutcomes(state.outcomes, outcomes);
   state.outcomes = merged.outcomes;
-  archivedSubmission = { ...archivedSubmission, matchingStatus: "matched", matchingNote: "Doğrulanmış sonuçlar kayıtlı tahminlerle eşleştirildi.", matchedAt: new Date().toISOString() };
+  archivedSubmission = { ...archivedSubmission, matchingStatus: "matched", matchingNote: "Sonuçlar kayıtlı tahminlerle otomatik eşleştirildi.", matchedAt: new Date().toISOString() };
   state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
   if (merged.added || merged.corrected) trainModel();
   const persistence = await persistCurrentMemory();
@@ -1985,7 +1970,7 @@ async function compareResults() {
     return new Set(leaders).size <= 1;
   }).length;
   const outcomeDetails = `<section class="card"><h3>Kısa olay yeri incelemesi</h3><p class="sub">${outcomes.length} kayıtlı tahmin sürümü · ${stableRaceCount}/${evaluatedRaceCount} değerlendirilen koşuda lider değişmedi · sürüm bazında lider isabeti ${leadersCorrect}/${outcomes.length} · ilk üç isabeti ${topThreeCorrect}/${outcomes.length}.</p>${auditRaces}</section>`;
-  showMessage(target, `${saved ? "Onayladığınız sonuçlar karşılaştırıldı ve kaydedildi." : "Karşılaştırma yapıldı ancak tüm hafıza kayıtları doğrulanamadı."} ${resultPersistenceNote(persistence)} ${merged.added} yeni sürüm sonucu · ${merged.corrected} düzeltilen sonuç · ${duplicates} yinelenen · ${racesWithoutWinner + racesWithoutPrediction} atlanan koşu. ${winnerMismatchNote} ${learningStatus}`, saved ? "success" : "error");
+  showMessage(target, `${saved ? "Sonuç bülteni otomatik karşılaştırıldı ve öğrenme hafızasına kaydedildi." : "Karşılaştırma yapıldı ancak tüm hafıza kayıtları doğrulanamadı."} ${resultPersistenceNote(persistence)} ${merged.added} yeni tahmin sonucu · ${merged.corrected} düzeltilen sonuç · ${duplicates} yinelenen · ${racesWithoutWinner + racesWithoutPrediction} atlanan koşu. ${winnerMismatchNote} ${learningStatus}`, saved ? "success" : "error");
   target.insertAdjacentHTML("beforeend", outcomeDetails);
   renderTrainingReport();
   updateMemory();
@@ -2002,11 +1987,7 @@ async function handleCompareResults() {
     resultComparisonInProgress = false;
   }
 }
-function scheduleResultComparison() {
-  clearTimeout(resultCompareTimer);
-  if (!$("sonucluBultenInput")?.value.trim()) return;
-  resultCompareTimer = window.setTimeout(handleCompareResults, 900);
-}
+
 const COUPON_STATUS_LABELS = { suggested: "Öneri · oynanmadı", pending: "Oynandı · sonuç bekleniyor", won: "Ödeme aldı", lost: "İsabetsiz", carryover: "Devretti" };
 function createCouponId() {
   return window.crypto?.randomUUID?.() || `coupon-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -2056,71 +2037,11 @@ function addManualCoupon(event) {
 function findSavedPrediction(date, city, raceNo) {
   return state.predictions.filter((prediction) => prediction.date === date && normalize(prediction.city || "") === normalize(city || "") && Number(prediction.no) === Number(raceNo)).sort((a, b) => String(b.predictionCreatedAt || "").localeCompare(String(a.predictionCreatedAt || "")))[0];
 }
-function updateCouponResult(id, card) {
-  const record = state.coupons.find((coupon) => coupon.id === id);
-  const status = card.querySelector("[data-coupon-status]")?.value;
-  const payoutValue = card.querySelector("[data-coupon-payout]")?.value;
-  const payout = payoutValue === "" ? null : parseNumber(payoutValue);
-  if (!record || !Object.hasOwn(COUPON_STATUS_LABELS, status) || (!['pending', 'suggested'].includes(status) && (!Number.isFinite(payout) || payout < 0))) {
-    showMessage($("ogrenmeLogAlani"), "Sonucu bekleyen olarak bırakın veya geçerli bir ödeme tutarı girin.", "error");
-    return;
-  }
-  const legResults = new Map((record.legResults || []).map((result) => [Number(result.raceNo), Number(result.winnerNumber)]));
-  for (const input of card.querySelectorAll("[data-leg-result]")) {
-    if (!input.value.trim()) continue;
-    const raceNo = Number(input.dataset.legResult);
-    const winnerNumber = Number(input.value);
-    if (!Number.isSafeInteger(winnerNumber) || winnerNumber < 1) {
-      showMessage($("ogrenmeLogAlani"), "Ayak kazananı için 1 veya daha büyük geçerli at numarası girin.", "error");
-      return;
-    }
-    legResults.set(raceNo, winnerNumber);
-  }
-  record.legResults = [...legResults].map(([raceNo, winnerNumber]) => ({ raceNo, winnerNumber }));
-  record.status = status;
-  record.payout = ['pending', 'suggested'].includes(status) ? null : payout;
-  record.resolvedAt = ['pending', 'suggested'].includes(status) ? null : new Date().toISOString();
-  let learnedLegs = 0;
-  let correctedLegs = 0;
-  for (const result of record.legResults) {
-    const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
-    const outcome = prediction && window.CouponLearning.outcomeFromPrediction(prediction, result.winnerNumber);
-    if (!outcome) continue;
-    const identity = window.CouponLearning.raceIdentity(outcome);
-    const existingIndex = state.outcomes.findIndex((item) => window.CouponLearning.raceIdentity(item) === identity);
-    if (existingIndex < 0) {
-      state.outcomes.push(outcome);
-      learnedLegs += 1;
-    } else if (Number(state.outcomes[existingIndex].winner) !== Number(outcome.winner)) {
-      state.outcomes[existingIndex] = outcome;
-      learnedLegs += 1;
-      correctedLegs += 1;
-    }
-  }
-  if (learnedLegs) trainModel();
-  saveState();
-  renderCouponHistory();
-  const learningNote = learnedLegs
-    ? ` ${learnedLegs} ayak tam tahmin kaydıyla eşleşip öğrenme hafızasına alındı${correctedLegs ? `; ${correctedLegs} eski sonuç düzeltildi` : ""}. ${state.trainingReport?.updated ? "Ayrılmış doğrulama iyileşti; güncellenmiş ağırlıklar etkin." : "Ağırlıklar yalnızca yeterli veri ve ileri tarihli doğrulama iyileşmesiyle güncellenir."}`
-    : " Eşleşen yeni tam tahmin bulunmadığından model eğitimi için yeni yarış eklenmedi; kupon/ödeme kaydı saklandı.";
-  showMessage($("ogrenmeLogAlani"), `Kupon ve ayak sonuçları kaydedildi.${learningNote}`, "success");
-}
 function renderCouponHistory() {
   const target = $("couponHistoryArea");
   const metrics = $("couponMetrics");
   if (!target || !metrics) return;
   const records = Array.isArray(state.coupons) ? state.coupons : [];
-  const resolved = records.filter((record) => ["won", "lost"].includes(record.status) && Number.isFinite(Number(record.payout)));
-  const carryovers = records.filter((record) => record.status === "carryover");
-  const cost = resolved.reduce((sum, record) => sum + Number(record.cost || 0), 0);
-  const payout = resolved.reduce((sum, record) => sum + Number(record.payout || 0), 0);
-  const net = payout - cost;
-  const roi = cost > 0 ? (net / cost) * 100 : null;
-  const baselineRecords = records.filter((record) => record.source === "Yarış Robotu");
-  const baselineResolved = baselineRecords.filter((record) => ["won", "lost"].includes(record.status) && Number.isFinite(Number(record.payout)));
-  const baselineCost = baselineResolved.reduce((sum, record) => sum + Number(record.cost || 0), 0);
-  const baselineNet = baselineResolved.reduce((sum, record) => sum + Number(record.payout || 0) - Number(record.cost || 0), 0);
-  const baselineRoi = baselineCost > 0 ? (baselineNet / baselineCost) * 100 : null;
   const sixLegEvaluation = window.CouponResults.evaluateSixLegCoupons(records);
   const legDiagnostics = records.flatMap((record) => (record.legResults || []).map((result) => {
     const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
@@ -2139,15 +2060,7 @@ function renderCouponHistory() {
     return item;
   };
   metrics.replaceChildren(
-    metric("Tüm kaynaklar · kupon", records.length.toLocaleString("tr-TR")),
-    metric("Tüm kaynaklar · sonuçlanan", resolved.length.toLocaleString("tr-TR")),
-    metric("Tüm kaynaklar · maliyet", money(cost)),
-    metric("Tüm kaynaklar · net ödeme farkı", resolved.length ? money(net) : "—"),
-    metric("Tüm kaynaklar · getiri / maliyet", roi === null ? "—" : `${roi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
-    metric("Devreden kupon", carryovers.length.toLocaleString("tr-TR")),
-    metric("Ana model önerisi / sonuçlanan", `${baselineRecords.length} / ${baselineResolved.length}`),
-    metric("Ana model net ödeme farkı", baselineResolved.length ? money(baselineNet) : "—"),
-    metric("Ana model net getiri / maliyet", baselineRoi === null ? "—" : `${baselineRoi.toLocaleString("tr-TR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`),
+    metric("Kayıtlı kupon", records.length.toLocaleString("tr-TR")),
     metric("Tahminle eşleşen ayak sonucu", `${matchedLegDiagnostics.length} / ${legDiagnostics.length}`),
     metric("Model ilk 3 içinde · kupon isabeti", `${matchedLegDiagnostics.filter((item) => item.top3Hit).length} / ${matchedLegDiagnostics.length}`),
     metric("Altılı geçmiş testi · tamamlanan", `${sixLegEvaluation.evaluatedCoupons} / ${sixLegEvaluation.eligibleCoupons}`),
@@ -2160,8 +2073,8 @@ function renderCouponHistory() {
     const note = document.createElement("p");
     note.className = "sub";
     note.textContent = sixLegEvaluation.evaluatedCoupons
-      ? `${sixLegEvaluation.eligibleCoupons} uygun sistem kuponunun ${sixLegEvaluation.evaluatedCoupons} tanesinde altı kazananın tamamı girilmiş; ${sixLegEvaluation.incompleteCoupons} eksik kayıt oran hesabına katılmadı.${sixLegEvaluation.evaluatedCoupons < 30 ? " Örneklem küçük; oranlar yalnızca ilk gözlemdir, güvenilir performans iddiası için daha fazla tamamlanmış kupon gerekir." : " Sonuçlar yalnızca tamamlanmış geçmiş kayıtlara dayanır; gelecekteki başarıyı garanti etmez."}`
-      : `Henüz değerlendirilebilir sistem altılısı yok. Uygun kupon: ${sixLegEvaluation.eligibleCoupons}; bunların ${sixLegEvaluation.incompleteCoupons} tanesinde altı ayağın tamamının kazananı girilmemiş. Sonuçları kupon kaydında tamamladıkça rapor güncellenir.`;
+      ? `${sixLegEvaluation.eligibleCoupons} uygun sistem kuponunun ${sixLegEvaluation.evaluatedCoupons} tanesi sonuç bültenleriyle otomatik eşleşti; ${sixLegEvaluation.incompleteCoupons} eksik kayıt oran hesabına katılmadı.${sixLegEvaluation.evaluatedCoupons < 30 ? " Örneklem küçük; oranlar yalnızca ilk gözlemdir, güvenilir performans iddiası için daha fazla tamamlanmış kupon gerekir." : " Sonuçlar yalnızca tamamlanmış geçmiş kayıtlara dayanır; gelecekteki başarıyı garanti etmez."}`
+      : `Henüz değerlendirilebilir sistem altılısı yok. Uygun kupon: ${sixLegEvaluation.eligibleCoupons}; sonuç bülteni eşleştikçe rapor otomatik güncellenir.`;
     const budgetGroups = document.createElement("div");
     budgetGroups.className = "stats";
     for (const group of sixLegEvaluation.byBudget) {
@@ -2177,7 +2090,7 @@ function renderCouponHistory() {
     sixLegTarget.replaceChildren(note, budgetGroups);
   }
   if (!records.length) {
-    target.innerHTML = '<p class="muted">Henüz kupon kaydı yok. Analiz ettiğinizde öneriler ve 6/6 değerlendirme için otomatik olarak kaydedilir; oynanıp oynanmadığını buradan işaretleyebilirsiniz.</p>';
+    target.innerHTML = '<p class="muted">Henüz kupon kaydı yok. Analizler ve sonuç eşleşmeleri burada otomatik görünür.</p>';
     return;
   }
   target.innerHTML = records.map((record) => {
@@ -2185,12 +2098,9 @@ function renderCouponHistory() {
     const date = escapeHtml(record.date || "Tarih yok");
     const venue = record.city ? ` · ${escapeHtml(record.city)}` : "";
     const ticket = record.columns ? `${record.columns} kolon · ${money(record.cost)}` : `Maliyet ${money(record.cost)} · seçim dökümü yok`;
-  const paid = record.status === "suggested" ? "oynanmadı" : Number.isFinite(Number(record.payout)) && record.status !== "pending" ? money(record.payout) : "bekleniyor";
-  const netValue = Number(record.payout) - Number(record.cost);
-  const netText = ["won", "lost"].includes(record.status) && Number.isFinite(Number(record.payout)) ? `<p>Net: <span class="coupon-net${netValue < 0 ? " negative" : ""}">${money(netValue)}</span></p>` : "";
     const legs = Array.isArray(record.legs) && record.legs.length ? `<p>Seçimler: ${record.legs.map((leg) => `${leg.raceNo}. ayak #${leg.horses.map((horse) => horse.number).join(", #")}`).join(" · ")}</p>` : "";
     const legEvaluation = window.CouponResults.evaluateCouponLegs(record.legs, record.legResults);
-    const legSummary = legEvaluation.total ? `<p class="coupon-leg-summary">${legEvaluation.completed === legEvaluation.total ? `${legEvaluation.hits}/${legEvaluation.total} ayak tuttu` : `${legEvaluation.hits} isabet · ${legEvaluation.completed}/${legEvaluation.total} ayak sonucu girildi`}${legEvaluation.missedRaceNos.length ? ` · kaçan ayak: ${legEvaluation.missedRaceNos.join(", ")}` : ""}</p>` : "";
+    const legSummary = legEvaluation.total ? `<p class="coupon-leg-summary">${legEvaluation.completed === legEvaluation.total ? `${legEvaluation.hits}/${legEvaluation.total} ayak tuttu` : `${legEvaluation.hits} isabet · ${legEvaluation.completed}/${legEvaluation.total} ayak sonucu eşleşti`}${legEvaluation.missedRaceNos.length ? ` · kaçan ayak: ${legEvaluation.missedRaceNos.join(", ")}` : ""}</p>` : "";
     const legLearningReport = (record.legResults || []).map((result) => {
       const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
       const selected = record.legs?.find((leg) => Number(leg.raceNo) === Number(result.raceNo))?.horses?.map((horse) => horse.number) || [];
@@ -2199,10 +2109,8 @@ function renderCouponHistory() {
       const context = insight.matched ? ` · ${escapeHtml(insight.surface)} / ${escapeHtml(insight.type)}${insight.distance ? ` / ${insight.distance} m` : ""}` : "";
       return `<p class="coupon-leg-learning">${Number(result.raceNo)}. ayak · kazanan #${Number(result.winnerNumber)} · ${insight.winnerRank ? `model sırası #${insight.winnerRank}` : "sıra yok"} · ${categoryLabel}${context}</p>`;
     }).join("");
-    const existingLegResults = new Map((record.legResults || []).map((result) => [Number(result.raceNo), result.winnerNumber]));
-    const legResultEditor = legEvaluation.total ? `<fieldset class="leg-result-grid"><legend class="sr-only">Her ayaktaki gerçek kazanan at numarası</legend>${record.legs.map((leg) => `<label>${leg.raceNo}. ayak kazananı<input data-leg-result="${Number(leg.raceNo)}" type="number" min="1" step="1" value="${existingLegResults.get(Number(leg.raceNo)) ?? ""}" aria-label="${Number(leg.raceNo)}. ayak kazanan at numarası"></label>`).join("")}</fieldset>` : "";
-    const finished = Array.isArray(record.finishedNos) && record.finishedNos.length ? `<p>Sonucu alınmış ayaklar: ${record.finishedNos.join(", ")}. Kupon anlık olarak açık ayaklar üzerinden oluşturulmuş; önceki kuponun geriye dönük kopyası değildir.</p>` : "";
-    return `<article class="coupon-record" data-coupon-card="${escapeHtml(record.id)}"><h3>${pool} · ${date}${venue}</h3><p>${escapeHtml(record.source || "Kupon")} · ${ticket}</p>${legs}${legSummary}${legLearningReport}${legResultEditor}${finished}<p>Durum: ${escapeHtml(COUPON_STATUS_LABELS[record.status] || "Sonuç bekleniyor")} · Ödeme: ${paid}</p>${netText}<div class="controls"><label class="control"><small>Sonuç durumu</small><select data-coupon-status aria-label="${pool} ${date} sonuç durumu">${Object.entries(COUPON_STATUS_LABELS).map(([value, label]) => `<option value="${value}"${record.status === value ? " selected" : ""}>${label}</option>`).join("")}</select></label><label class="control"><small>Alınan ödeme (TL)</small><input data-coupon-payout type="number" min="0" step="0.01" value="${record.payout ?? ""}" placeholder="Sonuç bekleniyorsa boş bırakın" aria-label="${pool} ${date} alınan ödeme"></label><button class="btn secondary" type="button" data-update-coupon="${escapeHtml(record.id)}">Sonucu kaydet</button></div></article>`;
+
+    return `<article class="coupon-record"><h3>${pool} · ${date}${venue}</h3><p>${escapeHtml(record.source || "Kupon")} · ${ticket}</p>${legs}${legSummary}${legLearningReport}</article>`;
   }).join("");
 }
 function exportBackup() {
@@ -2455,9 +2363,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     $("resultsDateInput").value = selected.dataset.date;
     $("resultsCityInput").value = selected.dataset.city || "";
     saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
-    scheduleResultComparison();
   });
-  $("resultsReviewedCheck")?.addEventListener("change", scheduleResultComparison);
   $("loadArchivedResultsButton")?.addEventListener("click", loadArchivedResults);
   $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("analystSignalInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), analystNotes: $("analystSignalInput").value }));
@@ -2467,24 +2373,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("butceInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), budget: $("butceInput").value }));
   $("birimInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), unit: $("birimInput").value }));
   $("sonucluBultenInput")?.addEventListener("input", () => {
-    $("resultsReviewedCheck").checked = false;
-    saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
-    scheduleResultComparison();
+      saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
   });
-  $("sonucluBultenInput")?.addEventListener("paste", scheduleResultComparison);
   $("resultsDateInput")?.addEventListener("change", () => {
     saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
-    scheduleResultComparison();
   });
   $("resultsCityInput")?.addEventListener("input", () => {
     saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
-    scheduleResultComparison();
   });
   $("manualCouponForm")?.addEventListener("submit", addManualCoupon);
-  $("couponHistoryArea")?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-update-coupon]");
-    if (button) updateCouponResult(button.dataset.updateCoupon, button.closest("[data-coupon-card]"));
-  });
   $("analyzeButton")?.addEventListener("click", analyze);
   $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; saveBulletinDraft("program", { text: "", date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }); $("bultenUyariAlani").innerHTML = ""; });
   $("chooseAnalystImageButton")?.addEventListener("click", () => $("analystImageInput")?.click());

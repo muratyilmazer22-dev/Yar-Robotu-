@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluateCouponLegs } = require('./lib/coupon-results');
+const { evaluateCouponLegs, synchronizeCouponResults } = require('./lib/coupon-results');
 
 const legs = Array.from({ length: 6 }, (_, index) => ({ raceNo: index + 1, horses: [{ number: index + 1 }] }));
 
@@ -8,6 +8,23 @@ test('reports a five-of-six coupon and identifies the first missed leg', () => {
   const result = evaluateCouponLegs(legs, Array.from({ length: 6 }, (_, index) => ({ raceNo: index + 1, winnerNumber: index === 0 ? 9 : index + 1 })));
 
   assert.deepEqual(result, { completed: 6, total: 6, hits: 5, missedRaceNos: [1] });
+});
+
+test('matches saved coupon legs to parsed results and keeps earlier legs on partial updates', () => {
+  const coupon = {
+    legs,
+    legResults: [{ raceNo: 1, winnerNumber: 9 }]
+  };
+  const changed = synchronizeCouponResults(coupon, [
+    { no: 1, horses: [{ number: 1, place: 1 }] },
+    { no: 2, horses: [{ number: 2, place: 1 }] },
+    { no: 3, horses: [{ number: 0, place: 1 }] },
+    { no: 4, horses: [{ number: 4, place: 1 }, { number: 8, place: 1 }] }
+  ]);
+
+  assert.equal(changed, true);
+  assert.deepEqual(coupon.legResults, [{ raceNo: 1, winnerNumber: 1 }, { raceNo: 2, winnerNumber: 2 }]);
+  assert.equal(synchronizeCouponResults(coupon, [{ no: 2, horses: [{ number: 2, place: 1 }] }]), false);
 });
 
 test('does not count missing or invalid results as misses', () => {
