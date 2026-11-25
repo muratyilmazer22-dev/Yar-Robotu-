@@ -1860,7 +1860,7 @@ async function compareResults() {
     archivedSubmission = { ...archivedSubmission, matchingStatus: "awaiting_structured_result", matchingNote: "Metin arşivlendi; koşu ve sonuç satırları güvenilir biçimde ayrıştırılamadı." };
     state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
     const persistence = await persistCurrentMemory();
-    showMessage(target, `İçerik arşivlendi ancak koşu/at sonuçları güvenilir biçimde ayrıştırılamadı. Kayıt saklandı; öğrenme güncellenmedi. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
+    showMessage(target, `Sonuç hafızaya işlendi. Koşu ve at sıraları çözümlenemedi; karşılaştırma yapılmadı. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
     updateMemory();
     return;
   }
@@ -1882,8 +1882,8 @@ async function compareResults() {
     state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
     const persistence = await persistCurrentMemory();
     const resultsHelp = state.predictions.length
-      ? "İçerik arşivlendi ancak kazanan at adı/numarası kayıtlı tahminlerle eşleşmedi. Analiz hafızasının bulunduğu cihazda/hesapta olduğunuzu doğrulayın veya Eşleşme belirsizse bölümünden doğru analizi seçin."
-      : "İçerik arşivlendi ancak bu cihazda kayıtlı tahmin bulunamadı. Analizin yapıldığı hesapla giriş yapın veya yedeği yükleyin.";
+      ? "Sonuç hafızaya işlendi; tahminlerle eşleşen tarih bulunamadı. Eşleşme belirsizse doğru analizi elle seçin."
+      : "Sonuç hafızaya işlendi; bu cihazda kayıtlı tahmin bulunamadı. Tahminlerin olduğu hesapla giriş yapın veya yedeği yükleyin.";
     showMessage(target, `${resultsHelp} ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
     updateMemory();
     return;
@@ -2012,21 +2012,46 @@ async function compareResults() {
     }).filter(Boolean);
     return new Set(leaders).size <= 1;
   }).length;
-  const outcomeDetails = `<section class="card"><h3>Kısa olay yeri incelemesi</h3><p class="sub">${outcomes.length} kayıtlı tahmin sürümü · ${stableRaceCount}/${evaluatedRaceCount} değerlendirilen koşuda lider değişmedi · sürüm bazında lider isabeti ${leadersCorrect}/${outcomes.length} · ilk üç isabeti ${topThreeCorrect}/${outcomes.length}.</p>${auditRaces}</section>`;
-  showMessage(target, `${saved ? "Sonuç bülteni otomatik karşılaştırıldı ve öğrenme hafızasına kaydedildi." : "Karşılaştırma yapıldı ancak tüm hafıza kayıtları doğrulanamadı."} ${resultPersistenceNote(persistence)} ${merged.added} yeni tahmin sonucu · ${merged.corrected} düzeltilen sonuç · ${duplicates} yinelenen · ${racesWithoutWinner + racesWithoutPrediction} atlanan koşu. ${winnerMismatchNote} ${learningStatus}`, saved ? "success" : "error");
+  const outcomeDetails = `<details class="result-comparison-details"><summary>Koşu ayrıntılarını göster · ${evaluatedRaceCount} koşu</summary><section class="card"><h3>Karşılaştırma raporu</h3><p class="sub">${outcomes.length} tahmin sürümü · ${stableRaceCount}/${evaluatedRaceCount} koşuda model lideri sabit · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length}.</p><p class="sub">${merged.added} yeni · ${merged.corrected} düzeltilen · ${duplicates} yinelenen · ${racesWithoutWinner + racesWithoutPrediction} atlanan tahmin sonucu. ${escapeHtml(winnerMismatchNote)} ${escapeHtml(learningStatus)}</p>${auditRaces}</section></details>`;
+  const summaryText = saved
+    ? `Sonuç hafızaya işlendi. ${evaluatedRaceCount} koşu karşılaştırıldı · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length} tahmin sürümünde isabet etti. Bu cihazda kaydedildi.`
+    : `Karşılaştırma tamamlandı ancak hafıza kaydı doğrulanamadı. ${resultPersistenceNote(persistence)}`;
+  showMessage(target, summaryText, saved ? "success" : "error");
   target.insertAdjacentHTML("beforeend", outcomeDetails);
   renderTrainingReport();
   updateMemory();
-  target.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 async function handleCompareResults() {
   if (resultComparisonInProgress) return;
   resultComparisonInProgress = true;
+  const button = $("learnButton");
+  const target = $("ogrenmeLogAlani");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Karşılaştırılıyor…";
+  }
+  target?.setAttribute("aria-busy", "true");
+  showMessage(target, "Sonuç hafızaya alınıyor ve kayıtlı tahminlerle karşılaştırılıyor…");
   try {
     await compareResults();
-  } catch {
-    showMessage($("ogrenmeLogAlani"), "Sonuçlar işlenirken beklenmeyen bir hata oluştu. Girdi alanlarını kontrol edip yeniden deneyin; kayıtlı hafıza korunuyor.", "error");
+  } catch (error) {
+    console.log("[v0] Result comparison failed:", error);
+    let persistence = { saved: false };
+    try {
+      persistence = await persistCurrentMemory();
+    } catch (saveError) {
+      console.log("[v0] Result memory save failed:", saveError);
+    }
+    const message = persistence.saved
+      ? "Sonuç hafızaya işlendi. Otomatik karşılaştırma tamamlanamadı; girdiyi kontrol edip yeniden deneyin."
+      : "Karşılaştırma tamamlanamadı ve hafıza kaydı doğrulanamadı. Girdiyi kontrol edip tekrar deneyin.";
+    showMessage(target, message, "error");
   } finally {
+    target?.removeAttribute("aria-busy");
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Hafızaya al ve otomatik karşılaştır";
+    }
     resultComparisonInProgress = false;
   }
 }
