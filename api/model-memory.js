@@ -1,6 +1,7 @@
-const { eq, sql } = require('drizzle-orm');
+const { desc, eq, sql } = require('drizzle-orm');
 const { db } = require('../lib/db');
-const { raceHistory, robotMemory } = require('../lib/db/schema');
+const { raceHistory, robotMemory, modelTrainingRuns } = require('../lib/db/schema');
+const { MODEL_KEY, MODEL_VERSION } = require('../lib/model-version');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -17,16 +18,25 @@ module.exports = async function handler(req, res) {
       firstDate: sql`min(${raceHistory.raceDate})`,
       lastDate: sql`max(${raceHistory.raceDate})`
     }).from(raceHistory);
-    const [automaticModel] = await db.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, 'automatic-learning-model')).limit(1);
+    const [automaticModel] = await db.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, MODEL_KEY)).limit(1);
+    const recentTrainingRuns = await db.select({
+      id: modelTrainingRuns.id,
+      modelVersion: modelTrainingRuns.modelVersion,
+      trainedAt: modelTrainingRuns.trainedAt,
+      sampleCounts: modelTrainingRuns.sampleCounts,
+      metrics: modelTrainingRuns.metrics,
+      accepted: modelTrainingRuns.accepted
+    }).from(modelTrainingRuns).where(eq(modelTrainingRuns.modelVersion, MODEL_VERSION)).orderBy(desc(modelTrainingRuns.trainedAt)).limit(5);
     const value = {
-      version: 1,
+      version: 2,
       source: 'official-tjk-archive',
-      model: automaticModel?.memoryValue?.model || 'deterministic-analysis-v4-contextual',
+      model: automaticModel?.memoryValue?.model || MODEL_VERSION,
       raceCount: Number(archive.raceCount || 0),
       completedRaceCount: Number(archive.completedRaceCount || 0),
       firstDate: archive.firstDate || null,
       lastDate: archive.lastDate || null,
       automaticModel: automaticModel?.memoryValue || null,
+      recentTrainingRuns,
       refreshedAt: new Date().toISOString()
     };
 

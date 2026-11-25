@@ -1,6 +1,7 @@
 const { and, eq, gte, lte } = require('drizzle-orm');
 const { db } = require('../lib/db');
 const { raceHistory, robotMemory } = require('../lib/db/schema');
+const { MODEL_KEY, MODEL_VERSION } = require('../lib/model-version');
 const { analyzeRace, normalizeName, BASE_WEIGHTS, softmaxScores } = require('../scoring');
 const classHistory = require('../class-history');
 const raceContext = require('../lib/race-context');
@@ -38,12 +39,13 @@ module.exports = async function handler(req, res) {
     const rows = await db.select().from(raceHistory)
       .where(and(gte(raceHistory.raceDate, from), lte(raceHistory.raceDate, to)))
       .orderBy(raceHistory.raceDate, raceHistory.city, raceHistory.raceNo);
-    const [storedAutomaticModel] = await db.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, 'automatic-learning-model')).limit(1);
+    const [storedAutomaticModel] = await db.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, MODEL_KEY)).limit(1);
     const automaticModel = storedAutomaticModel?.memoryValue || null;
     const acceptedValidation = automaticModel?.lastAcceptedValidation || null;
     const automaticWeights = automaticModel?.weights;
     const hasValidatedAutomaticModel = Boolean(
-      acceptedValidation?.from
+      automaticModel?.model === MODEL_VERSION
+      && acceptedValidation?.from
       && automaticWeights
       && Object.keys(BASE_WEIGHTS).every((key) => Number.isFinite(Number(automaticWeights[key])))
     );

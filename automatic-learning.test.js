@@ -1,9 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { BASE_WEIGHTS, TRAINING_WINDOW_DAYS, trainingCutoff, dateInTurkey, fitModel, raceToTrainingExample } = require('./lib/automatic-learning');
+const { MODEL_KEY, MODEL_VERSION, BASE_WEIGHTS, TRAINING_WINDOW_DAYS, trainingCutoff, dateInTurkey, fitModel, raceToTrainingExample } = require('./lib/automatic-learning');
 const { createIndex } = require('./lib/race-context');
 const classHistory = require('./class-history');
 const pedigreeHistory = require('./lib/pedigree-history');
+
+test('model storage key is version-specific and cannot read the legacy shared key', () => {
+  assert.equal(MODEL_KEY, `automatic-learning-model:${MODEL_VERSION}`);
+  assert.notEqual(MODEL_KEY, 'automatic-learning-model');
+});
 
 test('model training window uses the latest 365 days without deleting older archive rows', () => {
   assert.equal(TRAINING_WINDOW_DAYS, 365);

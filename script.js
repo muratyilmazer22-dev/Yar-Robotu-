@@ -344,9 +344,18 @@ async function restoreState() {
 let state = normalizeState(null);
 let stateDb = null;
 let sharedAutomaticModel = null;
+let latestModelTrainingRun = null;
+function modelRefreshRunText(run = latestModelTrainingRun) {
+  if (!run) return "zamanlanmış yenileme kaydı yok";
+  const status = run.metrics?.status;
+  const label = status === "completed" ? "tamamlandı" : status === "failed" ? "başarısız" : status === "running" ? "çalışıyor" : "eski kayıt";
+  const date = new Date(run.trainedAt);
+  const timestamp = Number.isNaN(date.getTime()) ? "zaman bilinmiyor" : date.toLocaleString("tr-TR");
+  return `${label} · ${timestamp}${run.metrics?.failureCode ? ` · ${run.metrics.failureCode}` : ""}`;
+}
 function sharedModelReportText() {
   const model = sharedAutomaticModel;
-  if (!model) return "Ortak otomatik model raporu henüz alınmadı.";
+  if (!model) return `Ortak otomatik model raporu henüz alınmadı. Son iş: ${modelRefreshRunText()}.`;
   const report = model.report || {};
   const validation = model.lastAcceptedValidation;
   const status = validation
@@ -356,7 +365,7 @@ function sharedModelReportText() {
     && typeof report.validationBrier === "number" && Number.isFinite(report.validationBrier)
     ? `Brier temel ${report.baselineBrier.toFixed(4)} / rapor ${report.validationBrier.toFixed(4)}`
     : "Brier doğrulaması henüz yok";
-  return `Ortak model: ${model.model || "model adı yok"} · ${status} · ${Number(model.trainedRaceCount || 0).toLocaleString("tr-TR")} eğitim verili koşu · ${Number(report.trainingRaces || 0)} eğitim / ${Number(report.validationRaces || 0)} doğrulama · ${scores} · ${Object.keys(model.contextWeights || {}).length} bağlam modeli · son yenileme ${model.refreshedAt || "bilinmiyor"}.`;
+  return `Ortak model: ${model.model || "model adı yok"} · ${status} · ${Number(model.trainedRaceCount || 0).toLocaleString("tr-TR")} eğitim verili koşu · ${Number(report.trainingRaces || 0)} eğitim / ${Number(report.validationRaces || 0)} doğrulama · ${scores} · ${Object.keys(model.contextWeights || {}).length} bağlam modeli · son model güncellemesi ${model.refreshedAt || "bilinmiyor"} · son zamanlanmış iş ${modelRefreshRunText()}.`;
 }
 let lastAnalysis = [];
 let lastCoupons = {};
@@ -1529,6 +1538,7 @@ async function refreshRemoteMemory() {
     const memory = await response.json();
     if (!response.ok) throw new Error(memory.error || "Neon hafızası alınamadı.");
   sharedAutomaticModel = memory.automaticModel && typeof memory.automaticModel === "object" ? memory.automaticModel : null;
+  latestModelTrainingRun = Array.isArray(memory.recentTrainingRuns) ? memory.recentTrainingRuns[0] || null : null;
   renderTrainingReport();
     const automated = sharedAutomaticModel;
   const automatedStatus = automated?.report?.updated
