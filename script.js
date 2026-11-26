@@ -1206,10 +1206,13 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
 }
 function buildCoupon(races, budget, unit) {
   const audit = window.BulletinQuality.auditCouponPool(races);
-  if (!audit.ok) return { error: audit.error };
-  const finishedNos = races.filter((race) => race.finished).map((race) => race.no);
-  const openLegs = races.filter((race) => !race.finished).map((race) => ({ race, ranked: window.RaceEkuri.selectionUnits(scoreRace(race)) }));
-  if (!openLegs.length) return { completedOnly: true, finishedNos };
+  if (!audit.ok) {
+    if (audit.code === "finished-race") {
+      return { incompleteStarted: true, races, finishedNos: audit.finishedNos };
+    }
+    return { error: audit.error };
+  }
+  const openLegs = races.map((race) => ({ race, ranked: window.RaceEkuri.selectionUnits(scoreRace(race)) }));
   if (openLegs.some(({ ranked }) => !ranked.length)) return { error: "Açık ayaklardan birinde koşabilir at bulunamadı." };
   if (!Number.isFinite(budget) || budget <= 0 || !Number.isFinite(unit) || unit <= 0) return { error: "Bütçe ve kolon fiyatı sıfırdan büyük olmalıdır." };
   const maxColumns = Math.floor(budget / unit);
@@ -1272,10 +1275,22 @@ function buildCoupon(races, budget, unit) {
     pick.excludedHorses = pick.ranked.slice(pick.count).flatMap((unit) => unit.members || [unit]);
   }
   const forcedSingleCount = picks.filter((pick) => pick.budgetForcedSingle).length;
-  return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed), budgetForcedSingle: forcedSingleCount > 0, budgetForcedMultipleSingles: budgetForcedMultipleSingles && forcedSingleCount > 1, forcedSingleCount, finishedNos };
+  return { picks, columns, total: Math.round(columns * unit * 100) / 100, budget, maxColumns, budgetNarrowed: picks.some((pick) => pick.budgetNarrowed), budgetForcedSingle: forcedSingleCount > 0, budgetForcedMultipleSingles: budgetForcedMultipleSingles && forcedSingleCount > 1, forcedSingleCount, finishedNos: [] };
 }
 function formatCoupon(coupon, poolTitle) {
   if (coupon.error) return `<article class="card coupon-detail"><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">${escapeHtml(coupon.error)}</p></article>`;
+  if (coupon.incompleteStarted) {
+    const legs = coupon.races.map((race) => {
+      const winner = race.finished ? race.horses.find((horse) => Number(horse.rank) === 1) : null;
+      const winnerNumber = Number(winner?.horseNumber ?? winner?.no);
+      const status = race.finished
+        ? `Koşuldu${winner && Number.isSafeInteger(winnerNumber) && winnerNumber > 0 ? ` · sonuç #${winnerNumber} ${escapeHtml(winner.name)}` : " · sonuç mevcut"}`
+        : "Açık · tahmin aşağıdaki koşu analizinde";
+      return `<li class="coupon-leg"><strong>${race.no}. Koşu</strong><div class="coupon-horses"><span class="coupon-horse">${status}</span></div></li>`;
+    }).join("");
+    const finishedLabel = coupon.finishedNos.map((number) => `${number}. koşu`).join(", ");
+    return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)} · kupon oluşturulmadı</h3><p class="coupon-intro">${escapeHtml(finishedLabel)} tamamlandığı için bu altılı eksik kalıyor. Altı açık ayak olmadan sistem kuponu veya tutar hesaplanmaz.</p></header><ol class="coupon-legs">${legs}</ol></article>`;
+  }
   if (coupon.completedOnly) return `<article class="card coupon-detail"><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Koşular tamamlandı; kupon oluşturulmadı.</p></article>`;
 
   const warning = coupon.budgetForcedMultipleSingles
@@ -2165,7 +2180,7 @@ function createCouponId() {
 }
 function saveGeneratedCoupon(poolKey, runId) {
   const coupon = lastCoupons[poolKey];
-  if (!coupon || coupon.error || coupon.completedOnly || !runId) return false;
+  if (!coupon || coupon.error || coupon.completedOnly || coupon.incompleteStarted || !runId) return false;
   if (state.coupons.some((record) => record.analysisRunId === runId && record.poolType === poolKey)) return false;
   const date = $("couponDateInput")?.value || lastAnalysis[0]?.date || new Date().toISOString().slice(0, 10);
   const city = $("couponCityInput")?.value.trim().slice(0, 80) || "";
