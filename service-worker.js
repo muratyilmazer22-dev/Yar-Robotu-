@@ -1,4 +1,4 @@
-const CACHE_NAME = "race-analysis-shell-v24";
+const CACHE_NAME = "race-analysis-shell-v25";
 const APP_FILES = ["./", "./index.html", "./script.js", "./firebase-memory-loader.js", "./parser.js", "./scoring.js", "./class-history.js", "./lib/pedigree-history.js", "./lib/race-context.js", "./lib/race-relations.js", "./lib/coupon-optimizer.js", "./lib/ekuri.js", "./lib/tip-signals.js", "./lib/bulletin-quality.js", "./lib/coupon-results.js", "./lib/coupon-learning.js", "./lib/learning-evaluation.js", "./lib/recovery.js", "./lib/result-evidence.js", "./manifest.webmanifest", "./horse-icon-192.png", "./horse-icon-512.png"];
 
 self.addEventListener("install", (event) => {
