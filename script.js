@@ -408,6 +408,7 @@ let firebaseSyncReady = false;
   let bulletinSaveTimer = null;
   let firebaseSyncChain = Promise.resolve();
 const $ = (id) => document.getElementById(id);
+document.querySelector(".shell")?.setAttribute("inert", "");
 const recoveryDiagnostics = [];
 function recordRecoveryDiagnostic(type, detail = {}) {
   recoveryDiagnostics.push({ type, path: detail.path || null, attempts: detail.attempts || 0, status: detail.status || null, at: new Date().toISOString() });
@@ -1382,6 +1383,8 @@ async function runAnalysis() {
     return;
   }
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
+  $("systemCompareDate").value = couponDate;
+  if (couponCity) $("systemCompareCity").value = couponCity;
   const externalSignals = window.TipSignals.parseAnalystSignals($("analystSignalInput")?.value || "");
   parsed.races.forEach((race) => { race.externalSignals = externalSignals[race.no] || null; });
   scoreCache = new WeakMap();
@@ -2551,6 +2554,8 @@ function renderSystemComparison() {
   if (!legsTarget || !scoreboard || !dateInput || !cityInput) return;
   const date = dateInput.value;
   const city = cityInput.value.trim();
+  const title = $("systemComparisonTitle");
+  if (title) title.textContent = `${city || "Hipodrom"} · ilk altılı sistem karşılaştırması`;
   const record = state.shadowComparisons.find((item) => item.date === date && normalize(item.city || "") === normalize(city));
   let mainHits = 0;
   let shadowHits = 0;
@@ -2656,7 +2661,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     memoryPanel.classList.remove("panel", "panel-details");
     learningContent.prepend(memoryPanel);
   }
-  state = await restoreState();
+  let restoreFailed = false;
+  try {
+    state = await restoreState();
+  } catch {
+    state = loadLegacyState();
+    restoreFailed = true;
+  }
   initializeMemoryNotes();
   initializeShadowSignalControls();
   window.addEventListener("beforeinstallprompt", (event) => {
@@ -2712,7 +2723,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("loadArchivedResultsButton")?.addEventListener("click", loadArchivedResults);
   $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("analystSignalInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), analystNotes: $("analystSignalInput").value }));
-  $("hamBultenInput")?.addEventListener("paste", () => window.setTimeout(() => analyze(), 0));
   $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("couponCityInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("butceInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), budget: $("butceInput").value }));
@@ -2831,6 +2841,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   compactResultsTools();
   updateMemory();
   renderTrainingReport();
+  $("appStatus").textContent = restoreFailed ? "● Yerel yedek kullanılıyor" : "● Hazır";
+  if (restoreFailed) $("appStatus").title = "Ana hafıza yüklenemedi; tarayıcı yedeğiyle devam ediliyor.";
+  document.querySelector(".shell")?.removeAttribute("inert");
   if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js").catch(() => {});
   loadArchiveSummary();
   refreshRemoteMemory();
