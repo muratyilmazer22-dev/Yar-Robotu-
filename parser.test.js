@@ -162,19 +162,19 @@ test('does not use a horse number as a finish position when result rank is absen
   assert.deepEqual(race.horses.map((horse) => horse.rank), [0, 0]);
 });
 
-test('reads parenthesized finishing positions when the horse number has its own column', () => {
-  const results = [
-    '3. Koşu 15:30 Maiden',
-    'N\tAt İsmi',
-    '9\tBY NALÇAKAN (1)',
-    '3\tDJUMBO (2)'
+test('does not mistake parenthesized program numbers for finishing positions', () => {
+  const program = [
+    '1. Koşu 15:00 Şartlı 2 1400 Kum',
+    'N\tAt İsmi\tYaş\tOrijin\tSıklet\tJokey\tSt\tHP\tSon 6 Y.\tKGS\ts20\tEn İyi D.\tGny\tAGF',
+    '1\tKÜÇÜK HASO (1) KG DB SK\t3y k e\tAKARÇAY - HANIMZEYNO / HABERBATUR\t56\tE.AKPINAR\t1\t38\t655008\t8\t13\t1.50.56\t3,30\t%4',
+    '3\tBAŞ YARGIÇ (2) K DB GKR\t3y a e\tGÜMBÜRGÜMBÜR - ŞIPSEVDİ / HABERBATUR\t57\tH.ŞİMŞEK\t4\t27\t073453\t7\t17\t1.39.20\t1,35\t%20'
   ].join('\n');
 
-  const [race] = parseRaces(results);
+  const [race] = parseRaces(program);
 
   assert.deepEqual(race.horses.map((horse) => [horse.horseNumber, horse.name, horse.rank]), [
-    [9, 'BY NALÇAKAN', 1],
-    [3, 'DJUMBO', 2]
+    [1, 'KÜÇÜK HASO', 0],
+    [3, 'BAŞ YARGIÇ', 0]
   ]);
 });
 

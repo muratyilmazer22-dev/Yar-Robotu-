@@ -101,7 +101,7 @@
         const shortRankIndex = headers.indexOf('s');
         const hasResultTimeColumn = headers.some((header) => ['derece', 'time', 'zaman', 'finish time'].includes(header));
         const rankIndex = explicitRankIndex >= 0 ? explicitRankIndex : hasResultTimeColumn ? shortRankIndex : -1;
-        assumedRank = rankIndex >= 0 ? parseNumber(cells[rankIndex]) : numberIndex >= 0 && horseMatch ? Number(horseMatch[1]) : null;
+        assumedRank = rankIndex >= 0 ? parseNumber(cells[rankIndex]) : null;
         const origin = column('orijin');
         const pedigree = parseOrigin(origin);
         const weightText = column('siklet');
