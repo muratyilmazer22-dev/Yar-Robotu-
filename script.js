@@ -305,7 +305,7 @@ let raceContextArchive = new Map();
 let pedigreeHistoryArchive = new Map();
 const MEMORY_NOTE_CATEGORIES = Object.freeze({ analysis: "At analizi / NotebookLM", gallop: "Galop / sprint", pedigree: "Soy kütüğü / orijin", race: "Koşu / hipodrom notu", general: "Genel not" });
 const MAX_MEMORY_NOTE_CHARACTERS = 50000;
-const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], bulletins: [], memoryNotes: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
+const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], shadowComparisons: [], bulletins: [], memoryNotes: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
 const DEFAULT_PROFILES = {
   DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
   NATIVEKHAN: [2, 4, 8, 2, 0], LUXOR: [6, 6, 4, 0, 0], KANEKO: [4, 8, 6, 0, 0],
@@ -329,7 +329,8 @@ function normalizeState(saved) {
     profiles: { ...DEFAULT_PROFILES },
     predictions: Array.isArray(saved?.predictions) ? saved.predictions : [],
     outcomes: Array.isArray(saved?.outcomes) ? saved.outcomes : [],
-  coupons: Array.isArray(saved?.coupons) ? saved.coupons : [],
+    coupons: Array.isArray(saved?.coupons) ? saved.coupons : [],
+    shadowComparisons: Array.isArray(saved?.shadowComparisons) ? saved.shadowComparisons : [],
     bulletins: Array.isArray(saved?.bulletins) ? saved.bulletins : [],
     memoryNotes: Array.isArray(saved?.memoryNotes) ? saved.memoryNotes : [],
     modelWeights,
@@ -1456,6 +1457,7 @@ async function runAnalysis() {
     warning.append(note);
   }
   setTab("analiz");
+  renderSystemComparison();
 }
 function softmaxScores(horses, weights) {
   return window.RaceScoring.softmaxScores(horses, weights);
@@ -2493,6 +2495,124 @@ function updateMemory() {
   $("historyArea").innerHTML = n ? `<table class="table"><thead><tr><th>Hipodrom / koşu</th><th>Kazanan</th><th>İlk üç</th><th>Lider</th><th>Tarih</th></tr></thead><tbody>${state.outcomes.slice(-30).reverse().map((item) => `<tr><td>${escapeHtml(item.city || "Manuel")} · ${item.raceNo}</td><td>#${item.winner} ${escapeHtml(item.winnerName)}</td><td>${item.top3Hit ? "Evet" : "Hayır"}</td><td>${item.top1Hit ? "Evet" : "Hayır"}</td><td>${new Date(item.at).toLocaleDateString("tr-TR")}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Karşılaştırma geçmişi henüz yok.</p>`;
   renderMemoryNotes();
   renderCouponHistory();
+  renderSystemComparison();
+}
+
+function comparisonPrediction(date, city, raceNo) {
+  const predictions = [...state.predictions, ...lastAnalysis].filter((item) => item.date === date && Number(item.no) === raceNo);
+  const exact = predictions.filter((item) => normalize(item.city || "") === normalize(city));
+  const candidates = exact.length ? exact : predictions.filter((item) => !normalize(item.city || ""));
+  return candidates.sort((a, b) => String(b.predictionCreatedAt || "").localeCompare(String(a.predictionCreatedAt || "")))[0] || null;
+}
+function comparisonMainPicks(date, city, raceNo) {
+  const coupons = state.coupons
+    .filter((item) => item.date === date && item.poolType === "first" && Array.isArray(item.legs))
+    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  const coupon = coupons.find((item) => normalize(item.city || "") === normalize(city)) || coupons.find((item) => !normalize(item.city || ""));
+  const couponLeg = coupon?.legs.find((leg) => Number(leg.raceNo) === raceNo);
+  if (couponLeg?.horses?.length) return { horses: couponLeg.horses, source: coupon.city ? "kaydedilmiş ilk altılı kuponu" : "kupon · hipodrom kaydı yok" };
+  const prediction = comparisonPrediction(date, city, raceNo);
+  if (!prediction?.horses?.length) return { horses: [], source: "ana tahmin henüz yok" };
+  return { horses: prediction.horses.slice(0, 3), source: prediction.city ? "model sıralaması · ilk üç" : "model sıralaması · hipodrom kaydı yok" };
+}
+function comparisonWinner(date, city, raceNo) {
+  return state.outcomes
+    .filter((item) => Number(item.raceNo) === raceNo && normalize(item.city || "") === normalize(city) && String(item.at || "").slice(0, 10) === date && Number.isSafeInteger(Number(item.winner)))
+    .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")))[0] || null;
+}
+function renderSystemComparison() {
+  const legsTarget = $("systemCompareLegs");
+  const scoreboard = $("systemCompareScoreboard");
+  const dateInput = $("systemCompareDate");
+  const cityInput = $("systemCompareCity");
+  if (!legsTarget || !scoreboard || !dateInput || !cityInput) return;
+  const date = dateInput.value;
+  const city = cityInput.value.trim();
+  const record = state.shadowComparisons.find((item) => item.date === date && normalize(item.city || "") === normalize(city));
+  let mainHits = 0;
+  let shadowHits = 0;
+  let comparedRaces = 0;
+  legsTarget.innerHTML = Array.from({ length: 6 }, (_, index) => {
+    const raceNo = index + 1;
+    const main = comparisonMainPicks(date, city, raceNo);
+    const mainNumbers = main.horses.map((horse) => Number(horse.number)).filter((number) => Number.isSafeInteger(number) && number > 0);
+    const officialWinner = comparisonWinner(date, city, raceNo);
+    const manuallyEnteredWinner = Number(record?.winners?.[raceNo]);
+    const winner = manuallyEnteredWinner > 0
+      ? { winner: manuallyEnteredWinner, winnerName: "", source: "manual" }
+      : officialWinner;
+    const shadowNumbers = record?.shadowPicks?.[raceNo] || [];
+    if (winner && mainNumbers.length && shadowNumbers.length) {
+      comparedRaces += 1;
+      if (mainNumbers.includes(Number(winner.winner))) mainHits += 1;
+      if (shadowNumbers.includes(Number(winner.winner))) shadowHits += 1;
+    }
+    const mainLabel = mainNumbers.length ? `Ana sistem: #${mainNumbers.join(", #")} · ${main.source}` : `Ana sistem: ${main.source}`;
+    const resultLabel = winner ? `Kazanan: #${Number(winner.winner)}${winner.winnerName ? ` ${escapeHtml(winner.winnerName)}` : winner.source === "manual" ? " · elle girildi" : ""}` : "Kazanan henüz girilmedi";
+    const scoreLabel = winner && mainNumbers.length && shadowNumbers.length
+      ? `Ana ${mainNumbers.includes(Number(winner.winner)) ? "isabet" : "kaçırdı"} · Gölge ${shadowNumbers.includes(Number(winner.winner)) ? "isabet" : "kaçırdı"}`
+      : "";
+    const winnerInputValue = manuallyEnteredWinner > 0 ? manuallyEnteredWinner : officialWinner?.winner || "";
+    return `<div class="system-comparison-leg"><div><strong>${raceNo}. Koşu</strong><small>${mainLabel}</small><small>${resultLabel}</small>${scoreLabel ? `<small>${scoreLabel}</small>` : ""}</div><label for="shadowPick${raceNo}">Gölge at numaraları<input id="shadowPick${raceNo}" inputmode="numeric" autocomplete="off" placeholder="Örn. 2, 5, 8" value="${(shadowNumbers || []).join(", ")}" aria-describedby="systemComparisonTitle"></label><label for="winnerPick${raceNo}">Kazanan at no.<input id="winnerPick${raceNo}" type="number" min="1" max="99" step="1" inputmode="numeric" autocomplete="off" placeholder="Sonuç sonrası" value="${winnerInputValue}" aria-label="${raceNo}. koşu kazanan at numarası"></label></div>`;
+  }).join("");
+  if (!date || !city) {
+    scoreboard.innerHTML = '<p class="sub">Tarih ve hipodrom girerek karşılaştırmayı başlatın.</p>';
+    return;
+  }
+  if (comparedRaces) {
+    const leader = mainHits === shadowHits ? "Berabere" : mainHits > shadowHits ? "Ana sistem önde" : "Gölge sistem önde";
+    scoreboard.innerHTML = `<div class="system-comparison-result"><strong>${leader}</strong><div class="system-comparison-row"><span>Ana sistem</span><strong>${mainHits}/${comparedRaces} yarış</strong></div><div class="system-comparison-row"><span>Gölge sistem</span><strong>${shadowHits}/${comparedRaces} yarış</strong></div><small class="muted">Yalnızca iki sistemde de seçim bulunan ve kazananı işlenmiş yarışlar sayılır.</small></div>`;
+  } else {
+    scoreboard.innerHTML = `<p class="sub">${record ? "Seçimler kaydedildi. " : "Önce gölge seçimlerini kaydedin. "}Yarıştan sonra kazanan at numarasını girip kaydedin; işlenmiş sonuç bültenleri de otomatik eşleştirilir.</p>`;
+  }
+}
+function saveShadowComparison() {
+  const date = $("systemCompareDate")?.value || "";
+  const city = $("systemCompareCity")?.value.trim() || "";
+  const status = $("systemCompareStatus");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !city) {
+    status.textContent = "Geçerli bir tarih ve hipodrom girin.";
+    status.classList.add("error");
+    return;
+  }
+  const shadowPicks = {};
+  const winners = {};
+  for (let raceNo = 1; raceNo <= 6; raceNo += 1) {
+    const raw = $(`shadowPick${raceNo}`)?.value.trim() || "";
+    if (!raw || !/^\d+(?:[\s,;]+\d+)*$/.test(raw)) {
+      status.textContent = `${raceNo}. koşu için at numaralarını virgülle ayırarak girin.`;
+      status.classList.add("error");
+      return;
+    }
+    const numbers = [...new Set(raw.split(/[\s,;]+/).map(Number))];
+    if (numbers.some((number) => !Number.isSafeInteger(number) || number < 1 || number > 99)) {
+      status.textContent = `${raceNo}. koşudaki at numaralarını kontrol edin.`;
+      status.classList.add("error");
+      return;
+    }
+    const prediction = comparisonPrediction(date, city, raceNo);
+    const available = new Set((prediction?.horses || []).map((horse) => Number(horse.number)));
+    if (available.size && numbers.some((number) => !available.has(number))) {
+      status.textContent = `${raceNo}. koşudaki numaralardan biri kayıtlı bültende bulunmuyor.`;
+      status.classList.add("error");
+      return;
+    }
+    const winnerRaw = $(`winnerPick${raceNo}`)?.value.trim() || "";
+    if (winnerRaw && !/^[1-9]\d?$/.test(winnerRaw)) {
+      status.textContent = `${raceNo}. koşunun kazanan at numarası 1–99 arasında olmalı.`;
+      status.classList.add("error");
+      return;
+    }
+    shadowPicks[raceNo] = numbers;
+    if (winnerRaw) winners[raceNo] = Number(winnerRaw);
+  }
+  const next = { id: `${date}:${normalize(city)}`, date, city: city.slice(0, 80), shadowPicks, winners, savedAt: new Date().toISOString() };
+  state.shadowComparisons = [next, ...state.shadowComparisons.filter((item) => item.id !== next.id)].slice(0, 200);
+  saveState().then((saved) => {
+    status.textContent = saved ? "Gölge seçimleri ve girilen kazananlar bu cihazda kaydedildi." : "Seçimler kaydedilemedi; tarayıcı hafızasını kontrol edin.";
+    status.classList.toggle("error", !saved);
+    renderSystemComparison();
+  });
 }
 
 function resetHistory() {
@@ -2504,6 +2624,7 @@ function resetHistory() {
   saveState();
   $("ogrenmeLogAlani").innerHTML = "";
   showMessage($("ogrenmeLogAlani"), "Öğrenme geçmişi varsayılanlara döndürüldü.", "success");
+  renderSystemComparison();
 }
 document.addEventListener("DOMContentLoaded", async () => {
   const memoryPanel = $("panel-hafiza");
@@ -2532,6 +2653,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("couponDateInput").value = todayLocal;
   $("resultsDateInput").value = todayLocal;
   $("manualCouponDate").value = todayLocal;
+  $("systemCompareDate").value = todayLocal;
+  const latestShadowComparison = [...state.shadowComparisons].sort((a, b) => String(b.savedAt || "").localeCompare(String(a.savedAt || "")))[0];
+  if (latestShadowComparison) {
+    $("systemCompareDate").value = latestShadowComparison.date || todayLocal;
+    $("systemCompareCity").value = latestShadowComparison.city || "İzmir";
+  }
   const savedProgramDraft = state.bulletins.find((item) => item.id === "draft-program");
   const savedResultDraft = state.bulletins.find((item) => item.id === "draft-result");
   if (savedProgramDraft) {
@@ -2577,6 +2704,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
   });
   $("manualCouponForm")?.addEventListener("submit", addManualCoupon);
+  $("saveShadowPredictionButton")?.addEventListener("click", saveShadowComparison);
+  $("systemCompareDate")?.addEventListener("change", renderSystemComparison);
+  $("systemCompareCity")?.addEventListener("change", renderSystemComparison);
   $("analyzeButton")?.addEventListener("click", analyze);
   $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; saveBulletinDraft("program", { text: "", date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }); $("bultenUyariAlani").innerHTML = ""; });
   $("chooseAnalystImageButton")?.addEventListener("click", () => $("analystImageInput")?.click());
