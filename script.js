@@ -2439,10 +2439,12 @@ function initializeMemoryNotes() {
     event.target.value = "";
     if (file) handleMemoryFile(file);
   });
-  $("saveMemoryNoteButton")?.addEventListener("click", async () => {
+  $("saveMemoryNoteButton")?.addEventListener("click", async (event) => {
     const input = $("memoryNoteInput");
     const status = $("memoryNoteStatus");
+    const button = event.currentTarget;
     const content = input?.value.trim() || "";
+    status.classList.remove("error", "success");
     if (!content) {
       status.textContent = "Kaydetmeden önce bir not girin veya dosyadan aktarın.";
       status.classList.add("error");
@@ -2452,18 +2454,33 @@ function initializeMemoryNotes() {
     const category = Object.hasOwn(MEMORY_NOTE_CATEGORIES, categoryValue) ? categoryValue : "general";
     const note = { id: window.crypto?.randomUUID?.() || `note-${Date.now()}-${Math.random().toString(36).slice(2)}`, category, content, createdAt: new Date().toISOString() };
     const previousNotes = state.memoryNotes || [];
+    button.disabled = true;
+    button.textContent = "Hafızaya kaydediliyor…";
+    status.textContent = "Not hafızaya kaydediliyor…";
     state.memoryNotes = [...previousNotes, note];
-    const saved = await saveState();
-    status.classList.toggle("error", !saved);
-    if (!saved) {
+    try {
+      const saved = await saveState();
+      if (!saved) {
+        state.memoryNotes = previousNotes;
+        updateMemory();
+        status.textContent = "Not kaydedilemedi; metin taslakta korundu. Yeniden deneyin.";
+        status.classList.add("error");
+        return;
+      }
+      input.value = "";
+      updateMemoryNoteCharacterCount();
+      const categoryLabel = MEMORY_NOTE_CATEGORIES[category] || MEMORY_NOTE_CATEGORIES.general;
+      status.textContent = `Kaydedildi — sistem öğrendi. ${categoryLabel} notu hafıza bankasına eklendi; tahmin puanları otomatik değiştirilmedi.`;
+      status.classList.add("success");
+    } catch (error) {
       state.memoryNotes = previousNotes;
       updateMemory();
-      status.textContent = "Not yerel hafızaya yazılamadı; metin taslakta korundu.";
-      return;
+      status.textContent = "Not kaydedilemedi; metin taslakta korundu. Yeniden deneyin.";
+      status.classList.add("error");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Hafızaya kaydet";
     }
-    input.value = "";
-    updateMemoryNoteCharacterCount();
-    status.textContent = "Not bu cihazın hafızasına kaydedildi.";
   });
   $("memoryNotesList")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-memory-action]");
