@@ -828,9 +828,7 @@ function restoreStoredAnalysis() {
   renderAnalysis(parsed.races);
 
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
-  const poolStarts = sortedRaces.length ? [sortedRaces[0].no] : [];
-  const secondPoolStart = sortedRaces.length ? sortedRaces[sortedRaces.length - 1].no - 5 : 0;
-  if (secondPoolStart > poolStarts[0]) poolStarts.push(secondPoolStart);
+  const poolStarts = window.CouponOptimizer.getPoolStarts(sortedRaces);
   const budget = parseNumber(source.budget || $("butceInput")?.value) || 80;
   const unit = parseNumber(source.unit || $("birimInput")?.value) || 1.25;
   lastCoupons = {};
@@ -1435,13 +1433,9 @@ async function runAnalysis() {
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
-  const firstRaceNo = sortedRaces[0].no;
-  const lastRaceNo = sortedRaces[sortedRaces.length - 1].no;
   const poolCards = [];
   let autoSavedCouponCount = 0;
-  const poolStarts = [firstRaceNo];
-  const secondPoolStart = lastRaceNo - 5;
-  if (secondPoolStart > firstRaceNo) poolStarts.push(secondPoolStart);
+  const poolStarts = window.CouponOptimizer.getPoolStarts(sortedRaces);
   lastCoupons = {};
   for (const [poolIndex, start] of poolStarts.entries()) {
     const end = start + 5;

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { getAllocationPriority, prioritizeCoverageCandidate, SURPRISE_COVERAGE_UTILITY_BONUS, optimizeCouponCounts } = require('./lib/coupon-optimizer');
+const { getAllocationPriority, prioritizeCoverageCandidate, SURPRISE_COVERAGE_UTILITY_BONUS, getPoolStarts, optimizeCouponCounts } = require('./lib/coupon-optimizer');
 
 function leg(shares, independentCoverage, singleEligible = true) {
   return {
@@ -11,6 +11,24 @@ function leg(shares, independentCoverage, singleEligible = true) {
     }))
   };
 }
+
+test('seven-race programs expose first altılı as 1–6 and second altılı as 2–7', () => {
+  const races = Array.from({ length: 7 }, (_, index) => ({ no: index + 1 }));
+
+  assert.deepEqual(getPoolStarts(races), [1, 2]);
+});
+
+test('second altılı always starts at the next race even when the program has more than seven races', () => {
+  const races = Array.from({ length: 8 }, (_, index) => ({ no: index + 1 }));
+
+  assert.deepEqual(getPoolStarts(races), [1, 2]);
+});
+
+test('a second altılı is not offered until six races are available from its start', () => {
+  const races = Array.from({ length: 6 }, (_, index) => ({ no: index + 1 }));
+
+  assert.deepEqual(getPoolStarts(races), [1]);
+});
 
 test('uncertain legs receive greater coverage priority', () => {
   const strong = leg([0.9, 0.1], 100);

@@ -1,4 +1,4 @@
-const CACHE_NAME = "race-analysis-shell-v21";
+const CACHE_NAME = "race-analysis-shell-v22";
 const APP_FILES = ["./", "./index.html", "./script.js", "./firebase-memory-loader.js", "./parser.js", "./scoring.js", "./class-history.js", "./lib/pedigree-history.js", "./lib/race-context.js", "./lib/race-relations.js", "./lib/bulletin-quality.js", "./lib/coupon-learning.js", "./lib/learning-evaluation.js", "./manifest.webmanifest", "./horse-icon-192.png", "./horse-icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -17,7 +17,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(fetch(request).catch(() => caches.match("./index.html")));
     return;
   }
-  if (["/script.js", "/parser.js", "/scoring.js", "/lib/bulletin-quality.js", "/lib/coupon-learning.js", "/lib/learning-evaluation.js"].includes(requestUrl.pathname)) {
+  if (["/script.js", "/parser.js", "/scoring.js", "/lib/bulletin-quality.js", "/lib/coupon-optimizer.js", "/lib/coupon-learning.js", "/lib/learning-evaluation.js"].includes(requestUrl.pathname)) {
     event.respondWith(fetch(request).then((response) => {
       if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
       return response;
