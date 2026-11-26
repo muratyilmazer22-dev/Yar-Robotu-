@@ -1381,8 +1381,6 @@ async function runAnalysis() {
     return;
   }
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
-  $("systemCompareDate").value = couponDate;
-  if (couponCity) $("systemCompareCity").value = couponCity;
   const externalSignals = window.TipSignals.parseAnalystSignals($("analystSignalInput")?.value || "");
   parsed.races.forEach((race) => { race.externalSignals = externalSignals[race.no] || null; });
   scoreCache = new WeakMap();
@@ -1420,6 +1418,7 @@ async function runAnalysis() {
   const shadowStatus = await saveShadowSignals(lastAnalysis);
   $("analysisEmptyState")?.remove();
   renderAnalysis(parsed.races);
+  renderSystemComparison();
   const completedCount = parsed.races.filter((race) => race.finished).length;
   const memoryStatus = !locallySaved
     ? "HATA: Analiz üretildi ancak tarayıcı hafızasına yazma doğrulanamadı; yedeği hemen indirin."
@@ -2540,101 +2539,73 @@ function comparisonWinner(date, city, raceNo) {
     .filter((item) => Number(item.raceNo) === raceNo && normalize(item.city || "") === normalize(city) && String(item.at || "").slice(0, 10) === date && Number.isSafeInteger(Number(item.winner)))
     .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")))[0] || null;
 }
+function latestComparisonContext() {
+  const predictions = [...state.predictions, ...lastAnalysis]
+    .filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(String(item.date || "")) && Array.isArray(item.horses) && item.horses.length)
+    .sort((a, b) => `${b.date}${b.predictionCreatedAt || ""}`.localeCompare(`${a.date}${a.predictionCreatedAt || ""}`));
+  const latest = predictions[0];
+  if (!latest) return null;
+  const matching = predictions.filter((item) => item.date === latest.date
+    && normalize(item.city || "") === normalize(latest.city || "")
+    && (!latest.runId || item.runId === latest.runId));
+  const latestByRace = new Map();
+  matching.forEach((item) => {
+    const raceNo = Number(item.no);
+    if (Number.isSafeInteger(raceNo) && raceNo > 0 && !latestByRace.has(raceNo)) latestByRace.set(raceNo, item);
+  });
+  return { date: latest.date, city: latest.city || "", races: [...latestByRace.values()].sort((a, b) => Number(a.no) - Number(b.no)) };
+}
+function comparisonExternalPicks(signals) {
+  const labels = { banko: "Banko", favorite: "Favori", place: "Plase", rival: "Rakip", surprise: "Sürpriz" };
+  const entries = Object.entries(signals || {}).filter(([, numbers]) => Array.isArray(numbers) && numbers.length);
+  const numbers = [...new Set(entries.flatMap(([, picks]) => picks.map(Number)))].filter((number) => Number.isSafeInteger(number) && number > 0);
+  const description = entries.map(([key, picks]) => `${labels[key] || key}: #${picks.join(", #")}`).join(" · ");
+  return { numbers, description };
+}
 function renderSystemComparison() {
   const legsTarget = $("systemCompareLegs");
   const scoreboard = $("systemCompareScoreboard");
-  const dateInput = $("systemCompareDate");
-  const cityInput = $("systemCompareCity");
-  if (!legsTarget || !scoreboard || !dateInput || !cityInput) return;
-  const date = dateInput.value;
-  const city = cityInput.value.trim();
+  if (!legsTarget || !scoreboard) return;
+  const context = latestComparisonContext();
   const title = $("systemComparisonTitle");
-  if (title) title.textContent = `${city || "Hipodrom"} · ilk altılı sistem karşılaştırması`;
-  const record = state.shadowComparisons.find((item) => item.date === date && normalize(item.city || "") === normalize(city));
+  if (!context) {
+    if (title) title.textContent = "Otomatik sonuç takibi";
+    legsTarget.innerHTML = '<p class="sub">Kayıtlı analiz bulunamadı. Bir analiz üretildiğinde seçimler burada otomatik izlenir.</p>';
+    scoreboard.replaceChildren();
+    return;
+  }
+  const { date, city, races } = context;
+  if (title) title.textContent = `${city || "Hipodrom"} · ${new Date(`${date}T00:00:00`).toLocaleDateString("tr-TR")} otomatik takip`;
   let mainHits = 0;
-  let shadowHits = 0;
-  let comparedRaces = 0;
-  legsTarget.innerHTML = Array.from({ length: 6 }, (_, index) => {
-    const raceNo = index + 1;
+  let mainCompared = 0;
+  let externalHits = 0;
+  let externalCompared = 0;
+  legsTarget.innerHTML = races.map((prediction) => {
+    const raceNo = Number(prediction.no);
     const main = comparisonMainPicks(date, city, raceNo);
     const mainNumbers = main.horses.map((horse) => Number(horse.number)).filter((number) => Number.isSafeInteger(number) && number > 0);
-    const officialWinner = comparisonWinner(date, city, raceNo);
-    const manuallyEnteredWinner = Number(record?.winners?.[raceNo]);
-    const winner = manuallyEnteredWinner > 0
-      ? { winner: manuallyEnteredWinner, winnerName: "", source: "manual" }
-      : officialWinner;
-    const shadowNumbers = record?.shadowPicks?.[raceNo] || [];
-    if (winner && mainNumbers.length && shadowNumbers.length) {
-      comparedRaces += 1;
+    const external = comparisonExternalPicks(prediction.externalSignals);
+    const winner = comparisonWinner(date, city, raceNo);
+    if (winner && mainNumbers.length) {
+      mainCompared += 1;
       if (mainNumbers.includes(Number(winner.winner))) mainHits += 1;
-      if (shadowNumbers.includes(Number(winner.winner))) shadowHits += 1;
+    }
+    if (winner && external.numbers.length) {
+      externalCompared += 1;
+      if (external.numbers.includes(Number(winner.winner))) externalHits += 1;
     }
     const mainLabel = mainNumbers.length ? `Ana sistem: #${mainNumbers.join(", #")} · ${main.source}` : `Ana sistem: ${main.source}`;
-    const resultLabel = winner ? `Kazanan: #${Number(winner.winner)}${winner.winnerName ? ` ${escapeHtml(winner.winnerName)}` : winner.source === "manual" ? " · elle girildi" : ""}` : "Kazanan henüz girilmedi";
-    const scoreLabel = winner && mainNumbers.length && shadowNumbers.length
-      ? `Ana ${mainNumbers.includes(Number(winner.winner)) ? "isabet" : "kaçırdı"} · Gölge ${shadowNumbers.includes(Number(winner.winner)) ? "isabet" : "kaçırdı"}`
-      : "";
-    const winnerInputValue = manuallyEnteredWinner > 0 ? manuallyEnteredWinner : officialWinner?.winner || "";
-    return `<div class="system-comparison-leg"><div><strong>${raceNo}. Koşu</strong><small>${mainLabel}</small><small>${resultLabel}</small>${scoreLabel ? `<small>${scoreLabel}</small>` : ""}</div><label for="shadowPick${raceNo}">Gölge at numaraları<input id="shadowPick${raceNo}" inputmode="numeric" autocomplete="off" placeholder="Örn. 2, 5, 8" value="${(shadowNumbers || []).join(", ")}" aria-describedby="systemComparisonTitle"></label><label for="winnerPick${raceNo}">Kazanan at no.<input id="winnerPick${raceNo}" type="number" min="1" max="99" step="1" inputmode="numeric" autocomplete="off" placeholder="Sonuç sonrası" value="${winnerInputValue}" aria-label="${raceNo}. koşu kazanan at numarası"></label></div>`;
+    const externalLabel = external.description ? `Dış sinyal: ${external.description}` : "Dış sinyal: bu analizde kayıtlı değil";
+    const resultLabel = winner ? `Kazanan: #${Number(winner.winner)}${winner.winnerName ? ` ${escapeHtml(winner.winnerName)}` : ""}` : "Resmî sonuç bekleniyor";
+    const mainStatus = winner && mainNumbers.length ? `Ana sistem ${mainNumbers.includes(Number(winner.winner)) ? "isabet etti" : "kaçırdı"}` : "Ana sistem sonucu bekliyor";
+    const externalStatus = winner && external.numbers.length ? `Dış sinyal ${external.numbers.includes(Number(winner.winner)) ? "isabet etti" : "kaçırdı"}` : "";
+    return `<div class="system-comparison-leg"><strong>${raceNo}. Koşu</strong><small>${mainLabel}</small><small>${externalLabel}</small><small>${resultLabel}</small><small>${mainStatus}${externalStatus ? ` · ${externalStatus}` : ""}</small></div>`;
   }).join("");
-  if (!date || !city) {
-    scoreboard.innerHTML = '<p class="sub">Tarih ve hipodrom girerek karşılaştırmayı başlatın.</p>';
-    return;
-  }
-  if (comparedRaces) {
-    const leader = mainHits === shadowHits ? "Berabere" : mainHits > shadowHits ? "Ana sistem önde" : "Gölge sistem önde";
-    scoreboard.innerHTML = `<div class="system-comparison-result"><strong>${leader}</strong><div class="system-comparison-row"><span>Ana sistem</span><strong>${mainHits}/${comparedRaces} yarış</strong></div><div class="system-comparison-row"><span>Gölge sistem</span><strong>${shadowHits}/${comparedRaces} yarış</strong></div><small class="muted">Yalnızca iki sistemde de seçim bulunan ve kazananı işlenmiş yarışlar sayılır.</small></div>`;
-  } else {
-    scoreboard.innerHTML = `<p class="sub">${record ? "Seçimler kaydedildi. " : "Önce gölge seçimlerini kaydedin. "}Yarıştan sonra kazanan at numarasını girip kaydedin; işlenmiş sonuç bültenleri de otomatik eşleştirilir.</p>`;
-  }
-}
-function saveShadowComparison() {
-  const date = $("systemCompareDate")?.value || "";
-  const city = $("systemCompareCity")?.value.trim() || "";
-  const status = $("systemCompareStatus");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !city) {
-    status.textContent = "Geçerli bir tarih ve hipodrom girin.";
-    status.classList.add("error");
-    return;
-  }
-  const shadowPicks = {};
-  const winners = {};
-  for (let raceNo = 1; raceNo <= 6; raceNo += 1) {
-    const raw = $(`shadowPick${raceNo}`)?.value.trim() || "";
-    if (!raw || !/^\d+(?:[\s,;]+\d+)*$/.test(raw)) {
-      status.textContent = `${raceNo}. koşu için at numaralarını virgülle ayırarak girin.`;
-      status.classList.add("error");
-      return;
-    }
-    const numbers = [...new Set(raw.split(/[\s,;]+/).map(Number))];
-    if (numbers.some((number) => !Number.isSafeInteger(number) || number < 1 || number > 99)) {
-      status.textContent = `${raceNo}. koşudaki at numaralarını kontrol edin.`;
-      status.classList.add("error");
-      return;
-    }
-    const prediction = comparisonPrediction(date, city, raceNo);
-    const available = new Set((prediction?.horses || []).map((horse) => Number(horse.number)));
-    if (available.size && numbers.some((number) => !available.has(number))) {
-      status.textContent = `${raceNo}. koşudaki numaralardan biri kayıtlı bültende bulunmuyor.`;
-      status.classList.add("error");
-      return;
-    }
-    const winnerRaw = $(`winnerPick${raceNo}`)?.value.trim() || "";
-    if (winnerRaw && !/^[1-9]\d?$/.test(winnerRaw)) {
-      status.textContent = `${raceNo}. koşunun kazanan at numarası 1–99 arasında olmalı.`;
-      status.classList.add("error");
-      return;
-    }
-    shadowPicks[raceNo] = numbers;
-    if (winnerRaw) winners[raceNo] = Number(winnerRaw);
-  }
-  const next = { id: `${date}:${normalize(city)}`, date, city: city.slice(0, 80), shadowPicks, winners, savedAt: new Date().toISOString() };
-  state.shadowComparisons = [next, ...state.shadowComparisons.filter((item) => item.id !== next.id)].slice(0, 200);
-  saveState().then((saved) => {
-    status.textContent = saved ? "Gölge seçimleri ve girilen kazananlar bu cihazda kaydedildi." : "Seçimler kaydedilemedi; tarayıcı hafızasını kontrol edin.";
-    status.classList.toggle("error", !saved);
-    renderSystemComparison();
-  });
+  const pending = races.filter((prediction) => !comparisonWinner(date, city, Number(prediction.no))).length;
+  const externalSummary = externalCompared
+    ? `<div class="system-comparison-row"><span>Dış sinyal</span><strong>${externalHits}/${externalCompared} isabet</strong></div>`
+    : "";
+  scoreboard.innerHTML = `<div class="system-comparison-status"><div class="system-comparison-row"><span>Ana sistem</span><strong>${mainHits}/${mainCompared} isabet</strong></div>${externalSummary}<small>${pending ? `${pending} koşu sonuç bekliyor.` : "Eşleşen tüm koşuların sonucu işlendi."} Kayıtlı sonuçlar geldikçe bu takip otomatik yenilenir.</small></div>`;
 }
 
 function resetHistory() {
@@ -2681,12 +2652,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("couponDateInput").value = todayLocal;
   $("resultsDateInput").value = todayLocal;
   $("manualCouponDate").value = todayLocal;
-  $("systemCompareDate").value = todayLocal;
-  const latestShadowComparison = [...state.shadowComparisons].sort((a, b) => String(b.savedAt || "").localeCompare(String(a.savedAt || "")))[0];
-  if (latestShadowComparison) {
-    $("systemCompareDate").value = latestShadowComparison.date || todayLocal;
-    $("systemCompareCity").value = latestShadowComparison.city || "İzmir";
-  }
   const savedProgramDraft = state.bulletins.find((item) => item.id === "draft-program");
   const savedResultDraft = state.bulletins.find((item) => item.id === "draft-result");
   if (savedProgramDraft) {
@@ -2731,9 +2696,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
   });
   $("manualCouponForm")?.addEventListener("submit", addManualCoupon);
-  $("saveShadowPredictionButton")?.addEventListener("click", saveShadowComparison);
-  $("systemCompareDate")?.addEventListener("change", renderSystemComparison);
-  $("systemCompareCity")?.addEventListener("change", renderSystemComparison);
   $("analyzeButton")?.addEventListener("click", analyze);
   $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; saveBulletinDraft("program", { text: "", date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }); $("bultenUyariAlani").innerHTML = ""; });
   $("chooseAnalystImageButton")?.addEventListener("click", () => $("analystImageInput")?.click());
