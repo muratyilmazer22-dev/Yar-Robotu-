@@ -81,6 +81,40 @@
     return { score, rawScore, coverage: coverage * 100, availableWeight, referenceWeight };
   }
 
+  function weightedFeatureScoreGradient(features, weights, marketAgreement = null) {
+    const referenceWeight = Object.values(weights || {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
+    const marketFactor = Number.isFinite(marketAgreement) ? Math.max(0.15, marketAgreement / 100) : 1;
+    const available = Object.entries(features || {}).filter(([key, value]) => {
+      const weight = Number(weights?.[key]);
+      const effectiveWeight = weight * (key === 'market' ? marketFactor : 1);
+      return Number.isFinite(value) && Number.isFinite(effectiveWeight) && effectiveWeight > 0;
+    }).map(([key, value]) => ({
+      key,
+      value,
+      factor: key === 'market' ? marketFactor : 1,
+      effectiveWeight: Number(weights[key]) * (key === 'market' ? marketFactor : 1)
+    }));
+    const availableWeight = available.reduce((sum, item) => sum + item.effectiveWeight, 0);
+    if (!availableWeight || !referenceWeight) return Object.fromEntries(Object.keys(weights || {}).map((key) => [key, 0]));
+
+    const rawScore = available.reduce((sum, item) => sum + item.value * item.effectiveWeight, 0) / availableWeight;
+    const coverage = Math.min(1, availableWeight / referenceWeight);
+    if (!(coverage > 0)) return Object.fromEntries(Object.keys(weights || {}).map((key) => [key, 0]));
+
+    const present = new Map(available.map((item) => [item.key, item]));
+    return Object.fromEntries(Object.keys(weights || {}).map((key) => {
+      const item = present.get(key);
+      const effectiveFactor = item?.factor || 0;
+      const rawDerivative = item ? effectiveFactor * (item.value - rawScore) / availableWeight : 0;
+      const coverageDerivative = coverage < 1 && referenceWeight > 0
+        ? (effectiveFactor * referenceWeight - availableWeight) / (referenceWeight * referenceWeight)
+        : 0;
+      const scoreDerivative = Math.sqrt(coverage) * rawDerivative
+        + (rawScore - 50) * coverageDerivative / (2 * Math.sqrt(coverage));
+      return [key, Number.isFinite(scoreDerivative) ? scoreDerivative : 0];
+    }));
+  }
+
   function softmaxScores(horses, weights) {
     const scores = horses.map((horse) => weightedFeatureScore(horse.features, weights, weights, horse.marketAgreement).score);
     const logits = scores.map((score) => score / 12.5);
@@ -202,5 +236,5 @@
     return scoreRaceWithWeights(race, weights, options.profileScore);
   }
 
-  return { DEFAULT_DNA, BASE_WEIGHTS, normalizeName, distanceBand, raceContextKeys, weightedFeatureScore, softmaxScores, analyzeRace };
+  return { DEFAULT_DNA, BASE_WEIGHTS, normalizeName, distanceBand, raceContextKeys, weightedFeatureScore, weightedFeatureScoreGradient, softmaxScores, analyzeRace };
 });
