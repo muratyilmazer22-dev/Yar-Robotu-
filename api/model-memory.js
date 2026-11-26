@@ -29,7 +29,7 @@ module.exports = async function handler(req, res) {
     }).from(modelTrainingRuns).where(eq(modelTrainingRuns.modelVersion, MODEL_VERSION)).orderBy(desc(modelTrainingRuns.trainedAt)).limit(5);
     const value = {
       version: 2,
-      source: 'official-tjk-archive',
+      source: 'official-tjk-archive+verified-shadow-signals',
       model: automaticModel?.memoryValue?.model || MODEL_VERSION,
       raceCount: Number(archive.raceCount || 0),
       completedRaceCount: Number(archive.completedRaceCount || 0),

@@ -870,6 +870,8 @@ function saveBulletinDraft(kind, details = {}) {
     budget: String(details.budget ?? existing.budget ?? $("butceInput")?.value ?? ""),
     unit: String(details.unit ?? existing.unit ?? $("birimInput")?.value ?? ""),
     analystNotes: String(details.analystNotes ?? existing.analystNotes ?? $("analystSignalInput")?.value ?? ""),
+    sourcePublishedAt: String(details.sourcePublishedAt ?? existing.sourcePublishedAt ?? $("analystSourcePublishedAt")?.value ?? ""),
+    publishedBeforeRace: Boolean(details.publishedBeforeRace ?? existing.publishedBeforeRace ?? $("analystPublishedBeforeRace")?.checked ?? false),
     updatedAt: new Date().toISOString(),
     ...(details.image ? { image: imageForMemory(details.image) } : existing.image ? { image: imageForMemory(existing.image) } : {})
   };
@@ -901,6 +903,97 @@ function archiveBulletin(kind, details = {}) {
   clearTimeout(bulletinSaveTimer);
   saveState();
   return record;
+}
+function initializeShadowSignalControls() {
+  const notes = $("analystSignalInput");
+  if (!notes || $("shadowSignalControls")) return;
+  const section = document.createElement("section");
+  section.id = "shadowSignalControls";
+  section.className = "shadow-signal-controls";
+  const intro = document.createElement("p");
+  intro.className = "sub";
+  intro.textContent = "Yorumlar koşu bazında gölge sinyali olarak kaydedilir. Resmî sonuçla tarih, hipodrom ve koşu numarası tam eşleşmeden öğrenmeye katılmaz.";
+  const timeLabel = document.createElement("label");
+  timeLabel.className = "field-label";
+  timeLabel.htmlFor = "analystSourcePublishedAt";
+  timeLabel.textContent = "Kaynak yorumun yayın zamanı";
+  const time = document.createElement("input");
+  time.id = "analystSourcePublishedAt";
+  time.type = "datetime-local";
+  time.autocomplete = "off";
+  time.setAttribute("aria-describedby", "shadowSignalHelp");
+  const attestLabel = document.createElement("label");
+  attestLabel.className = "shadow-signal-attestation";
+  const attest = document.createElement("input");
+  attest.id = "analystPublishedBeforeRace";
+  attest.type = "checkbox";
+  const attestText = document.createElement("span");
+  attestText.textContent = "Kaynağın yarış gününden önce yayımlandığını ve tarih/hipodrom/koşu eşleşmesini kontrol ettim.";
+  attestLabel.append(attest, attestText);
+  const help = document.createElement("p");
+  help.id = "shadowSignalHelp";
+  help.className = "hint";
+  help.textContent = "Yarış gününden önceki gerçek yayın zamanını girip onaylamadıkça veri eğitim dışında bekler. Görselin kendisi değil, kontrol ettiğiniz koşu sinyalleri kaydedilir.";
+  const status = document.createElement("p");
+  status.id = "shadowSignalStatus";
+  status.className = "sub";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  section.append(intro, timeLabel, time, attestLabel, help, status);
+  notes.insertAdjacentElement("afterend", section);
+  const updateDraft = () => saveBulletinDraft("program", {
+    text: $("hamBultenInput")?.value || "",
+    date: $("couponDateInput")?.value || "",
+    city: $("couponCityInput")?.value.trim() || "",
+    analystNotes: notes.value,
+    sourcePublishedAt: time.value,
+    publishedBeforeRace: attest.checked
+  });
+  time.addEventListener("change", updateDraft);
+  attest.addEventListener("change", updateDraft);
+}
+async function saveShadowSignals(predictions) {
+  const status = $("shadowSignalStatus");
+  const sourceTimeValue = $("analystSourcePublishedAt")?.value || "";
+  const parsedSourceTime = sourceTimeValue ? new Date(sourceTimeValue) : null;
+  const sourcePublishedAt = parsedSourceTime && Number.isFinite(parsedSourceTime.getTime()) ? parsedSourceTime.toISOString() : null;
+  const records = (Array.isArray(predictions) ? predictions : []).flatMap((prediction) => {
+    const signals = prediction.externalSignals;
+    if (!signals || !Object.keys(signals).length) return [];
+    return [{
+      raceDate: prediction.date,
+      city: prediction.city,
+      raceNo: prediction.no,
+      signals,
+      sourcePublishedAt,
+      publishedBeforeRace: $("analystPublishedBeforeRace")?.checked === true
+    }];
+  });
+  if (!records.length) return "";
+  try {
+    const firebase = await window.RaceRobotFirebaseReady;
+    const token = await firebase?.getIdToken?.();
+    if (!token) {
+      if (status) status.textContent = "Sinyaller bu cihazdaki tahmin hafızasında; bulut hafızası için giriş yapın.";
+      return "Sinyaller bu cihazdaki tahmin hafızasında kaldı; buluta eşitlenmedi.";
+    }
+    const response = await fetch("/api/shadow-signals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ records })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Gölge sinyalleri eşitlenemedi.");
+    const note = payload.pending
+      ? `${payload.saved} koşu sinyali bulut hafızasına kaydedildi; yarış gününden önce yayımlandığı doğrulanmayan ${payload.pending} kayıt öğrenmeye alınmadı.`
+      : `${payload.saved} koşu sinyali bulut hafızasına kaydedildi; resmî sonuç ve ileri tarih doğrulamasından sonra öğrenmeye katılacak.`;
+    if (status) status.textContent = note;
+    return note;
+  } catch (error) {
+    const note = error instanceof Error ? error.message : "Gölge sinyalleri eşitlenemedi.";
+    if (status) status.textContent = `${note} Bu cihazdaki tahminler korunuyor.`;
+    return "Gölge sinyalleri buluta kaydedilemedi; bu cihazdaki kayıtlar korundu.";
+  }
 }
 function showMessage(target, text, type = "") {
   target.setAttribute("role", type === "error" ? "alert" : "status");
@@ -1293,6 +1386,7 @@ async function runAnalysis() {
   saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: couponDate, city: couponCity });
   clearTimeout(bulletinSaveTimer);
   const locallySaved = await saveState();
+  const shadowStatus = await saveShadowSignals(lastAnalysis);
   $("analysisEmptyState")?.remove();
   renderAnalysis(parsed.races);
   const completedCount = parsed.races.filter((race) => race.finished).length;
@@ -1304,7 +1398,7 @@ async function runAnalysis() {
     : `${completedCount} koşunun tamamı koşulmuş; tahmin üretilmedi. ${memoryStatus}`;
   const persistenceFailed = !locallySaved;
   const dataHandlingMessage = "Eksik bilgiler tahmin edilmedi; seyrek veya birbiriyle uyuşmayan sinyallerin etkisi otomatik azaltıldı.";
-  showMessage(warning, `${statusMessage} ${dataHandlingMessage}`, persistenceFailed ? "error" : "success");
+  showMessage(warning, `${statusMessage} ${dataHandlingMessage}${shadowStatus ? ` ${shadowStatus}` : ""}`, persistenceFailed ? "error" : "success");
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
@@ -1577,7 +1671,9 @@ async function refreshRemoteMemory() {
         ? " · geçmiş arşivden aday model doğrulamayı geçemedi (kişisel model etkilenmedi)"
         : " · ortak arşiv modeli yenilenmedi; yeni manuel sonuçlar kişisel modeli besler";
     const learnedContexts = Object.keys(automated?.contextWeights || {}).length;
-    target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu arşiv koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Öğrenme hedefi: tüm mevcut yarış sinyallerinde ve hipodrom/zemin/tür/mesafe kesişimlerinde daha iyi ileri-tarih tahminleri bulmak; yalnızca doğrulama kazanan değişiklikleri etkinleştirmek. ${learnedContexts} doğrulanmış bağlam modeli ortak hafızada. Bu geçmiş arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi hesabınızla giriş yaptıysanız otomatik eşitlenir, aksi halde bu cihazda kalır.`;
+  const shadow = automated?.shadowSignalSummary || {};
+  const shadowStatus = `${Number(shadow.saved || 0)} onaylı gölge sinyali · ${Number(shadow.matchedCompleteRaces || 0)} eksiksiz resmî koşuyla eşleşti`;
+  target.textContent = `Kalıcı Neon hafızası: ${Number(memory.completedRaceCount || 0).toLocaleString("tr-TR")} sonuçlu arşiv koşusu · ${memory.firstDate || "—"} – ${memory.lastDate || "—"}${automatedStatus}. Gölge sinyalleri: ${shadowStatus}. Yalnızca tam yarış eşleşmesi ve ileri tarih doğrulamasını geçen veriler model ağırlıklarına etki eder. Öğrenme hedefi: mevcut yarış sinyalleriyle daha iyi ileri-tarih tahminleri bulmak; yalnızca doğrulama kazanan değişiklikleri etkinleştirmek. ${learnedContexts} doğrulanmış bağlam modeli ortak hafızada. Bu geçmiş arşiv ve doğrulanmış model tüm kurulumlarda ortak kullanılır; kişisel analiz geçmişi giriş yaptıysanız eşitlenir, aksi halde bu cihazda kalır.`;
     return memory;
   } catch {
     target.textContent = "Neon kalıcı hafızasına şu an ulaşılamıyor; bu cihazdaki kayıtlar korunuyor.";
@@ -2403,6 +2499,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   state = await restoreState();
   initializeMemoryNotes();
+  initializeShadowSignalControls();
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;
@@ -2429,6 +2526,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (savedProgramDraft.budget) $("butceInput").value = savedProgramDraft.budget;
     if (savedProgramDraft.unit) $("birimInput").value = savedProgramDraft.unit;
     $("analystSignalInput").value = savedProgramDraft.analystNotes || "";
+    $("analystSourcePublishedAt").value = savedProgramDraft.sourcePublishedAt || "";
+    $("analystPublishedBeforeRace").checked = savedProgramDraft.publishedBeforeRace === true;
   }
   if (savedResultDraft) {
     $("sonucluBultenInput").value = savedResultDraft.text || "";
