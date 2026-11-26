@@ -621,6 +621,7 @@ function saveState() {
   singleEvidenceCache = null;
   state.localUpdatedAt = new Date().toISOString();
   const localSave = persistStateLocally();
+  if (firebaseAccount && firebaseSyncReady) queueFirebaseMemorySync();
   updateMemory();
   return localSave;
 }
@@ -1950,11 +1951,31 @@ function inferResultPredictionContext(races) {
 }
 async function persistCurrentMemory() {
   const localSaved = await saveState();
-  return { localSaved, saved: localSaved };
+  const cloudEnabled = Boolean(firebaseAccount && firebaseSyncReady);
+  const cloudSaved = localSaved && cloudEnabled ? await queueFirebaseMemorySync(true) : null;
+  return { localSaved, cloudEnabled, cloudSaved, saved: localSaved && (!cloudEnabled || cloudSaved === true) };
 }
 function resultPersistenceNote(persistence) {
   if (!persistence.localSaved) return "Tarayıcı hafızasına yazılamadı; yedeği indirip saklayın.";
-  return "Bu cihazda kaydedildi; başka cihaza aktarmak için yedeği indirip orada geri yükleyin.";
+  if (persistence.cloudEnabled && !persistence.cloudSaved) return "Cihaz kaydı korundu ancak hesap eşitlemesi tamamlanamadı; bağlantı düzelince yeniden kaydedin.";
+  return persistence.cloudSaved ? "Cihaza ve hesabınıza kaydedildi." : "Bu cihazda kaydedildi; başka cihazlarla eşitlemek için e-posta bağlantısıyla giriş yapın.";
+}
+async function saveResultForCorrection(submission, message, matchingStatus = "awaiting_structured_result") {
+  const preserved = { ...submission, matchingStatus, matchingNote: message };
+  const draft = {
+    id: "draft-result",
+    kind: "result",
+    status: "draft",
+    text: $("sonucluBultenInput")?.value || "",
+    date: $("resultsDateInput")?.value || "",
+    city: $("resultsCityInput")?.value.trim() || "",
+    updatedAt: new Date().toISOString(),
+    ...(storedResultImage ? { image: imageForMemory(storedResultImage) } : {})
+  };
+  state.bulletins = [...state.bulletins.filter((item) => item.id !== submission.id && item.id !== draft.id), preserved, draft];
+  const persistence = await persistCurrentMemory();
+  showMessage($("ogrenmeLogAlani"), `${message} Sonuç metni ve düzeltme taslağı hafızaya alındı; geçerli bir sonuç tablosu olmadan karşılaştırma yapılmadı. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
+  updateMemory();
 }
 async function compareResults() {
   const target = $("ogrenmeLogAlani");
@@ -1987,35 +2008,40 @@ async function compareResults() {
   state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
   const parsed = parseRaces(resultText);
   if (!parsed.races.length) {
-    archivedSubmission = { ...archivedSubmission, matchingStatus: "awaiting_structured_result", matchingNote: "Metin arşivlendi; koşu ve sonuç satırları güvenilir biçimde ayrıştırılamadı." };
-    state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
-    const persistence = await persistCurrentMemory();
-    showMessage(target, `Sonuç hafızaya işlendi. Koşu ve at sıraları çözümlenemedi; karşılaştırma yapılmadı. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
-    updateMemory();
+    await saveResultForCorrection(archivedSubmission, "Koşu ve sonuç satırları metinden güvenilir biçimde ayrıştırılamadı. Sonuçları tablo biçiminde düzenleyip yeniden deneyin.");
     return;
   }
-  if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) { showMessage(target, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu kaldırıp yeniden deneyin.", "error"); return; }
+  if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) {
+    await saveResultForCorrection(archivedSubmission, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu düzeltip yeniden deneyin.");
+    return;
+  }
   const invalidRace = parsed.races.find((race) => {
     const numbers = race.horses.map((horse) => Number(horse.number));
     return numbers.some((number) => !Number.isSafeInteger(number) || number < 1)
       || new Set(numbers).size !== numbers.length
       || race.horses.some((horse) => horse.place !== null && (!Number.isSafeInteger(horse.place) || horse.place < 1));
   });
-  if (invalidRace) { showMessage(target, `${invalidRace.no}. koşuda at numarası yineleniyor veya sıra bilgisi geçersiz. Sonuç tablosunu düzeltip yeniden deneyin.`, "error"); return; }
+  if (invalidRace) {
+    const numbers = invalidRace.horses.map((horse) => Number(horse.number));
+    const duplicates = numbers.filter((number, index) => numbers.indexOf(number) !== index && Number.isSafeInteger(number) && number > 0);
+    const invalidPlaces = invalidRace.horses.filter((horse) => horse.place !== null && (!Number.isSafeInteger(horse.place) || horse.place < 1));
+    const details = [
+      duplicates.length ? `yinelenen at numarası: ${[...new Set(duplicates)].join(", ")}` : "",
+      invalidPlaces.length ? `geçersiz sıra: ${invalidPlaces.map((horse) => `${horse.name || `#${horse.number}`} (${horse.place})`).join(", ")}` : ""
+    ].filter(Boolean).join("; ");
+    await saveResultForCorrection(archivedSubmission, `${invalidRace.no}. koşu geçersiz görünüyor${details ? ` — ${details}` : ""}. Sonuç tablosunu düzeltip yeniden deneyin.`);
+    return;
+  }
   const inferredContext = inferResultPredictionContext(parsed.races);
   const selectedContext = $("resultsContextInput")?.selectedOptions[0];
   const manuallySelected = Boolean(selectedContext?.dataset.date && $("resultsContextInput").closest("details")?.open);
   const resultDate = manuallySelected ? selectedContext.dataset.date : inferredContext?.date || "";
   const resultCity = manuallySelected ? normalize(selectedContext.dataset.city) : normalize(inferredContext?.city || "");
   if (!resultDate) {
-    archivedSubmission = { ...archivedSubmission, matchingStatus: "awaiting_match", matchingNote: "Sonuç metni arşivlendi; tahminlerle eşleşen tarih ve hipodrom henüz doğrulanamadı." };
-    state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
-    const persistence = await persistCurrentMemory();
     const resultsHelp = state.predictions.length
       ? "Sonuç hafızaya işlendi; tahminlerle eşleşen tarih bulunamadı. Eşleşme belirsizse doğru analizi elle seçin."
-      : "Sonuç hafızaya işlendi; bu cihazda kayıtlı tahmin bulunamadı. Tahminlerin olduğu hesapla giriş yapın veya yedeği yükleyin.";
-    showMessage(target, `${resultsHelp} ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
-    updateMemory();
+      : "Sonuç hafızaya işlendi; kayıtlı tahmin bulunamadı. Tahminlerin olduğu hesapla giriş yapın veya yedeği yükleyin.";
+    await saveResultForCorrection(archivedSubmission, resultsHelp, "awaiting_match");
     return;
   }
   $("resultsDateInput").value = resultDate;
@@ -2026,10 +2052,7 @@ async function compareResults() {
   await saveState();
   const matchingPredictions = state.predictions.filter((item) => item.date === resultDate && normalize(item.city || "") === resultCity);
   if (!matchingPredictions.length) {
-    const persistence = await persistCurrentMemory();
-    const note = resultPersistenceNote(persistence);
-    showMessage(target, `Sonuç arşivlendi ancak seçilen analiz için kayıtlı tahmin bulunamadı. Öğrenme güncellenmedi. ${note}`, persistence.saved ? "" : "error");
-    updateMemory();
+    await saveResultForCorrection(archivedSubmission, "Sonuç arşivlendi ancak seçilen analiz için kayıtlı tahmin bulunamadı. Öğrenme güncellenmedi; doğru analizi seçip yeniden deneyin.", "awaiting_prediction_match");
     return;
   }
   for (const coupon of state.coupons) {
@@ -2103,6 +2126,12 @@ async function compareResults() {
   if (merged.added || merged.corrected) trainModel();
   const persistence = await persistCurrentMemory();
   const saved = persistence.saved;
+  if (saved) {
+    const previousBulletins = state.bulletins;
+    state.bulletins = state.bulletins.filter((item) => item.id !== "draft-result");
+    if (await saveState()) $("sonucluBultenInput").value = "";
+    else state.bulletins = previousBulletins;
+  }
   const duplicates = outcomes.length - merged.added - merged.corrected;
   const winnerMismatchNote = racesWithWinnerMismatch ? `${racesWithWinnerMismatch} koşu kazanan at kimliği uyuşmadığı için dışarıda bırakıldı.` : "";
   const report = state.trainingReport || {};
@@ -2144,8 +2173,8 @@ async function compareResults() {
   }).length;
   const outcomeDetails = `<details class="result-comparison-details"><summary>Koşu ayrıntılarını göster · ${evaluatedRaceCount} koşu</summary><section class="card"><h3>Karşılaştırma raporu</h3><p class="sub">${outcomes.length} tahmin sürümü · ${stableRaceCount}/${evaluatedRaceCount} koşuda model lideri sabit · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length}.</p><p class="sub">${merged.added} yeni · ${merged.corrected} düzeltilen · ${duplicates} yinelenen · ${racesWithoutWinner + racesWithoutPrediction} atlanan tahmin sonucu. ${escapeHtml(winnerMismatchNote)} ${escapeHtml(learningStatus)}</p>${auditRaces}</section></details>`;
   const summaryText = saved
-    ? `Sonuç hafızaya işlendi. ${evaluatedRaceCount} koşu karşılaştırıldı · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length} tahmin sürümünde isabet etti. Bu cihazda kaydedildi.`
-    : `Karşılaştırma tamamlandı ancak hafıza kaydı doğrulanamadı. ${resultPersistenceNote(persistence)}`;
+    ? `Sonuç hafızaya işlendi. ${evaluatedRaceCount} koşu karşılaştırıldı · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length} tahmin sürümünde isabet etti. ${resultPersistenceNote(persistence)} ${learningStatus}`
+    : `Karşılaştırma tamamlandı ancak kalıcı hafıza kaydı doğrulanamadı. ${resultPersistenceNote(persistence)}`;
   showMessage(target, summaryText, saved ? "success" : "error");
   target.insertAdjacentHTML("beforeend", outcomeDetails);
   renderTrainingReport();
@@ -2817,7 +2846,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("appStatus").textContent = restoreFailed ? "● Yerel yedek kullanılıyor" : "● Hazır";
   if (restoreFailed) $("appStatus").title = "Ana hafıza yüklenemedi; tarayıcı yedeğiyle devam ediliyor.";
   document.querySelector(".shell")?.removeAttribute("inert");
-  if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+  if ("serviceWorker" in navigator && location.protocol !== "file:") {
+    navigator.serviceWorker.register("./service-worker.js", { updateViaCache: "none" })
+      .then((registration) => registration.update())
+      .catch(() => {});
+  }
   loadArchiveSummary();
   refreshRemoteMemory();
 });
