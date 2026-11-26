@@ -1,9 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { BASE_WEIGHTS, TRAINING_WINDOW_DAYS, trainingCutoff, dateInTurkey, fitModel, raceToTrainingExample } = require('./lib/automatic-learning');
+const { MODEL_KEY, MODEL_VERSION, BASE_WEIGHTS, TRAINING_WINDOW_DAYS, trainingCutoff, dateInTurkey, fitModel, raceToTrainingExample } = require('./lib/automatic-learning');
 const { createIndex } = require('./lib/race-context');
 const classHistory = require('./class-history');
 const pedigreeHistory = require('./lib/pedigree-history');
+const { raceKey } = require('./lib/shadow-signal-learning');
+
+test('model storage key is version-specific and cannot read the legacy shared key', () => {
+  assert.equal(MODEL_KEY, `automatic-learning-model:${MODEL_VERSION}`);
+  assert.notEqual(MODEL_KEY, 'automatic-learning-model');
+});
 
 test('model training window uses the latest 365 days without deleting older archive rows', () => {
   assert.equal(TRAINING_WINDOW_DAYS, 365);
@@ -98,4 +104,42 @@ test('model fitter preserves trusted weights until it has a forward validation s
   const report = fitModel([], protectedWeights);
   assert.equal(report.verified, false);
   assert.deepEqual(report.weights, protectedWeights);
+});
+
+test('automatic model refuses promotion before 18 distinct race dates', () => {
+  const protectedWeights = { ...BASE_WEIGHTS, market: 0.4 };
+  const races = Array.from({ length: 17 }, (_, dayIndex) => {
+    const date = `2026-02-${String(dayIndex + 1).padStart(2, '0')}`;
+    return Array.from({ length: 5 }, () => ({
+      date,
+      winner: 1,
+      horses: [
+        { number: 1, features: Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, 90])) },
+        { number: 2, features: Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, 20])) }
+      ]
+    }));
+  }).flat();
+  const report = fitModel(races, protectedWeights);
+
+  assert.equal(report.verified, false);
+  assert.equal(report.trainingDates, 17);
+  assert.equal(report.updated, false);
+  assert.deepEqual(report.weights, protectedWeights);
+});
+
+test('verified shadow analyst signals become training features only on an exact race identity', () => {
+  const row = {
+    raceDate: '2026-11-25',
+    city: 'İstanbul',
+    raceNo: 3,
+    program: { raceType: 'Handikap', surface: 'Kum', distance: 1400, runners: [{ no: 1, name: 'AT A', handicapPoints: 80 }, { no: 2, name: 'AT B', handicapPoints: 60 }] },
+    results: { runners: [{ no: 1, finishPosition: 1, odds: 2 }, { no: 2, finishPosition: 2, odds: 4 }] }
+  };
+  const shadowSignalsByRace = new Map([[raceKey(row.raceDate, row.city, row.raceNo), { banko: [1] }]]);
+  const example = raceToTrainingExample(row, { shadowSignalsByRace });
+  const unrelated = raceToTrainingExample({ ...row, raceNo: 4 }, { shadowSignalsByRace });
+
+  assert.equal(example.horses.find((horse) => horse.number === 1).features.analystFit, 100);
+  assert.equal(example.horses.find((horse) => horse.number === 2).features.analystFit, 50);
+  assert.equal(unrelated.horses.every((horse) => horse.features.analystFit === null), true);
 });

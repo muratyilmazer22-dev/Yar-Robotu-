@@ -1,6 +1,7 @@
 const { and, eq, gte, lte } = require('drizzle-orm');
 const { db } = require('../lib/db');
 const { raceHistory, robotMemory } = require('../lib/db/schema');
+const { MODEL_KEY, MODEL_VERSION } = require('../lib/model-version');
 const { analyzeRace, normalizeName, BASE_WEIGHTS, softmaxScores } = require('../scoring');
 const classHistory = require('../class-history');
 const raceContext = require('../lib/race-context');
@@ -8,6 +9,7 @@ const pedigreeHistory = require('../lib/pedigree-history');
 const raceRelations = require('../lib/race-relations');
 const { getWinnerRank, getWinnerRankBucket } = require('../lib/backtest-metrics');
 const { createReturnMetrics, recordReturn, finalizeReturnMetrics } = require('../lib/backtest-economics');
+const { evaluateWalkForward } = require('../lib/advanced-model-evaluation');
 
 function validDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const parsed = new Date(`${value}T00:00:00Z`); return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
@@ -38,12 +40,13 @@ module.exports = async function handler(req, res) {
     const rows = await db.select().from(raceHistory)
       .where(and(gte(raceHistory.raceDate, from), lte(raceHistory.raceDate, to)))
       .orderBy(raceHistory.raceDate, raceHistory.city, raceHistory.raceNo);
-    const [storedAutomaticModel] = await db.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, 'automatic-learning-model')).limit(1);
+    const [storedAutomaticModel] = await db.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, MODEL_KEY)).limit(1);
     const automaticModel = storedAutomaticModel?.memoryValue || null;
     const acceptedValidation = automaticModel?.lastAcceptedValidation || null;
     const automaticWeights = automaticModel?.weights;
     const hasValidatedAutomaticModel = Boolean(
-      acceptedValidation?.from
+      automaticModel?.model === MODEL_VERSION
+      && acceptedValidation?.from
       && automaticWeights
       && Object.keys(BASE_WEIGHTS).every((key) => Number.isFinite(Number(automaticWeights[key])))
     );
@@ -76,6 +79,7 @@ module.exports = async function handler(req, res) {
     let automaticLearnedBrierTotal = 0;
     const returnMetrics = { fixed: createReturnMetrics(), favorite: createReturnMetrics(), automatic: createReturnMetrics() };
     const contextIndex = raceContext.createIndex(rows);
+    const walkForwardRaces = [];
     const classIndex = classHistory.createIndex(rows);
     const pedigreeIndex = pedigreeHistory.createIndex(rows);
     const relationIndex = raceRelations.createIndex(rows);
@@ -126,6 +130,17 @@ module.exports = async function handler(req, res) {
       }
 
       evaluatedRaces += 1;
+      walkForwardRaces.push({
+        date: raceDate,
+        winner: Number(winnerEntry.horse.number),
+        horses: scores.map((horse) => ({
+          number: Number(horse.number),
+          finishPosition: finishById.get(identity(horse)) ?? null,
+          agf: Number.isFinite(horse.agf) ? horse.agf : null,
+          features: horse.features,
+          marketAgreement: horse.marketAgreement
+        }))
+      });
       const selected = scores.slice(0, 3).map((horse) => ({ horse, place: finishById.get(identity(horse)) }));
       const hits = selected.filter((entry) => Number.isFinite(entry.place) && entry.place <= 3).length;
       totalTopThreeHits += hits;
@@ -206,6 +221,7 @@ module.exports = async function handler(req, res) {
       byRaceType.set(raceType, typeGroup);
     }
 
+    const walkForwardValidation = evaluateWalkForward(walkForwardRaces);
     const rate = (value, total) => total ? Number((value / total * 100).toFixed(1)) : null;
     return res.status(200).json({
       model: 'deterministic-baseline-v1',
@@ -248,6 +264,7 @@ module.exports = async function handler(req, res) {
           validated: item.candidates >= 30 && validationRaces > 0 && item.wins / item.candidates > validationTop1Hits / validationRaces
         }))
       },
+      walkForwardValidation,
       automaticModelValidation: {
         available: hasValidatedAutomaticModel,
         reason: hasValidatedAutomaticModel ? null : 'Ortak hafızada ileri-tarih doğrulaması bulunan öğrenilmiş ağırlık yok.',
@@ -280,7 +297,7 @@ module.exports = async function handler(req, res) {
         averageTopThreeHits: Number((group.totalTopThreeHits / group.races).toFixed(2)),
         winnerHitRate: rate(group.winnerHits, group.races)
       })),
-      method: 'Ana rapor sabit temel ağırlıklarla form, piyasa, HP, pedigri, grup seviyesi/bitiriş, sınıf geçmişi, hipodrom, hava, pist ve derece sinyallerini değerlendirir. Ayrı otomatik-model karşılaştırması yalnızca modelin eğitiminde kullanılmamış, kabul edilmiş ileri tarih doğrulama aralığını kullanır. Tüm arşiv indeksleri hedef tarihten önceki yarışlarla sınırlandırılır. 30’dan az eşik adayı sonuçları yön gösterici sayılmamalıdır. Sonuçlar kazanma garantisi değildir.'
+      method: 'Ana rapor sabit temel ağırlıklarla form, piyasa, HP, pedigri, grup seviyesi/bitiriş, sınıf geçmişi, hipodrom, hava, pist ve derece sinyallerini değerlendirir. Ayrı otomatik-model karşılaştırması yalnızca modelin eğitiminde kullanılmamış, kabul edilmiş ileri tarih doğrulama aralığını kullanır. Walk-forward bölümündeki Plackett–Luce sıralama ölçümleri, mevcut kazanma olasılıklarını at gücü kabul ederek koşullu ilk-üç sıralama olasılığı üretir; ayrı eğitilmiş model değildir ve ana tahmini değiştirmez. Tüm arşiv indeksleri hedef tarihten önceki yarışlarla sınırlandırılır. 30’dan az eşik adayı sonuçları yön gösterici sayılmamalıdır. Sonuçlar kazanma garantisi değildir.'
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected server error.';

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { getAllocationPriority, optimizeCouponCounts } = require('./lib/coupon-optimizer');
+const { getAllocationPriority, prioritizeCoverageCandidate, SURPRISE_COVERAGE_UTILITY_BONUS, optimizeCouponCounts } = require('./lib/coupon-optimizer');
 
 function leg(shares, independentCoverage, singleEligible = true) {
   return {
@@ -25,6 +25,48 @@ test('budget expansion goes to the less reliable leg before the stable leader', 
   const optimized = optimizeCouponCounts([strong, uncertain], 2, false);
 
   assert.deepEqual(optimized.counts, [1, 2]);
+  assert.equal(optimized.columns, 2);
+});
+
+test('a supported surprise candidate is promoted to the second coupon slot without changing its model rank', () => {
+  const result = prioritizeCoverageCandidate([
+    { number: 1, name: 'Leader', modelShare: 0.65, signal: 'Sinyaller uyumlu' },
+    { number: 2, name: 'Second', modelShare: 0.25, signal: 'Sinyaller uyumlu' },
+    {
+      number: 6,
+      name: 'Value runner',
+      modelShare: 0.1,
+      signal: 'Sürpriz adayı',
+      independentCoverage: 60,
+      coverage: 55,
+      performanceScore: 74,
+      marketScore: 60
+    }
+  ]);
+
+  assert.deepEqual(result.ranked.map((horse) => horse.number), [1, 6, 2]);
+  assert.equal(result.ranked[1].modelRank, 3);
+  assert.equal(result.ranked[1].coverageCandidate, true);
+  assert.deepEqual(result.candidate, { number: 6, name: 'Value runner', modelRank: 3, edge: 14 });
+  assert.equal(result.candidateIndex, 1);
+});
+
+test('surprise labels without enough independent evidence do not get promoted', () => {
+  const result = prioritizeCoverageCandidate([
+    { number: 1, modelShare: 0.7, signal: 'Sinyaller uyumlu' },
+    { number: 6, modelShare: 0.3, signal: 'Sürpriz adayı', independentCoverage: 20, coverage: 60, performanceScore: 80, marketScore: 50 }
+  ]);
+
+  assert.deepEqual(result.ranked.map((horse) => horse.number), [1, 6]);
+  assert.equal(result.candidate, null);
+});
+
+test('the optimizer allocates a constrained extra slot to a qualified surprise-coverage leg', () => {
+  const surpriseLeg = { ...leg([0.9, 0.1], 100), coverageCandidateIndex: 1, coverageBonus: SURPRISE_COVERAGE_UTILITY_BONUS };
+  const stableLeg = leg([0.9, 0.1], 100);
+  const optimized = optimizeCouponCounts([surpriseLeg, stableLeg], 2, false);
+
+  assert.deepEqual(optimized.counts, [2, 1]);
   assert.equal(optimized.columns, 2);
 });
 
