@@ -7,7 +7,15 @@ const legs = Array.from({ length: 6 }, (_, index) => ({ raceNo: index + 1, horse
 test('reports a five-of-six coupon and identifies the first missed leg', () => {
   const result = evaluateCouponLegs(legs, Array.from({ length: 6 }, (_, index) => ({ raceNo: index + 1, winnerNumber: index === 0 ? 9 : index + 1 })));
 
-  assert.deepEqual(result, { completed: 6, total: 6, hits: 5, missedRaceNos: [1] });
+  assert.deepEqual(result, {
+    completed: 6,
+    total: 6,
+    hits: 5,
+    missedRaceNos: [1],
+    coverageCandidateEvaluated: 0,
+    coverageCandidateHits: 0,
+    coverageCandidateOutsideHits: 0
+  });
 });
 
 test('matches saved coupon legs to parsed results and keeps earlier legs on partial updates', () => {
@@ -27,10 +35,31 @@ test('matches saved coupon legs to parsed results and keeps earlier legs on part
   assert.equal(synchronizeCouponResults(coupon, [{ no: 2, horses: [{ number: 2, place: 1 }] }]), false);
 });
 
+test('tracks when an unselected coverage candidate wins', () => {
+  const result = evaluateCouponLegs([
+    { raceNo: 1, horses: [{ number: 2 }], coverageCandidate: { number: 6, selected: false } },
+    ...legs.slice(1)
+  ], [{ raceNo: 1, winnerNumber: 6 }]);
+
+  assert.equal(result.hits, 0);
+  assert.equal(result.missedRaceNos[0], 1);
+  assert.equal(result.coverageCandidateEvaluated, 1);
+  assert.equal(result.coverageCandidateHits, 1);
+  assert.equal(result.coverageCandidateOutsideHits, 1);
+});
+
 test('does not count missing or invalid results as misses', () => {
   const result = evaluateCouponLegs(legs, [{ raceNo: 1, winnerNumber: 1 }, { raceNo: 2, winnerNumber: 0 }]);
 
-  assert.deepEqual(result, { completed: 1, total: 6, hits: 1, missedRaceNos: [] });
+  assert.deepEqual(result, {
+    completed: 1,
+    total: 6,
+    hits: 1,
+    missedRaceNos: [],
+    coverageCandidateEvaluated: 0,
+    coverageCandidateHits: 0,
+    coverageCandidateOutsideHits: 0
+  });
 });
 
 test('backtests only complete six-leg system coupons and groups results by actual cost', () => {
@@ -55,6 +84,26 @@ test('backtests only complete six-leg system coupons and groups results by actua
   assert.equal(report.fiveOfSix, 1);
   assert.equal(report.averageHits, 5.5);
   assert.deepEqual(report.byBudget.map(({ budget, coupons }) => [budget, coupons]), [[80, 2]]);
+});
+
+test('aggregate history reports wins caught by coverage candidates outside the original ticket', () => {
+  const { evaluateSixLegCoupons } = require('./lib/coupon-results');
+  const candidateLegs = legs.map((leg, index) => ({
+    ...leg,
+    coverageCandidate: index === 0 ? { number: 9, modelRank: 4, selected: false } : null
+  }));
+  const report = evaluateSixLegCoupons([{
+    source: 'Yarış Robotu',
+    poolType: 'first',
+    cost: 10,
+    legs: candidateLegs,
+    legResults: Array.from({ length: 6 }, (_, index) => ({ raceNo: index + 1, winnerNumber: index === 0 ? 9 : index + 1 }))
+  }]);
+
+  assert.equal(report.coverageCandidateEvaluated, 1);
+  assert.equal(report.coverageCandidateHits, 1);
+  assert.equal(report.coverageCandidateOutsideHits, 1);
+  assert.equal(report.coverageCandidateHitRate, 100);
 });
 
 test('reports eligible but incomplete system coupons separately from evaluated coupons', () => {

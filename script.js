@@ -1213,18 +1213,24 @@ function buildCoupon(races, budget, unit) {
     }
     return { error: audit.error };
   }
-  const openLegs = races.map((race) => ({ race, ranked: window.RaceEkuri.selectionUnits(scoreRace(race)) }));
+  const openLegs = races.map((race) => {
+    const ranked = window.RaceEkuri.selectionUnits(scoreRace(race));
+    return { race, ...window.CouponOptimizer.prioritizeCoverageCandidate(ranked) };
+  });
   if (openLegs.some(({ ranked }) => !ranked.length)) return { error: "Açık ayaklardan birinde koşabilir at bulunamadı." };
   if (!Number.isFinite(budget) || budget <= 0 || !Number.isFinite(unit) || unit <= 0) return { error: "Bütçe ve kolon fiyatı sıfırdan büyük olmalıdır." };
   const maxColumns = Math.floor(budget / unit);
   if (!Number.isSafeInteger(maxColumns)) return { error: "Bütçe, güvenli kolon hesabı sınırını aşıyor." };
   if (maxColumns < 1) return { error: "Bütçe, en az bir kolonun birim fiyatını karşılamıyor." };
 
-  const picks = openLegs.map(({ race, ranked }) => {
+  const picks = openLegs.map(({ race, ranked, candidate, candidateIndex }) => {
     return {
       no: race.no,
       ranked,
       externalSignals: race.externalSignals || null,
+      coverageCandidate: candidate,
+      coverageCandidateIndex: candidateIndex,
+      coverageBonus: candidate ? window.CouponOptimizer.SURPRISE_COVERAGE_UTILITY_BONUS : 0,
       count: 1,
       singleEligible: isValidatedSingle(ranked)
     };
@@ -1302,6 +1308,14 @@ function formatCoupon(coupon, poolTitle) {
         ? `<div class="alert">Bütçe bazı ayaklardaki at sayısını sınırladı.</div>`
         : "";
   const completed = coupon.finishedNos?.length ? `<p class="coupon-intro">Koşulan ayaklar: ${coupon.finishedNos.map((no) => `${no}. koşu`).join(", ")}</p>` : "";
+  const coverageNotes = coupon.picks.filter((pick) => pick.coverageCandidate).map((pick) => {
+    const { number, name, modelRank } = pick.coverageCandidate;
+    const included = pick.count > pick.coverageCandidateIndex;
+    return `${pick.no}. koşu #${number ?? "?"} ${escapeHtml(name || "isimsiz at")} (model sırası #${modelRank}) ${included ? "ek kapsama adayı olarak kupona eklendi" : "bütçe nedeniyle ek kapsama dışında kaldı"}`;
+  });
+  const coverageNote = coverageNotes.length
+    ? `<p class="coupon-intro">Bağımsız performans verisi piyasa sinyalinden ayrışan ek adaylar: ${coverageNotes.join(" · ")}. Bu etiket kazanma garantisi değildir.</p>`
+    : "";
   const excludedPicks = coupon.picks.filter((pick) => pick.excludedHorses.length);
   const excludedNote = excludedPicks.length
     ? `<p class="coupon-intro">Bütçe nedeniyle alınmayan seçimler: ${excludedPicks.map((pick) => `${pick.no}. koşu: ${pick.excludedHorses.map((horse) => `${Number.isSafeInteger(horse.number) && horse.number > 0 ? `#${horse.number}` : "No belirtilmemiş"} ${escapeHtml(horse.name || "İsimsiz at")}`).join(", ")}`).join(" · ")}</p>`
@@ -1311,7 +1325,7 @@ function formatCoupon(coupon, poolTitle) {
     const labels = pick.ranked.slice(0, pick.count).flatMap((unit) => unit.members || [unit]).map((horse) => `<span class="coupon-horse">${Number.isSafeInteger(horse.number) && horse.number > 0 ? `#${horse.number}` : "No belirtilmemiş"} ${escapeHtml(horse.name)}</span>`).join("");
     return `<li class="coupon-leg"><strong>${pick.no}. Koşu</strong><div class="coupon-horses">${labels}</div></li>`;
   }).join("");
-  return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Model önerisi · bütçe sınırı aşılmaz · otomatik hafızaya kaydedilir</p></header>${warning}${completed}<ol class="coupon-legs">${legs}</ol>${excludedNote}<div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Üst bütçe ${coupon.budget.toFixed(2)} TL · Kullanılmayan ${unusedBudget.toFixed(2)} TL</span></div></article>`;
+  return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Model önerisi · bütçe sınırı aşılmaz · otomatik hafızaya kaydedilir</p></header>${warning}${completed}${coverageNote}<ol class="coupon-legs">${legs}</ol>${excludedNote}<div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Üst bütçe ${coupon.budget.toFixed(2)} TL · Kullanılmayan ${unusedBudget.toFixed(2)} TL</span></div></article>`;
 }
 const POOL_KEYS = ["first", "second", "third", "fourth", "fifth", "sixth"];
 const POOL_ORDINALS = ["Birinci", "İkinci", "Üçüncü", "Dördüncü", "Beşinci", "Altıncı"];
@@ -2190,7 +2204,12 @@ function saveGeneratedCoupon(poolKey, runId) {
     id: createCouponId(), analysisRunId: runId, date, city, poolType: poolKey, cost: coupon.total, payout: null, status: "suggested",
     source: "Yarış Robotu", columns: coupon.columns, unit: parseNumber($("birimInput")?.value),
     modelVersion: MODEL_VERSION,
-    legs: coupon.picks.map((pick) => ({ raceNo: pick.no, externalSignals: pick.externalSignals || null, horses: pick.ranked.slice(0, pick.count).flatMap((unit) => unit.members || [unit]).map((horse) => ({ number: horse.number, name: horse.name, modelShare: horse.modelShare, couplingGroup: horse.couplingGroup || "" })) })),
+    legs: coupon.picks.map((pick) => ({
+      raceNo: pick.no,
+      externalSignals: pick.externalSignals || null,
+      coverageCandidate: pick.coverageCandidate ? { ...pick.coverageCandidate, selected: pick.count > pick.coverageCandidateIndex } : null,
+      horses: pick.ranked.slice(0, pick.count).flatMap((unit) => unit.members || [unit]).map((horse) => ({ number: horse.number, name: horse.name, modelShare: horse.modelShare, couplingGroup: horse.couplingGroup || "" }))
+    })),
     legResults: [],
     finishedNos: coupon.finishedNos || [],
     createdAt: new Date().toISOString()
@@ -2254,7 +2273,8 @@ function renderCouponHistory() {
     metric("Altılı geçmiş testi · tamamlanan", `${sixLegEvaluation.evaluatedCoupons} / ${sixLegEvaluation.eligibleCoupons}`),
     metric("Altılı geçmiş testi · 6/6", sixLegEvaluation.sixOfSixRate === null ? "—" : `${sixLegEvaluation.sixOfSix} · %${sixLegEvaluation.sixOfSixRate}`),
     metric("Altılı geçmiş testi · 5/6", sixLegEvaluation.fiveOfSixRate === null ? "—" : `${sixLegEvaluation.fiveOfSix} · %${sixLegEvaluation.fiveOfSixRate}`),
-    metric("Altılı başına ortalama isabet", sixLegEvaluation.averageHits === null ? "—" : `${sixLegEvaluation.averageHits} / 6`)
+    metric("Altılı başına ortalama isabet", sixLegEvaluation.averageHits === null ? "—" : `${sixLegEvaluation.averageHits} / 6`),
+    metric("Ek kapsama adayı isabeti", sixLegEvaluation.coverageCandidateEvaluated ? `${sixLegEvaluation.coverageCandidateHits} / ${sixLegEvaluation.coverageCandidateEvaluated} · %${sixLegEvaluation.coverageCandidateHitRate} · kupon dışı ${sixLegEvaluation.coverageCandidateOutsideHits}` : "Henüz sonuç yok")
   );
   const sixLegTarget = $("sixLegEvaluation");
   if (sixLegTarget) {
@@ -2288,7 +2308,10 @@ function renderCouponHistory() {
     const ticket = record.columns ? `${record.columns} kolon · ${money(record.cost)}` : `Maliyet ${money(record.cost)} · seçim dökümü yok`;
     const legs = Array.isArray(record.legs) && record.legs.length ? `<p>Seçimler: ${record.legs.map((leg) => `${leg.raceNo}. ayak #${leg.horses.map((horse) => horse.number).join(", #")}`).join(" · ")}</p>` : "";
     const legEvaluation = window.CouponResults.evaluateCouponLegs(record.legs, record.legResults);
-    const legSummary = legEvaluation.total ? `<p class="coupon-leg-summary">${legEvaluation.completed === legEvaluation.total ? `${legEvaluation.hits}/${legEvaluation.total} ayak tuttu` : `${legEvaluation.hits} isabet · ${legEvaluation.completed}/${legEvaluation.total} ayak sonucu eşleşti`}${legEvaluation.missedRaceNos.length ? ` · kaçan ayak: ${legEvaluation.missedRaceNos.join(", ")}` : ""}</p>` : "";
+    const candidateSummary = legEvaluation.coverageCandidateEvaluated
+      ? ` · ek aday ${legEvaluation.coverageCandidateHits}/${legEvaluation.coverageCandidateEvaluated} birincilik · kupon dışında yakalanan ${legEvaluation.coverageCandidateOutsideHits}`
+      : "";
+    const legSummary = legEvaluation.total ? `<p class="coupon-leg-summary">${legEvaluation.completed === legEvaluation.total ? `${legEvaluation.hits}/${legEvaluation.total} ayak tuttu` : `${legEvaluation.hits} isabet · ${legEvaluation.completed}/${legEvaluation.total} ayak sonucu eşleşti`}${legEvaluation.missedRaceNos.length ? ` · kaçan ayak: ${legEvaluation.missedRaceNos.join(", ")}` : ""}${candidateSummary}</p>` : "";
     const legLearningReport = (record.legResults || []).map((result) => {
       const prediction = findSavedPrediction(record.date, record.city, result.raceNo);
       const selected = record.legs?.find((leg) => Number(leg.raceNo) === Number(result.raceNo))?.horses?.map((horse) => horse.number) || [];
