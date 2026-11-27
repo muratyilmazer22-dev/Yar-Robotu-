@@ -1974,7 +1974,14 @@ async function extractResultsFromImage() {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Görsel okunamadı. Daha net bir görüntü seçip tekrar deneyin.");
     const recognizedText = String(payload.text || "").trim();
-    if (!recognizedText) throw new Error("Görselde okunabilir sonuç metni bulunamadı.");
+    if (!recognizedText || recognizedText === "[NO_RACE_RESULTS]") {
+      throw new Error("Görselde yarış sonuç tablosu bulunamadı. Site menüsü yerine yalnızca sonuç tablosunu içeren bir fotoğraf seçin.");
+    }
+    const recognizedRaces = window.RaceParser.parseRaces(recognizedText);
+    const hasResultOrder = recognizedRaces.some((race) => race.horses.some((horse) => Number(horse.rank) > 0));
+    if (!hasResultOrder) {
+      throw new Error("OCR çıktısında doğrulanabilir at sırası bulunamadı; metin kutusu değiştirilmedi. Sonuç tablosunu kırpıp tekrar deneyin.");
+    }
     const textarea = $("sonucluBultenInput");
     textarea.value = [textarea.value.trim(), recognizedText].filter(Boolean).join("\n\n");
     saveBulletinDraft("result", { text: textarea.value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
@@ -2052,6 +2059,14 @@ async function compareResults() {
     showMessage(target, "Arşivlemek için sonuç metni girin veya bir fotoğraf yükleyin.", "error");
     return;
   }
+  const parsed = parseRaces(resultText);
+  if (!parsed.races.length) {
+    const message = resultText
+      ? "Metinde yarış/at satırı bulunamadı. Site gezinme yazıları sonuç değildir; doğru tabloyu yapıştırın veya fotoğraftan yeniden okuyun. Hatalı metin hafızaya eklenmedi."
+      : "Fotoğrafı hafızaya almadan önce Görselden metni oku düğmesine basın ve sonuç tablosunun metne aktarıldığını doğrulayın.";
+    showMessage(target, message, "error");
+    return;
+  }
   let archivedSubmission = state.bulletins
     .filter((item) => item.kind === "result" && item.text === resultText && (!storedResultImage
       || item.image?.savedAt === storedResultImage.savedAt
@@ -2074,11 +2089,6 @@ async function compareResults() {
   }
   archivedSubmission = { ...archivedSubmission, reviewedByUser: true, reviewedAt: new Date().toISOString() };
   state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
-  const parsed = parseRaces(resultText);
-  if (!parsed.races.length) {
-    await saveResultForCorrection(archivedSubmission, "Koşu ve sonuç satırları metinden güvenilir biçimde ayrıştırılamadı. Sonuçları tablo biçiminde düzenleyip yeniden deneyin.");
-    return;
-  }
   if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) {
     await saveResultForCorrection(archivedSubmission, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu düzeltip yeniden deneyin.");
     return;
