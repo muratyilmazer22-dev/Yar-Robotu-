@@ -7,7 +7,7 @@ const classHistory = require('../class-history');
 const raceContext = require('../lib/race-context');
 const pedigreeHistory = require('../lib/pedigree-history');
 const raceRelations = require('../lib/race-relations');
-const { getWinnerRank, getWinnerRankBucket } = require('../lib/backtest-metrics');
+const { getWinnerRank, getWinnerRankBucket, summarizeWinnerRankContexts } = require('../lib/backtest-metrics');
 const { createReturnMetrics, recordReturn, finalizeReturnMetrics } = require('../lib/backtest-economics');
 const { evaluateWalkForward } = require('../lib/advanced-model-evaluation');
 
@@ -80,6 +80,7 @@ module.exports = async function handler(req, res) {
     const returnMetrics = { fixed: createReturnMetrics(), favorite: createReturnMetrics(), automatic: createReturnMetrics() };
     const contextIndex = raceContext.createIndex(rows);
     const walkForwardRaces = [];
+    const contextualWinnerRanks = [];
     const classIndex = classHistory.createIndex(rows);
     const pedigreeIndex = pedigreeHistory.createIndex(rows);
     const relationIndex = raceRelations.createIndex(rows);
@@ -132,6 +133,9 @@ module.exports = async function handler(req, res) {
       evaluatedRaces += 1;
       walkForwardRaces.push({
         date: raceDate,
+        city: String(row.city || ''),
+        surface: String(program.surface || ''),
+        distance: Number.isFinite(Number(program.distance)) ? Number(program.distance) : null,
         winner: Number(winnerEntry.horse.number),
         horses: scores.map((horse) => ({
           number: Number(horse.number),
@@ -151,6 +155,13 @@ module.exports = async function handler(req, res) {
         winnerRankCounts[winnerRankBucket] += 1;
         totalWinnerRank += winnerRank;
         if (winnerRank <= 3) winnerTopThreeRankHits += 1;
+        contextualWinnerRanks.push({
+          date: raceDate,
+          city: row.city,
+          distance: program.distance,
+          surface: program.surface,
+          rank: winnerRank
+        });
       }
       const modelLeaderHit = winnerRank === 1;
       if (modelLeaderHit) winnerHits += 1;
@@ -237,6 +248,7 @@ module.exports = async function handler(req, res) {
       winnerTopThreeRankRate: rate(winnerTopThreeRankHits, evaluatedRaces),
       averageWinnerRank: evaluatedRaces ? Number((totalWinnerRank / evaluatedRaces).toFixed(2)) : null,
       winnerRankCounts,
+      winnerRankContext: summarizeWinnerRankContexts(contextualWinnerRanks),
       marketFavoriteHitRate: rate(marketFavoriteHits, evaluatedRaces),
       returnMetrics: {
         fixed: finalizeReturnMetrics(returnMetrics.fixed),

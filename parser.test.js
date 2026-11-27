@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseRaces, parseRaceConditions } = require('./parser');
+const { auditCouponPool } = require('./lib/bulletin-quality');
+const { getPoolStarts } = require('./lib/coupon-optimizer');
 
 test('extracts weather and surface-change notes from the bulletin text', () => {
   const conditions = parseRaceConditions('Hava Durumu: Parçalı Bulutlu\nPist Durumu: Islak\nPist Değişikliği: Çim yerine sentetik pistte koşulacaktır');
@@ -260,6 +262,43 @@ test('reads the horse number when the compact N and horse-name headers are paste
     [2, 'BESNİ'],
     [3, 'KÜÇÜK ŞOVALYE']
   ]);
+});
+
+test('normalizes punctuation and Turkish aliases in horse-number headers', () => {
+  const bulletin = [
+    '1. Koşu 14:00 Maiden 1400 Kum',
+    'At No.\tAt Adı\tAGF',
+    '1\tKIR AT\t%24',
+    '2\tAK AT\t%10'
+  ].join('\n');
+
+  const [race] = parseRaces(bulletin);
+
+  assert.deepEqual(race.horses.map((horse) => horse.horseNumber), [1, 2]);
+});
+
+test('creates valid first and second six-leg pools from a full bulletin with abbreviated number headers', () => {
+  const bulletin = Array.from({ length: 7 }, (_, index) => [
+    `${index + 1}. Koşu 14:00 Maiden 1400 Kum`,
+    'N°\tAt İsmi\tAGF',
+    '1\tKIR AT\t%24',
+    '2\tAK AT\t%10'
+  ].join('\n')).join('\n');
+  const races = parseRaces(bulletin);
+  const starts = getPoolStarts(races, bulletin);
+
+  assert.deepEqual(starts, [1, 2]);
+  assert.deepEqual(starts.map((start) => auditCouponPool(races.filter((race) => race.no >= start && race.no < start + 6)).ok), [true, true]);
+});
+
+test('falls back to a clear parenthesized horse number when the number cell is blank', () => {
+  const [race] = parseRaces([
+    '1. Koşu 14:00 Maiden 1400 Kum',
+    'No.\tAt İsmi\tAGF',
+    '\tKIR AT (7) KG\t%24'
+  ].join('\n'));
+
+  assert.equal(race.horses[0].horseNumber, 7);
 });
 
 test('keeps the first and second race legs separate at their numbered headings', () => {

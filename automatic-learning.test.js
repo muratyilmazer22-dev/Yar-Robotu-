@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { MODEL_KEY, MODEL_VERSION, BASE_WEIGHTS, TRAINING_WINDOW_DAYS, trainingCutoff, dateInTurkey, fitModel, raceToTrainingExample } = require('./lib/automatic-learning');
+const { MODEL_KEY, MODEL_VERSION, BASE_WEIGHTS, TRAINING_WINDOW_DAYS, MINIMUM_PROMOTION_HOLDOUT_RACES, trainingCutoff, dateInTurkey, fitModel, assessHoldoutPromotion, raceToTrainingExample } = require('./lib/automatic-learning');
 const { createIndex } = require('./lib/race-context');
 const classHistory = require('./class-history');
 const pedigreeHistory = require('./lib/pedigree-history');
@@ -97,6 +97,8 @@ test('model fitter reserves the final chronological 20 percent as an untouched h
   assert.equal(report.holdoutStartDate, '2026-01-17');
   assert.equal(report.holdoutEvaluation.learned.pricedRaces, 12);
   assert.equal(report.holdoutEvaluation.learned.roi, 150);
+  assert.equal(report.promotionGate.passed, false);
+  assert.match(report.promotionGate.reasons[0], /en az 20 yarış/);
 });
 
 test('model fitter preserves trusted weights until it has a forward validation sample', () => {
@@ -125,6 +127,27 @@ test('automatic model refuses promotion before 18 distinct race dates', () => {
   assert.equal(report.trainingDates, 17);
   assert.equal(report.updated, false);
   assert.deepEqual(report.weights, protectedWeights);
+});
+
+test('model promotion requires enough untouched holdout races and non-degrading rank metrics', () => {
+  const metric = { races: MINIMUM_PROMOTION_HOLDOUT_RACES, brier: 0.4, hitRate: 0.3, topThreeRate: 0.6, lowRankWinnerRate: 0.4 };
+  const accepted = assessHoldoutPromotion({ learned: metric, fixed: metric, protected: metric });
+  const rejected = assessHoldoutPromotion({
+    learned: { ...metric, topThreeRate: 0.5, lowRankWinnerRate: 0.5 },
+    fixed: metric,
+    protected: metric
+  });
+  const tooSmall = assessHoldoutPromotion({
+    learned: { ...metric, races: MINIMUM_PROMOTION_HOLDOUT_RACES - 1 },
+    fixed: metric,
+    protected: metric
+  });
+
+  assert.equal(accepted.passed, true);
+  assert.equal(rejected.passed, false);
+  assert.ok(rejected.reasons.some((reason) => reason.includes('ilk-3')));
+  assert.ok(rejected.reasons.some((reason) => reason.includes('düşük sıra')));
+  assert.equal(tooSmall.passed, false);
 });
 
 test('verified shadow analyst signals become training features only on an exact race identity', () => {

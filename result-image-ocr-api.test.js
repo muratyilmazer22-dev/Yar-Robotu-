@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const handler = require("./result-image-ocr");
+const handler = require("./api/result-image-ocr");
 
 function createResponse() {
   return {

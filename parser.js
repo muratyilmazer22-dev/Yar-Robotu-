@@ -23,6 +23,18 @@
     return null;
   }
 
+  function normalizeHeader(value) {
+    return fold(value).replace(/[.#°º]/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  function isHorseNameHeader(header) {
+    return header.includes('at ismi') || header === 'at adi' || header === 'at' || header.includes('horse name') || header === 'horse' || header === 'runner';
+  }
+
+  function isHorseNumberHeader(header) {
+    return header === 'n' || header === 'no' || header.includes('at no') || header.includes('at numarasi') || header === 'numara' || header.includes('horse no') || header.includes('horse number') || header.includes('runner no') || header.includes('program no') || header.includes('program numarasi');
+  }
+
   function parseOrigin(origin) {
     const parts = String(origin || '').split(/\s*[-–—]\s*/);
     const sire = (parts[0] || '').trim();
@@ -74,8 +86,8 @@
 
       const cells = splitCells(raw);
       if (!cells) continue;
-      const normalizedHeaders = cells.map(fold);
-      const nameIndex = normalizedHeaders.findIndex((cell) => cell.includes('at ismi') || cell === 'at adi' || cell === 'at' || cell.includes('horse name') || cell === 'horse' || cell === 'runner');
+      const normalizedHeaders = cells.map(normalizeHeader);
+      const nameIndex = normalizedHeaders.findIndex(isHorseNameHeader);
       if (nameIndex >= 0) {
         headers = normalizedHeaders;
         continue;
@@ -88,18 +100,18 @@
       let legacyNo = null;
       if (headers) {
         const indexOf = (fragment) => headers.findIndex((header) => header === fragment || header.includes(fragment));
-        const horseCellIndex = headers.findIndex((header) => header.includes('at ismi') || header === 'at adi' || header === 'at' || header.includes('horse name') || header === 'horse' || header === 'runner');
+        const horseCellIndex = headers.findIndex(isHorseNameHeader);
         rowName = cells[horseCellIndex] || '';
         const horseMatch = rowName.match(/\((\d{1,2})\)/) || rowName.match(/^\s*(\d{1,2})\s*[-–.)]\s*/);
         const column = (fragment) => {
           const index = indexOf(fragment);
           return index >= 0 ? cells[index] || '' : '';
         };
-        const numberIndex = headers.findIndex((header) => header === 'n' || header === 'no' || header.includes('at no') || header.includes('horse no') || header.includes('horse number') || header.includes('program no'));
-        const combinedNumberMatch = horseCellIndex === 0 && /^(?:n|no|at no|horse no|horse number|program no)\s+at (?:ismi|adi|name)\b/.test(headers[0])
+        const numberIndex = headers.findIndex(isHorseNumberHeader);
+        const combinedNumberMatch = horseCellIndex === 0 && /^(?:n|no|at no|at numarasi|horse no|horse number|runner no|program no|program numarasi)\s+at (?:ismi|adi|name)\b/.test(headers[0])
           ? rowName.match(/^\s*(\d{1,2})\s+(.+)$/)
           : null;
-        horseNumber = numberIndex >= 0 ? parseNumber(cells[numberIndex]) : horseMatch ? Number(horseMatch[1]) : combinedNumberMatch ? Number(combinedNumberMatch[1]) : null;
+        horseNumber = (numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null) ?? (horseMatch ? Number(horseMatch[1]) : null) ?? (combinedNumberMatch ? Number(combinedNumberMatch[1]) : null);
         const explicitRankIndex = headers.findIndex((header) => header.includes('sira') || header.includes('sonuc') || header.includes('result') || header.includes('rank') || header.includes('placing') || header.includes('position'));
         const shortRankIndex = headers.indexOf('s');
         const hasResultTimeColumn = headers.some((header) => ['derece', 'time', 'zaman', 'finish time'].includes(header));

@@ -207,7 +207,7 @@
       const automaticValidation = data.automaticModelValidation || {};
       const holdout = automaticValidation.finalHoldout;
       const formatHoldout = (metric) => metric
-        ? `isabet %${metric.hitRate == null ? '—' : (metric.hitRate * 100).toFixed(1)} · ROI ${metric.roi == null ? 'ölçülemedi' : `${metric.roi.toFixed(1)}%`} (${metric.pricedRaces || 0} oranlı koşu)`
+        ? `ilk sıra %${metric.hitRate == null ? '—' : (metric.hitRate * 100).toFixed(1)} · ilk-3 %${metric.topThreeRate == null ? '—' : (metric.topThreeRate * 100).toFixed(1)} · düşük sıra kazanan %${metric.lowRankWinnerRate == null ? '—' : (metric.lowRankWinnerRate * 100).toFixed(1)} · Brier ${metric.brier?.toFixed(3) ?? '—'} · ROI ${metric.roi == null ? 'ölçülemedi' : `${metric.roi.toFixed(1)}%`} (${metric.pricedRaces || 0} oranlı koşu)`
         : 'ölçülemedi';
       const automaticValidationBlock = document.createElement('section');
       const automaticValidationTitle = document.createElement('h3');
@@ -215,7 +215,7 @@
       const automaticValidationNote = document.createElement('p');
       automaticValidationNote.className = 'sub';
       automaticValidationNote.textContent = automaticValidation.available
-        ? `${automaticValidation.from} – ${automaticValidation.to || '—'} arasında ${Number(automaticValidation.races || 0).toLocaleString('tr-TR')} koşu. Otomatik model lider isabeti: ${automaticValidation.modelTop1HitRate ?? '—'}%; piyasa favorisi: ${automaticValidation.marketFavoriteHitRate ?? '—'}%. Aynı koşulardaki Brier skoru: temel ${automaticValidation.baselineBrier?.toFixed(3) ?? '—'}, öğrenilmiş ${automaticValidation.learnedBrier?.toFixed(3) ?? '—'}; düşük değer daha iyi olasılık kalibrasyonu demektir. Eğitim raporu: ${automaticValidation.trainingReport?.trainingRaces ?? '—'} eğitim / ${automaticValidation.trainingReport?.validationRaces ?? '—'} doğrulama koşusu, ${automaticValidation.contextModelCount || 0} bağlam modeli. Bu doğrulama dilimi model ağırlıklarının eğitiminde kullanılmadı. Bağımsız son holdout (${automaticValidation.holdoutFrom || '—'} – ${automaticValidation.holdoutTo || '—'}): öğrenilmiş ${formatHoldout(holdout?.learned)}, sabit ${formatHoldout(holdout?.fixed)}, piyasa favorisi ${formatHoldout(holdout?.favorite)}.`
+        ? `${automaticValidation.from} – ${automaticValidation.to || '—'} arasında ${Number(automaticValidation.races || 0).toLocaleString('tr-TR')} koşu. Otomatik model lider isabeti: ${automaticValidation.modelTop1HitRate ?? '—'}%; piyasa favorisi: ${automaticValidation.marketFavoriteHitRate ?? '—'}%. Aynı koşulardaki Brier skoru: temel ${automaticValidation.baselineBrier?.toFixed(3) ?? '—'}, öğrenilmiş ${automaticValidation.learnedBrier?.toFixed(3) ?? '—'}; düşük değer daha iyi olasılık kalibrasyonu demektir. Eğitim raporu: ${automaticValidation.trainingReport?.trainingRaces ?? '—'} eğitim / ${automaticValidation.trainingReport?.validationRaces ?? '—'} doğrulama koşusu, ${automaticValidation.contextModelCount || 0} bağlam modeli. Bu doğrulama dilimi model ağırlıklarının eğitiminde kullanılmadı. Bağımsız son holdout (${automaticValidation.holdoutFrom || '—'} – ${automaticValidation.holdoutTo || '—'}): aday ${formatHoldout(automaticValidation.trainingReport?.promotionEvaluation?.learned)}, sabit ${formatHoldout(automaticValidation.trainingReport?.promotionEvaluation?.fixed)}, korunan ${formatHoldout(automaticValidation.trainingReport?.promotionEvaluation?.protected)}. Son model: ${formatHoldout(holdout?.learned)}. Terfi kapısı: ${automaticValidation.trainingReport?.promotionGate ? (automaticValidation.trainingReport.promotionGate.passed ? 'geçti' : 'geçmedi') : 'henüz raporlanmadı'}${automaticValidation.trainingReport?.promotionGate?.reasons?.length ? ` — ${automaticValidation.trainingReport.promotionGate.reasons.join(' ')}` : ''}.`
         : automaticValidation.reason || 'Henüz ileri tarih diliminde doğrulanmış otomatik model bulunmuyor.';
       automaticValidationBlock.append(automaticValidationTitle, automaticValidationNote);
       const walkForward = data.walkForwardValidation || {};
@@ -265,6 +265,58 @@
         rankList.append(row);
       }
       rankBreakdown.append(rankTitle, rankNote, rankList);
+      const contextRankBreakdown = document.createElement('section');
+      const contextRankTitle = document.createElement('h3');
+      contextRankTitle.textContent = '4. ve altı sıradaki kazananlar — tarih ve yarış bağlamı';
+      const contextRankNote = document.createElement('p');
+      contextRankNote.className = 'sub';
+      contextRankNote.textContent = `Kazananın model sırası ay bazında ve hipodrom, mesafe, pist kırılımlarında izlenir. 4. sıra ve altı “düşük sıralı” sayılır; ${data.winnerRankContext?.minimumSample || 30} koşudan az gruplar küçük örnek olarak işaretlenir. Bu geçmiş rapor başarı garantisi değildir.`;
+      const contextRankList = document.createElement('ul');
+      const contextDimensions = [
+        ['byMonth', 'Aylık trend'],
+        ['byCity', 'Hipodrom'],
+        ['byDistanceBand', 'Mesafe'],
+        ['bySurface', 'Pist']
+      ];
+      for (const [dimension, label] of contextDimensions) {
+        const groups = data.winnerRankContext?.[dimension] || [];
+        const visibleGroups = dimension === 'byMonth' ? groups.slice(-12) : groups;
+        for (const group of visibleGroups) {
+          const row = document.createElement('li');
+          const sampleNote = group.sufficientSample ? '' : ' · küçük örnek';
+          row.textContent = `${label} · ${group.context}: düşük sıra ${group.lowRankWinners}/${group.races} (%${group.lowRankWinnerRate}) · kazanan ilk 3’te %${group.topThreeWinnerRate} · lider isabeti %${group.leaderHitRate}${sampleNote}`;
+          contextRankList.append(row);
+        }
+      }
+      if (!contextRankList.childElementCount) {
+        const row = document.createElement('li');
+        row.textContent = 'Bağlam kırılımı için henüz eşleşmiş yarış yok.';
+        contextRankList.append(row);
+      }
+      contextRankBreakdown.append(contextRankTitle, contextRankNote, contextRankList);
+      const forwardContextBreakdown = document.createElement('section');
+      const forwardContextTitle = document.createElement('h3');
+      forwardContextTitle.textContent = 'Walk-forward düşük sıra izleme';
+      const forwardContextNote = document.createElement('p');
+      forwardContextNote.className = 'sub';
+      forwardContextNote.textContent = 'Bu bölüm her test tarihinden önce eğitilen otomatik modelin yalnızca sonraki yarışlardaki sıralamasını gösterir; eğitimde görülen sonuçlar dahil edilmez.';
+      const forwardContextList = document.createElement('ul');
+      const learnedContexts = walkForward.winnerRankContextByModel?.learned || {};
+      for (const [dimension, label] of contextDimensions) {
+        const groups = learnedContexts[dimension] || [];
+        const visibleGroups = dimension === 'byMonth' ? groups.slice(-12) : groups;
+        for (const group of visibleGroups) {
+          const row = document.createElement('li');
+          row.textContent = `${label} · ${group.context}: düşük sıra ${group.lowRankWinners}/${group.races} (%${group.lowRankWinnerRate}) · kazanan ilk 3’te %${group.topThreeWinnerRate}${group.sufficientSample ? '' : ' · küçük örnek'}`;
+          forwardContextList.append(row);
+        }
+      }
+      if (!forwardContextList.childElementCount) {
+        const row = document.createElement('li');
+        row.textContent = 'Walk-forward testinde bağlama göre sıralama ölçülecek kadar veri bulunmuyor.';
+        forwardContextList.append(row);
+      }
+      forwardContextBreakdown.append(forwardContextTitle, forwardContextNote, forwardContextList);
       const breakdown = document.createElement('section');
       const breakdownTitle = document.createElement('h3');
       breakdownTitle.textContent = 'Yarış türüne göre';
@@ -280,7 +332,7 @@
         breakdownList.append(item);
       }
       breakdown.append(breakdownTitle, breakdownList);
-      backtestSummary.replaceChildren(metrics, validationBlock, automaticValidationBlock, walkForwardBlock, note, rankBreakdown, breakdown);
+      backtestSummary.replaceChildren(metrics, validationBlock, automaticValidationBlock, walkForwardBlock, note, rankBreakdown, contextRankBreakdown, forwardContextBreakdown, breakdown);
     } catch (error) {
       backtestSummary.textContent = error.message || 'Geriye dönük test çalıştırılamadı.';
     } finally {

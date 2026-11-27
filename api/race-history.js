@@ -1,6 +1,6 @@
 const { Pool } = require("pg");
 const { drizzle } = require("drizzle-orm/node-postgres");
-const { secureDatabaseConnectionString } = require("../lib/db/connection-string");
+const { getDatabaseUrl, secureDatabaseConnectionString } = require("../lib/db/connection-string");
 const { and, asc, desc, eq, sql } = require("drizzle-orm");
 const { date, jsonb, pgTable, smallint, text } = require("drizzle-orm/pg-core");
 
@@ -23,9 +23,7 @@ module.exports = async function handler(request, response) {
     response.setHeader("Allow", "GET");
     return response.status(405).json({ error: "Method not allowed" });
   }
-  const databaseUrl = process.env.SUPABASE_POSTGRES_URL_NON_POOLING
-    || process.env.SUPABASE_POSTGRES_URL
-    || process.env.DATABASE_URL;
+  const databaseUrl = getDatabaseUrl();
   if (!databaseUrl) {
     return response.status(503).json({ error: "Historical archive is not configured" });
   }

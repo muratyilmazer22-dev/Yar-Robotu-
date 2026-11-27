@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f4ef">
+  <meta name="description" content="Bülten metinlerinden özel kurgu taslakları oluşturun, düzenleyin ve güvenle saklayın.">
+  <title>Bülten Kurgu Stüdyosu</title>
+  <link rel="stylesheet" href="/kurgu/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/kurgu/" aria-label="Bülten Kurgu Stüdyosu ana sayfa">
+      <span class="brand-mark" aria-hidden="true">BK</span>
+      <span><span class="eyebrow">Özel yazı alanı</span><strong>Bülten Kurgu</strong></span>
+    </a>
+    <div class="top-actions">
+      <a class="back-link" href="/">Yarış Robotu</a>
+      <span class="session-label" id="sessionLabel" role="status" aria-live="polite">Bağlantı hazırlanıyor</span>
+      <button class="button button-quiet" id="signOutButton" type="button" hidden>Oturumu kapat</button>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="intro-row" aria-labelledby="pageTitle">
+      <div>
+        <p class="eyebrow">Kopyala · düzenle · kurgula</p>
+        <h1 id="pageTitle">Bülteninden hikâyene.</h1>
+        <p class="lede">Kaynak metni ekle, olay örgüsünü kur ve taslağını kendi hesabında sakla. Kurgu iskeleti bu cihazda oluşturulur; metin üçüncü taraf bir yapay zekâ servisine gönderilmez.</p>
+      </div>
+      <div class="privacy-note"><span class="privacy-dot" aria-hidden="true"></span><span>Özel alan<br><strong>Hesabınıza bağlı kayıtlar</strong></span></div>
+    </section>
+
+    <section class="sign-in-card" id="signInPanel" aria-labelledby="signInTitle" hidden>
+      <div class="card-copy">
+        <p class="eyebrow">Güvenli erişim</p>
+        <h2 id="signInTitle">Yazı alanınıza giriş yapın</h2>
+        <p>E-posta adresinize tek kullanımlık giriş bağlantısı gönderelim. Taslaklarınız hesabınıza özel olarak kaydedilir.</p>
+      </div>
+      <form id="signInForm" class="sign-in-form">
+        <label for="emailInput">E-posta adresi</label>
+        <div class="form-row"><input id="emailInput" name="email" type="email" autocomplete="email" required maxlength="254" placeholder="ornek@eposta.com"><button class="button button-primary" type="submit">Giriş bağlantısı gönder</button></div>
+        <p class="form-status" id="authStatus" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="workspace" id="workspace" hidden aria-label="Kurgu çalışma alanı">
+      <aside class="library" aria-labelledby="libraryTitle">
+        <div class="library-heading"><div><p class="eyebrow">Kişisel arşiv</p><h2 id="libraryTitle">Taslaklar</h2></div><button class="button button-primary button-small" id="newDraftButton" type="button">Yeni taslak</button></div>
+        <p class="library-hint">En son güncellenenler üstte görünür.</p>
+        <div class="document-list" id="documentList" aria-live="polite"></div>
+      </aside>
+
+      <section class="editor" aria-label="Taslak düzenleyici">
+        <div class="editor-heading">
+          <div><p class="eyebrow">Çalışma masası</p><input class="title-input" id="titleInput" type="text" maxlength="120" aria-label="Taslak başlığı" placeholder="Taslağa bir başlık verin"></div>
+          <span class="save-state" id="saveState" role="status" aria-live="polite">Yeni taslak</span>
+        </div>
+
+        <div class="editor-grid">
+          <div class="source-column">
+            <div class="field-heading"><label for="sourceInput">Kaynak bülten</label><span id="sourceCount">0 / 40.000</span></div>
+            <textarea id="sourceInput" maxlength="40000" placeholder="Bülten metnini buraya yapıştırın…" spellcheck="false"></textarea>
+            <p class="field-help">Kaynağı koruyun; olay örgüsü metni ayrı alanda hazırlanır.</p>
+            <button class="button button-secondary full-width" id="outlineButton" type="button">Kurgu iskeleti oluştur</button>
+          </div>
+
+          <div class="draft-column">
+            <div class="field-heading"><label for="outlineInput">Olay örgüsü notları</label><span>İsteğe bağlı</span></div>
+            <textarea id="outlineInput" maxlength="40000" placeholder="Karakterler, çatışma, dönüm noktası…"></textarea>
+            <div class="field-heading draft-heading"><label for="draftInput">Kurgu taslağı</label><span id="draftCount">0 / 40.000</span></div>
+            <textarea class="story-input" id="draftInput" maxlength="40000" placeholder="Hikâyeni burada yaz ve dilediğin gibi düzenle…"></textarea>
+          </div>
+        </div>
+
+        <div class="editor-footer">
+          <p class="editor-status" id="editorStatus" role="status" aria-live="polite">Kaydetmek için giriş yapın.</p>
+          <div class="editor-actions"><button class="button button-quiet" id="copyButton" type="button">Taslağı kopyala</button><button class="button button-quiet" id="downloadButton" type="button">.txt indir</button><button class="button button-primary" id="saveButton" type="button" disabled>Kaydet</button><button class="button button-danger" id="deleteButton" type="button" hidden>Sil</button></div>
+        </div>
+      </section>
+    </section>
+    <noscript><p class="noscript">Bu uygulamayı kullanmak için tarayıcınızda JavaScript etkin olmalıdır.</p></noscript>
+  </main>
+  <script type="module" src="/kurgu/app.js"></script>
+</body>
+</html>
