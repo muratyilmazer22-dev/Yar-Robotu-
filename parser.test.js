@@ -291,6 +291,22 @@ test('creates valid first and second six-leg pools from a full bulletin with abb
   assert.deepEqual(starts.map((start) => auditCouponPool(races.filter((race) => race.no >= start && race.no < start + 6)).ok), [true, true]);
 });
 
+test('parses explicit hash-prefixed horse numbers in the second six-leg pool', () => {
+  const bulletin = Array.from({ length: 8 }, (_, index) => [
+    `${index + 1}. Koşu 14:00 Maiden 1400 Kum`,
+    ...(index === 0 || index === 2 ? ["6'lı Ganyan Bu koşudan başlar"] : []),
+    'At İsmi\tAGF',
+    `#${index + 1} AT ${index + 1}\t%24`
+  ].join('\n')).join('\n');
+  const races = parseRaces(bulletin);
+  const starts = getPoolStarts(races, bulletin);
+  const pools = starts.map((start) => races.filter((race) => race.no >= start && race.no < start + 6));
+
+  assert.deepEqual(starts, [1, 3]);
+  assert.deepEqual(races.find((race) => race.no === 8).horses.map((horse) => [horse.horseNumber, horse.name]), [[8, 'AT 8']]);
+  assert.deepEqual(pools.map((pool) => auditCouponPool(pool).ok), [true, true]);
+});
+
 test('falls back to a clear parenthesized horse number when the number cell is blank', () => {
   const [race] = parseRaces([
     '1. Koşu 14:00 Maiden 1400 Kum',

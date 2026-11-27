@@ -103,6 +103,7 @@
         const horseCellIndex = headers.findIndex(isHorseNameHeader);
         rowName = cells[horseCellIndex] || '';
         const horseMatch = rowName.match(/\((\d{1,2})\)/) || rowName.match(/^\s*(\d{1,2})\s*[-–.)]\s*/);
+        const hashNumberMatch = rowName.match(/^\s*#\s*(\d{1,2})\s+(.+)$/);
         const column = (fragment) => {
           const index = indexOf(fragment);
           return index >= 0 ? cells[index] || '' : '';
@@ -111,7 +112,7 @@
         const combinedNumberMatch = horseCellIndex === 0 && /^(?:n|no|at no|at numarasi|horse no|horse number|runner no|program no|program numarasi)\s+at (?:ismi|adi|name)\b/.test(headers[0])
           ? rowName.match(/^\s*(\d{1,2})\s+(.+)$/)
           : null;
-        horseNumber = (numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null) ?? (horseMatch ? Number(horseMatch[1]) : null) ?? (combinedNumberMatch ? Number(combinedNumberMatch[1]) : null);
+        horseNumber = (numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null) ?? (horseMatch ? Number(horseMatch[1]) : null) ?? (combinedNumberMatch ? Number(combinedNumberMatch[1]) : null) ?? (hashNumberMatch ? Number(hashNumberMatch[1]) : null);
         const explicitRankIndex = headers.findIndex((header) => header.includes('sira') || header.includes('sonuc') || header.includes('result') || header.includes('rank') || header.includes('placing') || header.includes('position'));
         const shortRankIndex = headers.indexOf('s');
         const hasResultTimeColumn = headers.some((header) => ['derece', 'time', 'zaman', 'finish time'].includes(header));
@@ -132,7 +133,7 @@
         const odds = parseNumber(column('gny'));
         const couplingGroup = column('ekuri') || column('ekuri grubu') || column('ekuri no');
         const weight = parseNumber(weightText);
-        const name = (combinedNumberMatch ? combinedNumberMatch[2] : rowName).replace(/\s*\(\d{1,2}\).*$/, '').replace(/^\s*\d{1,2}\s*[-–.)]\s*/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
+        const name = (combinedNumberMatch ? combinedNumberMatch[2] : hashNumberMatch ? hashNumberMatch[2] : rowName).replace(/\s*\(\d{1,2}\).*$/, '').replace(/^\s*\d{1,2}\s*[-–.)]\s*/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
         if (!isUsableHorseName(name)) continue;
         current.horses.push({
           no: horseNumber,
