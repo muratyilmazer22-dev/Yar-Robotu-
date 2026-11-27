@@ -233,7 +233,54 @@
     const contextKeys = raceContextKeys(race);
     const contextualWeights = contextKeys.map((key) => options.contextWeights?.[key]).find(Boolean) || {};
     const weights = { ...BASE_WEIGHTS, ...(options.modelWeights || {}), ...contextualWeights };
-    return scoreRaceWithWeights(race, weights, options.profileScore);
+    const scored = scoreRaceWithWeights(race, weights, options.profileScore);
+    const shares = softmaxScores(scored, weights);
+    const rankForScenario = (scenarioWeights) => new Map([...scored]
+      .sort((a, b) => weightedFeatureScore(b.features, scenarioWeights, scenarioWeights, b.marketAgreement).score
+        - weightedFeatureScore(a.features, scenarioWeights, scenarioWeights, a.marketAgreement).score)
+      .map((horse, index) => [horse, index + 1]));
+    const baselineRanks = rankForScenario(BASE_WEIGHTS);
+    const noMarketRanks = rankForScenario({ ...weights, market: 0 });
+
+    return scored.map((horse, index) => {
+      const baseRank = baselineRanks.get(horse) || index + 1;
+      const withoutMarketRank = noMarketRanks.get(horse) || index + 1;
+      const rankShift = Math.max(Math.abs(index + 1 - baseRank), Math.abs(index + 1 - withoutMarketRank));
+      const drivers = Object.entries(horse.features)
+        .filter(([key, value]) => Number.isFinite(value) && Number(weights[key]) > 0)
+        .map(([key, value]) => {
+          const marketFactor = key === 'market' && Number.isFinite(horse.marketAgreement)
+            ? Math.max(0.15, horse.marketAgreement / 100)
+            : 1;
+          return { key, label: FEATURE_LABELS[key] || key, value, impact: (value - 50) * Number(weights[key]) * marketFactor };
+        });
+      const positiveDrivers = drivers.filter((driver) => driver.impact > 0).sort((a, b) => b.impact - a.impact).slice(0, 3);
+      const counterSignals = drivers.filter((driver) => driver.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 3);
+      const riskFlags = [];
+      if (horse.independentCoverage < 35) riskFlags.push('Piyasa dışı bağımsız kanıt sınırlı.');
+      if (horse.coverage < 50) riskFlags.push('Toplam veri kapsamı düşük; skor daha belirsiz.');
+      if (horse.marketConflict) riskFlags.push('AGF ile oran ayrışıyor; piyasa etkisi azaltıldı.');
+      if (rankShift >= 2) riskFlags.push(`Ağırlık/piyasa duyarlılık testinde sıra ${rankShift} basamağa kadar değişiyor.`);
+      if (horse.missingSignals.length) riskFlags.push(`Eksik sinyaller: ${horse.missingSignals.join(', ')}.`);
+      const summary = [
+        positiveDrivers.length ? `Olumlu sürücüler: ${positiveDrivers.map((driver) => driver.label).join(', ')}.` : '50 nötr çizgisinin üzerinde güçlü bir model sinyali yok.',
+        counterSignals.length ? `Karşı sinyaller: ${counterSignals.map((driver) => driver.label).join(', ')}.` : 'Mevcut veride belirgin negatif model sinyali yok.'
+      ].join(' ');
+      return {
+        ...horse,
+        modelShare: shares[index],
+        reasoning: {
+          summary,
+          positiveDrivers,
+          counterSignals,
+          riskFlags,
+          rankStability: Math.max(0, 100 - rankShift * 25),
+          baseRank,
+          withoutMarketRank,
+          rankShift
+        }
+      };
+    }).sort((a, b) => b.modelShare - a.modelShare);
   }
 
   return { DEFAULT_DNA, BASE_WEIGHTS, normalizeName, distanceBand, raceContextKeys, weightedFeatureScore, weightedFeatureScoreGradient, softmaxScores, analyzeRace };

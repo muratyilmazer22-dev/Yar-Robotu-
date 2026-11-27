@@ -186,6 +186,36 @@
       color: var(--green);
     }
 
+    .horse > .score {
+      grid-column: 3;
+    }
+
+    .horse-reasoning {
+      grid-column: 2 / -1;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface2);
+      padding: 9px 11px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .horse-reasoning summary {
+      cursor: pointer;
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .horse-reasoning p {
+      margin: 8px 0 0;
+    }
+
+    .horse-reasoning ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+    }
+
     .section-tab:focus-visible,
     button:focus-visible,
     summary:focus-visible {
