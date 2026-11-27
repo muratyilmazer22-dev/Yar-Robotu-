@@ -2847,6 +2847,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (restoreFailed) $("appStatus").title = "Ana hafıza yüklenemedi; tarayıcı yedeğiyle devam ediliyor.";
   document.querySelector(".shell")?.removeAttribute("inert");
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
+    const alreadyControlled = Boolean(navigator.serviceWorker.controller);
+    if (alreadyControlled) {
+      navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true });
+    }
     navigator.serviceWorker.register("./service-worker.js", { updateViaCache: "none" })
       .then((registration) => registration.update())
       .catch(() => {});
