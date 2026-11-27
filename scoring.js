@@ -241,10 +241,16 @@
       .map((horse, index) => [horse, index + 1]));
     const baselineRanks = rankForScenario(BASE_WEIGHTS);
     const noMarketRanks = rankForScenario({ ...weights, market: 0 });
+    const marketRanks = new Map(scored
+      .filter((horse) => Number.isFinite(horse.marketScore))
+      .sort((a, b) => b.marketScore - a.marketScore)
+      .map((horse, index) => [horse, index + 1]));
 
     return scored.map((horse, index) => {
       const baseRank = baselineRanks.get(horse) || index + 1;
       const withoutMarketRank = noMarketRanks.get(horse) || index + 1;
+      const marketRank = marketRanks.get(horse) || null;
+      const marketLift = withoutMarketRank > index + 1;
       const rankShift = Math.max(Math.abs(index + 1 - baseRank), Math.abs(index + 1 - withoutMarketRank));
       const drivers = Object.entries(horse.features)
         .filter(([key, value]) => Number.isFinite(value) && Number(weights[key]) > 0)
@@ -260,14 +266,20 @@
       if (horse.independentCoverage < 35) riskFlags.push('Piyasa dışı bağımsız kanıt sınırlı.');
       if (horse.coverage < 50) riskFlags.push('Toplam veri kapsamı düşük; skor daha belirsiz.');
       if (horse.marketConflict) riskFlags.push('AGF ile oran ayrışıyor; piyasa etkisi azaltıldı.');
+      if (marketLift) riskFlags.push(`Piyasa etkisi toplam sıralamayı öne taşıyor; piyasa hariç model sırası #${withoutMarketRank}.`);
+      if (marketRank !== null && Math.abs(marketRank - withoutMarketRank) >= 2) riskFlags.push(`Piyasa sırası #${marketRank} ile piyasa hariç model sırası #${withoutMarketRank} ayrışıyor; favori/sürpriz riski izlenmeli.`);
       if (rankShift >= 2) riskFlags.push(`Ağırlık/piyasa duyarlılık testinde sıra ${rankShift} basamağa kadar değişiyor.`);
       if (horse.missingSignals.length) riskFlags.push(`Eksik sinyaller: ${horse.missingSignals.join(', ')}.`);
+      const confidence = marketLift && horse.independentCoverage < 60 ? 'Düşük' : horse.confidence;
       const summary = [
         positiveDrivers.length ? `Olumlu sürücüler: ${positiveDrivers.map((driver) => driver.label).join(', ')}.` : '50 nötr çizgisinin üzerinde güçlü bir model sinyali yok.',
         counterSignals.length ? `Karşı sinyaller: ${counterSignals.map((driver) => driver.label).join(', ')}.` : 'Mevcut veride belirgin negatif model sinyali yok.'
       ].join(' ');
       return {
         ...horse,
+        confidence,
+        marketRank,
+        marketLift,
         modelShare: shares[index],
         reasoning: {
           summary,
@@ -277,6 +289,8 @@
           rankStability: Math.max(0, 100 - rankShift * 25),
           baseRank,
           withoutMarketRank,
+          marketRank,
+          marketLift,
           rankShift
         }
       };

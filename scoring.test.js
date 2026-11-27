@@ -302,3 +302,26 @@ test('reasoning reports when model ranks change under baseline and market-free s
   assert.ok(marketLeader.reasoning.rankShift >= 1);
   assert.equal(marketLeader.reasoning.withoutMarketRank, 2);
 });
+
+test('a market-lifted leader with incomplete independent evidence is marked low confidence', () => {
+  const { BASE_WEIGHTS } = require('./scoring');
+  const modelWeights = Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [
+    key,
+    key === 'market' ? 0.8 : key === 'rating' || key === 'form' ? 0.1 : 0
+  ]));
+  const ranked = analyzeRace({
+    horses: [
+      { number: 1, hp: 60, agf: 40, odds: 1.05 },
+      { number: 2, hp: 100, agf: 20, odds: 4, last6: '111111' }
+    ]
+  }, { modelWeights });
+  const leader = ranked[0];
+
+  assert.equal(leader.number, 1);
+  assert.equal(leader.marketRank, 1);
+  assert.equal(leader.reasoning.withoutMarketRank, 2);
+  assert.equal(leader.marketLift, true);
+  assert.equal(leader.confidence, 'Düşük');
+  assert.equal(leader.performanceScore, 60);
+  assert.ok(leader.reasoning.riskFlags.some((flag) => flag.includes('piyasa hariç model sırası #2')));
+});
