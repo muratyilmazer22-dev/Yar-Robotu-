@@ -408,6 +408,7 @@ let firebaseSyncReady = false;
   let bulletinSaveTimer = null;
   let firebaseSyncChain = Promise.resolve();
 const $ = (id) => document.getElementById(id);
+document.querySelector(".shell")?.setAttribute("inert", "");
 const recoveryDiagnostics = [];
 function recordRecoveryDiagnostic(type, detail = {}) {
   recoveryDiagnostics.push({ type, path: detail.path || null, attempts: detail.attempts || 0, status: detail.status || null, at: new Date().toISOString() });
@@ -620,6 +621,7 @@ function saveState() {
   singleEvidenceCache = null;
   state.localUpdatedAt = new Date().toISOString();
   const localSave = persistStateLocally();
+  if (firebaseAccount && firebaseSyncReady) queueFirebaseMemorySync();
   updateMemory();
   return localSave;
 }
@@ -827,9 +829,7 @@ function restoreStoredAnalysis() {
   renderAnalysis(parsed.races);
 
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
-  const poolStarts = sortedRaces.length ? [sortedRaces[0].no] : [];
-  const secondPoolStart = sortedRaces.length ? sortedRaces[sortedRaces.length - 1].no - 5 : 0;
-  if (secondPoolStart > poolStarts[0]) poolStarts.push(secondPoolStart);
+  const poolStarts = window.CouponOptimizer.getPoolStarts(sortedRaces, source.text);
   const budget = parseNumber(source.budget || $("butceInput")?.value) || 80;
   const unit = parseNumber(source.unit || $("birimInput")?.value) || 1.25;
   lastCoupons = {};
@@ -1172,6 +1172,19 @@ function historicalEvidenceMarkup(race, horse) {
     : `Mevcut rakiplere karşı geçmiş puanı ${Number(horse.features.rivalFit).toFixed(1)}`;
   return `<small class="horse-meta historical-evidence">Geçmiş veri: ${jockeyText}. ${riderContextText}. ${rivalText}. ${rivalScoreText}. Jokey/at ortak geçmişi bilgilendirme amaçlıdır; veri puana yalnızca eşleşen jokey ve rakip sinyalleri üzerinden girer.</small>`;
 }
+function reasoningMarkup(horse) {
+  const reasoning = horse.reasoning;
+  if (!reasoning) return "";
+  const formatDrivers = (items) => items.length
+    ? items.map((driver) => `${escapeHtml(driver.label)} (${Number(driver.value).toFixed(0)})`).join(" · ")
+    : "Belirgin sinyal yok";
+  const risks = reasoning.riskFlags.length
+    ? `<ul>${reasoning.riskFlags.map((risk) => `<li>${escapeHtml(risk)}</li>`).join("")}</ul>`
+    : "<p>Bu karşılaştırmada belirgin bir veri uyarısı yok.</p>";
+  const stability = Number(reasoning.rankStability) >= 75 ? "Daha kararlı" : "Duyarlı";
+  const coupledNote = horse.isCoupled ? " Eküri sıralaması grup olasılığını toplar; gerekçe en güçlü üyeye aittir." : "";
+  return `<details class="horse-reasoning"><summary>Karar gerekçesi · ${stability} (%${Number(reasoning.rankStability)})</summary><p>${escapeHtml(reasoning.summary)}${coupledNote}</p><p><strong>Olumlu:</strong> ${formatDrivers(reasoning.positiveDrivers)}<br><strong>Karşı sinyal:</strong> ${formatDrivers(reasoning.counterSignals)}</p><p><strong>Duyarlılık:</strong> temel ağırlıklarla sıra ${reasoning.baseRank}; piyasa sinyali çıkarılınca sıra ${reasoning.withoutMarketRank}. Bu test sıralama kararlılığını gösterir, kazanma olasılığı değildir.</p>${risks}</details>`;
+}
 function renderAnalysis(races, targetId = "kosuSonucAlani") {
   const target = $(targetId);
   target.innerHTML = races.map((race) => {
@@ -1202,7 +1215,7 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     const ekuriPairCount = [...ekuriCounts.values()].filter((count) => count > 1).length;
     const relationshipNote = `<p class="hint historical-summary">Atın geçmiş hipodrom, hava ve pist koşullarındaki sonuçları yeterli eşleşme varsa puana katılır; jokeyin aynı pist/mesafe performansı ile mevcut rakiplere karşı önceki bitirişleri de puanlanır. Eşleşmeyen bağlam puanı etkilemez. ${repeatedJockeyCount ? `${repeatedJockeyCount} jokey birden fazla ayakta görünüyor.` : "Ayaklar arasında tekrarlanan jokey tespit edilmedi."} Eküri yalnızca bültendeki açık eküri kodu aynı olan atlarda uygulanır; ${ekuriPairCount ? `${ekuriPairCount} eküri grubu bulundu.` : "bu bültende açık eküri kodu bulunmadı."} KGS (koşmadığı gün sayısı), son starttan bu yana geçen süreyi gösterir; uzun ara ve kısa dinlenme olasılıklarını form ile birlikte değerlendirmeye yardımcı olur. Tek başına performans kanıtı değildir ve veri yoksa tahmin edilmez. Sistem at sahibi benzerliğinden eşleşme tahmin etmez.</p>`;
     const metricTable = ranked.length ? `<details class="analysis-details"><summary>Detaylı analiz tablosu</summary><p class="hint">Puanlar göreli sıralamadır, kazanma olasılığı değildir. Grup gücü; önceki yarışın sınıfı, rakiplerin medyan HP&apos;si ve atın bitirişini birlikte değerlendirir. Pedigri puanı, aynı pist türü ve mesafe bandındaki önceki yavru sonuçlarından öğrenilir; en az üç farklı yavru yoksa gösterilmez. Derece uyumu aynı pist türü ve 200 m yakınlıktaki geçmiş dereceleri karşılaştırır.</p><div class="analysis-table-wrap" role="region" aria-label="Atların detaylı analiz tablosu" tabindex="0"><table class="analysis-table"><thead><tr><th scope="col">Sıra</th><th scope="col">At no</th><th scope="col">At adı</th><th scope="col">Genel</th><th scope="col">Form</th><th scope="col">Piyasa</th><th scope="col">Pedigri</th><th scope="col">Rakip geçmişi</th><th scope="col">Jokey</th><th scope="col">Mesafe</th><th scope="col">Kilo</th><th scope="col">Grup gücü</th><th scope="col">Derece uyumu</th><th scope="col">HP</th><th scope="col">AGF</th><th scope="col">Oran</th><th scope="col">Son 6</th></tr></thead><tbody>${ranked.map((horse, index) => `<tr${index === 0 ? ' class="leader-row"' : ""}><td>${index + 1}</td><td>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</td><td>${escapeHtml(horse.name)}</td><td>${horse.score.toFixed(1)}</td><td>${horse.features.form === null ? "—" : horse.features.form.toFixed(1)}</td><td>${horse.features.market === null ? "—" : horse.features.market.toFixed(1)}</td><td>${horse.features.pedigree === null ? "—" : `${horse.features.pedigree.toFixed(1)} · ${escapeHtml(horse.pedigreeSource || "kaynak yok")}`}</td><td>${horse.features.rivalFit === null ? "—" : horse.features.rivalFit.toFixed(1)}</td><td>${horse.features.jockeyFit === null ? "—" : horse.features.jockeyFit.toFixed(1)}</td><td>${horse.features.distanceFit === null ? "—" : horse.features.distanceFit.toFixed(1)}</td><td>${horse.features.weightFit === null ? "—" : horse.features.weightFit.toFixed(1)}</td><td>${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)}</td><td>${horse.features.timeFit === null ? "—" : horse.features.timeFit.toFixed(1)}</td><td>${horse.hp === null ? "—" : horse.hp}</td><td>${horse.agf === null ? "—" : `%${horse.agf}`}</td><td>${horse.odds === null ? "—" : horse.odds}</td><td>${horse.last6 || "—"}</td></tr>`).join("")}</tbody></table></div></details>` : "";
-    return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${relationshipNote}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}${horse.isCoupled ? `<small>Eküri · ${horse.members.map((member) => `#${member.number} ${escapeHtml(member.name)}`).join(" + ")}</small>` : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small><small>Veri güveni: ${escapeHtml(horse.confidence || "Düşük")} · kapsam %${Number(horse.coverage) || 0} · bağımsız veri %${Number(horse.independentCoverage) || 0}</small><small>${horse.missingSignals?.length ? `Eksik sinyal: ${horse.missingSignals.map(escapeHtml).join(", ")}` : "Kullanılabilir sinyal grupları mevcut"}${horse.marketConflict ? " · AGF ve oran ayrışıyor; piyasa etkisi otomatik azaltıldı" : ""}</small><small>Grup puanı ${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)} · Pedigri puanı ${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)} · Gazete sinyali ${horse.features.analystFit === null ? "—" : horse.features.analystFit.toFixed(0)}</small></span><span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}${Number.isFinite(horse.daysSinceLastRace) ? ` · KGS ${horse.daysSinceLastRace} gün` : " · KGS yok"}</small>${historicalEvidenceMarkup(race, horse)}</div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
+    return `<article class="race">${heading}${signalNote}<p class="hint">${singleNote}</p>${relationshipNote}${ranked.length ? ranked.map((horse, index) => `<div class="horse"><strong class="horse-number"><small>AT NO</small>${Number.isSafeInteger(horse.number) && horse.number > 0 ? horse.number : "—"}</strong><span class="horse-info"><strong>${escapeHtml(horse.name || "İsimsiz at")}</strong>${index === 0 ? " <small class=\"leader-label\">Lider</small>" : ""}${horse.isCoupled ? `<small>Eküri · ${horse.members.map((member) => `#${member.number} ${escapeHtml(member.name)}`).join(" + ")}</small>` : ""}<small>${escapeHtml(horse.signal || "Sinyal yok")}</small><small>Veri güveni: ${escapeHtml(horse.confidence || "Düşük")} · kapsam %${Number(horse.coverage) || 0} · bağımsız veri %${Number(horse.independentCoverage) || 0}</small><small>${horse.missingSignals?.length ? `Eksik sinyal: ${horse.missingSignals.map(escapeHtml).join(", ")}` : "Kullanılabilir sinyal grupları mevcut"}${horse.marketConflict ? " · AGF ve oran ayrışıyor; piyasa etkisi otomatik azaltıldı" : ""}</small><small>Grup puanı ${horse.features.groupFit === null ? "—" : horse.features.groupFit.toFixed(1)} · Pedigri puanı ${horse.features.pedigree === null ? "—" : horse.features.pedigree.toFixed(1)} · Gazete sinyali ${horse.features.analystFit === null ? "—" : horse.features.analystFit.toFixed(0)}</small></span>${reasoningMarkup(horse)}<span class="score"><small>PUAN</small>${horse.score.toFixed(1)}</span><small class="horse-meta">${horse.agf === null ? "AGF yok" : `AGF %${horse.agf}`}${horse.odds === null ? " · Oran yok" : ` · Oran ${horse.odds}`}${horse.hp === null ? " · HP yok" : ` · HP ${horse.hp}`}${Number.isFinite(horse.daysSinceLastRace) ? ` · KGS ${horse.daysSinceLastRace} gün` : " · KGS yok"}</small>${historicalEvidenceMarkup(race, horse)}</div>`).join("") : "<p class=muted>Koşabilir at bulunamadı.</p>"}${metricTable}</article>`;
   }).join("");
 }
 function buildCoupon(races, budget, unit) {
@@ -1419,6 +1432,7 @@ async function runAnalysis() {
   const shadowStatus = await saveShadowSignals(lastAnalysis);
   $("analysisEmptyState")?.remove();
   renderAnalysis(parsed.races);
+  renderSystemComparison();
   const completedCount = parsed.races.filter((race) => race.finished).length;
   const memoryStatus = !locallySaved
     ? "HATA: Analiz üretildi ancak tarayıcı hafızasına yazma doğrulanamadı; yedeği hemen indirin."
@@ -1432,13 +1446,9 @@ async function runAnalysis() {
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
-  const firstRaceNo = sortedRaces[0].no;
-  const lastRaceNo = sortedRaces[sortedRaces.length - 1].no;
   const poolCards = [];
   let autoSavedCouponCount = 0;
-  const poolStarts = [firstRaceNo];
-  const secondPoolStart = lastRaceNo - 5;
-  if (secondPoolStart > firstRaceNo) poolStarts.push(secondPoolStart);
+  const poolStarts = window.CouponOptimizer.getPoolStarts(sortedRaces, input);
   lastCoupons = {};
   for (const [poolIndex, start] of poolStarts.entries()) {
     const end = start + 5;
@@ -1954,11 +1964,34 @@ function inferResultPredictionContext(races) {
 }
 async function persistCurrentMemory() {
   const localSaved = await saveState();
-  return { localSaved, saved: localSaved };
+  const cloudEnabled = Boolean(firebaseAccount && firebaseSyncReady);
+  const cloudSaved = localSaved && cloudEnabled ? await queueFirebaseMemorySync(true) : null;
+  return { localSaved, cloudEnabled, cloudSaved, saved: localSaved && (!cloudEnabled || cloudSaved === true) };
 }
 function resultPersistenceNote(persistence) {
   if (!persistence.localSaved) return "Tarayıcı hafızasına yazılamadı; yedeği indirip saklayın.";
-  return "Bu cihazda kaydedildi; başka cihaza aktarmak için yedeği indirip orada geri yükleyin.";
+  if (persistence.cloudEnabled && !persistence.cloudSaved) return "Cihaz kaydı korundu ancak hesap eşitlemesi tamamlanamadı; bağlantı düzelince yeniden kaydedin.";
+  return persistence.cloudSaved ? "Cihaza ve hesabınıza kaydedildi." : "Bu cihazda kaydedildi; başka cihazlarla eşitlemek için e-posta bağlantısıyla giriş yapın.";
+}
+async function saveResultForCorrection(submission, message, matchingStatus = "awaiting_structured_result") {
+  const preserved = { ...submission, matchingStatus, matchingNote: message };
+  const draft = {
+    id: "draft-result",
+    kind: "result",
+    status: "draft",
+    text: $("sonucluBultenInput")?.value || "",
+    date: $("resultsDateInput")?.value || "",
+    city: $("resultsCityInput")?.value.trim() || "",
+    updatedAt: new Date().toISOString(),
+    ...(storedResultImage ? { image: imageForMemory(storedResultImage) } : {})
+  };
+  state.bulletins = [...state.bulletins.filter((item) => item.id !== submission.id && item.id !== draft.id), preserved, draft];
+  const persistence = await persistCurrentMemory();
+  const statusMessage = persistence.saved
+    ? `✅ Sonuç hafızaya kaydedildi. Ancak karşılaştırma ve öğrenme yapılmadı: ${message} Metin düzeltmeniz için kutuda bırakıldı. ${resultPersistenceNote(persistence)}`
+    : `❌ Sonuç hafızaya kaydedilemedi: ${message} ${resultPersistenceNote(persistence)}`;
+  showMessage($("ogrenmeLogAlani"), statusMessage, persistence.saved ? "success" : "error");
+  updateMemory();
 }
 async function compareResults() {
   const target = $("ogrenmeLogAlani");
@@ -1991,35 +2024,40 @@ async function compareResults() {
   state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
   const parsed = parseRaces(resultText);
   if (!parsed.races.length) {
-    archivedSubmission = { ...archivedSubmission, matchingStatus: "awaiting_structured_result", matchingNote: "Metin arşivlendi; koşu ve sonuç satırları güvenilir biçimde ayrıştırılamadı." };
-    state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
-    const persistence = await persistCurrentMemory();
-    showMessage(target, `Sonuç hafızaya işlendi. Koşu ve at sıraları çözümlenemedi; karşılaştırma yapılmadı. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
-    updateMemory();
+    await saveResultForCorrection(archivedSubmission, "Koşu ve sonuç satırları metinden güvenilir biçimde ayrıştırılamadı. Sonuçları tablo biçiminde düzenleyip yeniden deneyin.");
     return;
   }
-  if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) { showMessage(target, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu kaldırıp yeniden deneyin.", "error"); return; }
+  if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) {
+    await saveResultForCorrection(archivedSubmission, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu düzeltip yeniden deneyin.");
+    return;
+  }
   const invalidRace = parsed.races.find((race) => {
     const numbers = race.horses.map((horse) => Number(horse.number));
     return numbers.some((number) => !Number.isSafeInteger(number) || number < 1)
       || new Set(numbers).size !== numbers.length
       || race.horses.some((horse) => horse.place !== null && (!Number.isSafeInteger(horse.place) || horse.place < 1));
   });
-  if (invalidRace) { showMessage(target, `${invalidRace.no}. koşuda at numarası yineleniyor veya sıra bilgisi geçersiz. Sonuç tablosunu düzeltip yeniden deneyin.`, "error"); return; }
+  if (invalidRace) {
+    const numbers = invalidRace.horses.map((horse) => Number(horse.number));
+    const duplicates = numbers.filter((number, index) => numbers.indexOf(number) !== index && Number.isSafeInteger(number) && number > 0);
+    const invalidPlaces = invalidRace.horses.filter((horse) => horse.place !== null && (!Number.isSafeInteger(horse.place) || horse.place < 1));
+    const details = [
+      duplicates.length ? `yinelenen at numarası: ${[...new Set(duplicates)].join(", ")}` : "",
+      invalidPlaces.length ? `geçersiz sıra: ${invalidPlaces.map((horse) => `${horse.name || `#${horse.number}`} (${horse.place})`).join(", ")}` : ""
+    ].filter(Boolean).join("; ");
+    await saveResultForCorrection(archivedSubmission, `${invalidRace.no}. koşu geçersiz görünüyor${details ? ` — ${details}` : ""}. Sonuç tablosunu düzeltip yeniden deneyin.`);
+    return;
+  }
   const inferredContext = inferResultPredictionContext(parsed.races);
   const selectedContext = $("resultsContextInput")?.selectedOptions[0];
   const manuallySelected = Boolean(selectedContext?.dataset.date && $("resultsContextInput").closest("details")?.open);
   const resultDate = manuallySelected ? selectedContext.dataset.date : inferredContext?.date || "";
   const resultCity = manuallySelected ? normalize(selectedContext.dataset.city) : normalize(inferredContext?.city || "");
   if (!resultDate) {
-    archivedSubmission = { ...archivedSubmission, matchingStatus: "awaiting_match", matchingNote: "Sonuç metni arşivlendi; tahminlerle eşleşen tarih ve hipodrom henüz doğrulanamadı." };
-    state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
-    const persistence = await persistCurrentMemory();
     const resultsHelp = state.predictions.length
       ? "Sonuç hafızaya işlendi; tahminlerle eşleşen tarih bulunamadı. Eşleşme belirsizse doğru analizi elle seçin."
-      : "Sonuç hafızaya işlendi; bu cihazda kayıtlı tahmin bulunamadı. Tahminlerin olduğu hesapla giriş yapın veya yedeği yükleyin.";
-    showMessage(target, `${resultsHelp} ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
-    updateMemory();
+      : "Sonuç hafızaya işlendi; kayıtlı tahmin bulunamadı. Tahminlerin olduğu hesapla giriş yapın veya yedeği yükleyin.";
+    await saveResultForCorrection(archivedSubmission, resultsHelp, "awaiting_match");
     return;
   }
   $("resultsDateInput").value = resultDate;
@@ -2030,10 +2068,7 @@ async function compareResults() {
   await saveState();
   const matchingPredictions = state.predictions.filter((item) => item.date === resultDate && normalize(item.city || "") === resultCity);
   if (!matchingPredictions.length) {
-    const persistence = await persistCurrentMemory();
-    const note = resultPersistenceNote(persistence);
-    showMessage(target, `Sonuç arşivlendi ancak seçilen analiz için kayıtlı tahmin bulunamadı. Öğrenme güncellenmedi. ${note}`, persistence.saved ? "" : "error");
-    updateMemory();
+    await saveResultForCorrection(archivedSubmission, "Sonuç arşivlendi ancak seçilen analiz için kayıtlı tahmin bulunamadı. Öğrenme güncellenmedi; doğru analizi seçip yeniden deneyin.", "awaiting_prediction_match");
     return;
   }
   for (const coupon of state.coupons) {
@@ -2096,7 +2131,10 @@ async function compareResults() {
     const mismatchNote = racesWithWinnerMismatch ? ` Kazananın numarası aynı olsa da at adı ${racesWithWinnerMismatch} koşuda tahminle uyuşmadı; yanlış hipodrom eşleşmesi olabileceğinden öğrenme durduruldu.` : "";
     const persistence = await persistCurrentMemory();
     const note = resultPersistenceNote(persistence);
-    showMessage(target, `Sonuç arşivlendi ancak güvenilir tahmin eşleşmesi bulunamadı. Öğrenme güncellenmedi; ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} ${note}`, persistence.saved ? "" : "error");
+    const statusMessage = persistence.saved
+      ? `✅ Sonuç hafızaya kaydedildi; ancak güvenilir tahmin eşleşmesi bulunamadığı için karşılaştırma ve öğrenme yapılmadı. ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} ${note}`
+      : `❌ Sonuç arşivlendi ancak kalıcı hafıza kaydı doğrulanamadı. ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} ${note}`;
+    showMessage(target, statusMessage, persistence.saved ? "warning" : "error");
     updateMemory();
     return;
   }
@@ -2104,17 +2142,30 @@ async function compareResults() {
   state.outcomes = merged.outcomes;
   archivedSubmission = { ...archivedSubmission, matchingStatus: "matched", matchingNote: "Sonuçlar kayıtlı tahminlerle otomatik eşleştirildi.", matchedAt: new Date().toISOString() };
   state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
-  if (merged.added || merged.corrected) trainModel();
+  const newLearningData = merged.added > 0 || merged.corrected > 0;
+  if (newLearningData) trainModel();
   const persistence = await persistCurrentMemory();
   const saved = persistence.saved;
+  if (saved) {
+    const previousBulletins = state.bulletins;
+    state.bulletins = state.bulletins.filter((item) => item.id !== "draft-result");
+    if (await saveState()) $("sonucluBultenInput").value = "";
+    else state.bulletins = previousBulletins;
+  }
   const duplicates = outcomes.length - merged.added - merged.corrected;
   const winnerMismatchNote = racesWithWinnerMismatch ? `${racesWithWinnerMismatch} koşu kazanan at kimliği uyuşmadığı için dışarıda bırakıldı.` : "";
   const report = state.trainingReport || {};
-  const learningStatus = report.updated
-    ? "İleri tarih doğrulaması geçti; yeni model ağırlıkları etkinleştirildi."
-    : report.verified
-      ? "Sonuçlar öğrenme arşivine eklendi; doğrulama eşiği geçilmediği için mevcut ağırlıklar korundu."
-      : `Sonuçlar öğrenme arşivine eklendi; model için henüz yeterli doğrulama verisi yok (en az ${MODEL_MIN_RACES} uygun yarış gerekli).`;
+  const learningDateCount = new Set(state.outcomes
+    .filter((item) => window.RaceLearningEvaluation.isPersonalBulletinOutcome(item) && item.reviewedByUser === true)
+    .map((item) => String(item.at || "").slice(0, 10))
+    .filter(Boolean)).size;
+  const learningStatus = !newLearningData
+    ? "Bu sonuçlar daha önce öğrenme hafızasına alınmış; yeni eğitim yapılmadı ve model ağırlıkları değiştirilmedi."
+    : report.updated
+      ? "İleri tarih doğrulaması geçti; yeni model ağırlıkları etkinleştirildi."
+      : report.verified
+        ? "Yeni sonuçlar öğrenme arşivine eklendi; doğrulama eşiği geçilmediği için mevcut ağırlıklar korundu."
+        : `Yeni sonuçlar öğrenme arşivine eklendi; model henüz güncellenmedi. Gerekli eşik: en az ${MODEL_MIN_RACES} eğitim yarışı, 5 ileri-tarih doğrulama yarışı ve 5 ayrı yarış günü. Şu an ${report.sampleSize || 0} uygun yarış / ${learningDateCount} ayrı gün var.`;
   const auditRaces = parsed.races.flatMap((race) => {
     const runs = matchingPredictions.filter((item) => Number(item.no) === Number(race.no)).sort((a, b) => String(a.predictionCreatedAt || "").localeCompare(String(b.predictionCreatedAt || "")));
     const winners = race.horses.filter((horse) => horse.place === 1);
@@ -2148,8 +2199,8 @@ async function compareResults() {
   }).length;
   const outcomeDetails = `<details class="result-comparison-details"><summary>Koşu ayrıntılarını göster · ${evaluatedRaceCount} koşu</summary><section class="card"><h3>Karşılaştırma raporu</h3><p class="sub">${outcomes.length} tahmin sürümü · ${stableRaceCount}/${evaluatedRaceCount} koşuda model lideri sabit · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length}.</p><p class="sub">${merged.added} yeni · ${merged.corrected} düzeltilen · ${duplicates} yinelenen · ${racesWithoutWinner + racesWithoutPrediction} atlanan tahmin sonucu. ${escapeHtml(winnerMismatchNote)} ${escapeHtml(learningStatus)}</p>${auditRaces}</section></details>`;
   const summaryText = saved
-    ? `Sonuç hafızaya işlendi. ${evaluatedRaceCount} koşu karşılaştırıldı · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length} tahmin sürümünde isabet etti. Bu cihazda kaydedildi.`
-    : `Karşılaştırma tamamlandı ancak hafıza kaydı doğrulanamadı. ${resultPersistenceNote(persistence)}`;
+    ? `✅ Sonuç hafızaya kaydedildi ve ${evaluatedRaceCount} koşu karşılaştırıldı · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length} tahmin sürümünde isabet etti. ${resultPersistenceNote(persistence)} ${learningStatus}`
+    : `❌ Karşılaştırma tamamlandı ancak kalıcı hafıza kaydı doğrulanamadı. ${resultPersistenceNote(persistence)}`;
   showMessage(target, summaryText, saved ? "success" : "error");
   target.insertAdjacentHTML("beforeend", outcomeDetails);
   renderTrainingReport();
@@ -2443,10 +2494,12 @@ function initializeMemoryNotes() {
     event.target.value = "";
     if (file) handleMemoryFile(file);
   });
-  $("saveMemoryNoteButton")?.addEventListener("click", async () => {
+  $("saveMemoryNoteButton")?.addEventListener("click", async (event) => {
     const input = $("memoryNoteInput");
     const status = $("memoryNoteStatus");
+    const button = event.currentTarget;
     const content = input?.value.trim() || "";
+    status.classList.remove("error", "success");
     if (!content) {
       status.textContent = "Kaydetmeden önce bir not girin veya dosyadan aktarın.";
       status.classList.add("error");
@@ -2456,18 +2509,33 @@ function initializeMemoryNotes() {
     const category = Object.hasOwn(MEMORY_NOTE_CATEGORIES, categoryValue) ? categoryValue : "general";
     const note = { id: window.crypto?.randomUUID?.() || `note-${Date.now()}-${Math.random().toString(36).slice(2)}`, category, content, createdAt: new Date().toISOString() };
     const previousNotes = state.memoryNotes || [];
+    button.disabled = true;
+    button.textContent = "Hafızaya kaydediliyor…";
+    status.textContent = "Not hafızaya kaydediliyor…";
     state.memoryNotes = [...previousNotes, note];
-    const saved = await saveState();
-    status.classList.toggle("error", !saved);
-    if (!saved) {
+    try {
+      const saved = await saveState();
+      if (!saved) {
+        state.memoryNotes = previousNotes;
+        updateMemory();
+        status.textContent = "Not kaydedilemedi; metin taslakta korundu. Yeniden deneyin.";
+        status.classList.add("error");
+        return;
+      }
+      input.value = "";
+      updateMemoryNoteCharacterCount();
+      const categoryLabel = MEMORY_NOTE_CATEGORIES[category] || MEMORY_NOTE_CATEGORIES.general;
+      status.textContent = `Kaydedildi — sistem öğrendi. ${categoryLabel} notu hafıza bankasına eklendi; tahmin puanları otomatik değiştirilmedi.`;
+      status.classList.add("success");
+    } catch (error) {
       state.memoryNotes = previousNotes;
       updateMemory();
-      status.textContent = "Not yerel hafızaya yazılamadı; metin taslakta korundu.";
-      return;
+      status.textContent = "Not kaydedilemedi; metin taslakta korundu. Yeniden deneyin.";
+      status.classList.add("error");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Hafızaya kaydet";
     }
-    input.value = "";
-    updateMemoryNoteCharacterCount();
-    status.textContent = "Not bu cihazın hafızasına kaydedildi.";
   });
   $("memoryNotesList")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-memory-action]");
@@ -2543,99 +2611,73 @@ function comparisonWinner(date, city, raceNo) {
     .filter((item) => Number(item.raceNo) === raceNo && normalize(item.city || "") === normalize(city) && String(item.at || "").slice(0, 10) === date && Number.isSafeInteger(Number(item.winner)))
     .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")))[0] || null;
 }
+function latestComparisonContext() {
+  const predictions = [...state.predictions, ...lastAnalysis]
+    .filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(String(item.date || "")) && Array.isArray(item.horses) && item.horses.length)
+    .sort((a, b) => `${b.date}${b.predictionCreatedAt || ""}`.localeCompare(`${a.date}${a.predictionCreatedAt || ""}`));
+  const latest = predictions[0];
+  if (!latest) return null;
+  const matching = predictions.filter((item) => item.date === latest.date
+    && normalize(item.city || "") === normalize(latest.city || "")
+    && (!latest.runId || item.runId === latest.runId));
+  const latestByRace = new Map();
+  matching.forEach((item) => {
+    const raceNo = Number(item.no);
+    if (Number.isSafeInteger(raceNo) && raceNo > 0 && !latestByRace.has(raceNo)) latestByRace.set(raceNo, item);
+  });
+  return { date: latest.date, city: latest.city || "", races: [...latestByRace.values()].sort((a, b) => Number(a.no) - Number(b.no)) };
+}
+function comparisonExternalPicks(signals) {
+  const labels = { banko: "Banko", favorite: "Favori", place: "Plase", rival: "Rakip", surprise: "Sürpriz" };
+  const entries = Object.entries(signals || {}).filter(([, numbers]) => Array.isArray(numbers) && numbers.length);
+  const numbers = [...new Set(entries.flatMap(([, picks]) => picks.map(Number)))].filter((number) => Number.isSafeInteger(number) && number > 0);
+  const description = entries.map(([key, picks]) => `${labels[key] || key}: #${picks.join(", #")}`).join(" · ");
+  return { numbers, description };
+}
 function renderSystemComparison() {
   const legsTarget = $("systemCompareLegs");
   const scoreboard = $("systemCompareScoreboard");
-  const dateInput = $("systemCompareDate");
-  const cityInput = $("systemCompareCity");
-  if (!legsTarget || !scoreboard || !dateInput || !cityInput) return;
-  const date = dateInput.value;
-  const city = cityInput.value.trim();
-  const record = state.shadowComparisons.find((item) => item.date === date && normalize(item.city || "") === normalize(city));
+  if (!legsTarget || !scoreboard) return;
+  const context = latestComparisonContext();
+  const title = $("systemComparisonTitle");
+  if (!context) {
+    if (title) title.textContent = "Otomatik sonuç takibi";
+    legsTarget.innerHTML = '<p class="sub">Kayıtlı analiz bulunamadı. Bir analiz üretildiğinde seçimler burada otomatik izlenir.</p>';
+    scoreboard.replaceChildren();
+    return;
+  }
+  const { date, city, races } = context;
+  if (title) title.textContent = `${city || "Hipodrom"} · ${new Date(`${date}T00:00:00`).toLocaleDateString("tr-TR")} otomatik takip`;
   let mainHits = 0;
-  let shadowHits = 0;
-  let comparedRaces = 0;
-  legsTarget.innerHTML = Array.from({ length: 6 }, (_, index) => {
-    const raceNo = index + 1;
+  let mainCompared = 0;
+  let externalHits = 0;
+  let externalCompared = 0;
+  legsTarget.innerHTML = races.map((prediction) => {
+    const raceNo = Number(prediction.no);
     const main = comparisonMainPicks(date, city, raceNo);
     const mainNumbers = main.horses.map((horse) => Number(horse.number)).filter((number) => Number.isSafeInteger(number) && number > 0);
-    const officialWinner = comparisonWinner(date, city, raceNo);
-    const manuallyEnteredWinner = Number(record?.winners?.[raceNo]);
-    const winner = manuallyEnteredWinner > 0
-      ? { winner: manuallyEnteredWinner, winnerName: "", source: "manual" }
-      : officialWinner;
-    const shadowNumbers = record?.shadowPicks?.[raceNo] || [];
-    if (winner && mainNumbers.length && shadowNumbers.length) {
-      comparedRaces += 1;
+    const external = comparisonExternalPicks(prediction.externalSignals);
+    const winner = comparisonWinner(date, city, raceNo);
+    if (winner && mainNumbers.length) {
+      mainCompared += 1;
       if (mainNumbers.includes(Number(winner.winner))) mainHits += 1;
-      if (shadowNumbers.includes(Number(winner.winner))) shadowHits += 1;
+    }
+    if (winner && external.numbers.length) {
+      externalCompared += 1;
+      if (external.numbers.includes(Number(winner.winner))) externalHits += 1;
     }
     const mainLabel = mainNumbers.length ? `Ana sistem: #${mainNumbers.join(", #")} · ${main.source}` : `Ana sistem: ${main.source}`;
-    const resultLabel = winner ? `Kazanan: #${Number(winner.winner)}${winner.winnerName ? ` ${escapeHtml(winner.winnerName)}` : winner.source === "manual" ? " · elle girildi" : ""}` : "Kazanan henüz girilmedi";
-    const scoreLabel = winner && mainNumbers.length && shadowNumbers.length
-      ? `Ana ${mainNumbers.includes(Number(winner.winner)) ? "isabet" : "kaçırdı"} · Gölge ${shadowNumbers.includes(Number(winner.winner)) ? "isabet" : "kaçırdı"}`
-      : "";
-    const winnerInputValue = manuallyEnteredWinner > 0 ? manuallyEnteredWinner : officialWinner?.winner || "";
-    return `<div class="system-comparison-leg"><div><strong>${raceNo}. Koşu</strong><small>${mainLabel}</small><small>${resultLabel}</small>${scoreLabel ? `<small>${scoreLabel}</small>` : ""}</div><label for="shadowPick${raceNo}">Gölge at numaraları<input id="shadowPick${raceNo}" inputmode="numeric" autocomplete="off" placeholder="Örn. 2, 5, 8" value="${(shadowNumbers || []).join(", ")}" aria-describedby="systemComparisonTitle"></label><label for="winnerPick${raceNo}">Kazanan at no.<input id="winnerPick${raceNo}" type="number" min="1" max="99" step="1" inputmode="numeric" autocomplete="off" placeholder="Sonuç sonrası" value="${winnerInputValue}" aria-label="${raceNo}. koşu kazanan at numarası"></label></div>`;
+    const externalLabel = external.description ? `Dış sinyal: ${external.description}` : "Dış sinyal: bu analizde kayıtlı değil";
+    const resultLabel = winner ? `Kazanan: #${Number(winner.winner)}${winner.winnerName ? ` ${escapeHtml(winner.winnerName)}` : ""}` : "Resmî sonuç bekleniyor";
+    const mainStatus = winner && mainNumbers.length ? `Ana sistem ${mainNumbers.includes(Number(winner.winner)) ? "isabet etti" : "kaçırdı"}` : "Ana sistem sonucu bekliyor";
+    const externalStatus = winner && external.numbers.length ? `Dış sinyal ${external.numbers.includes(Number(winner.winner)) ? "isabet etti" : "kaçırdı"}` : "";
+    return `<div class="system-comparison-leg"><strong>${raceNo}. Koşu</strong><small>${mainLabel}</small><small>${externalLabel}</small><small>${resultLabel}</small><small>${mainStatus}${externalStatus ? ` · ${externalStatus}` : ""}</small></div>`;
   }).join("");
-  if (!date || !city) {
-    scoreboard.innerHTML = '<p class="sub">Tarih ve hipodrom girerek karşılaştırmayı başlatın.</p>';
-    return;
-  }
-  if (comparedRaces) {
-    const leader = mainHits === shadowHits ? "Berabere" : mainHits > shadowHits ? "Ana sistem önde" : "Gölge sistem önde";
-    scoreboard.innerHTML = `<div class="system-comparison-result"><strong>${leader}</strong><div class="system-comparison-row"><span>Ana sistem</span><strong>${mainHits}/${comparedRaces} yarış</strong></div><div class="system-comparison-row"><span>Gölge sistem</span><strong>${shadowHits}/${comparedRaces} yarış</strong></div><small class="muted">Yalnızca iki sistemde de seçim bulunan ve kazananı işlenmiş yarışlar sayılır.</small></div>`;
-  } else {
-    scoreboard.innerHTML = `<p class="sub">${record ? "Seçimler kaydedildi. " : "Önce gölge seçimlerini kaydedin. "}Yarıştan sonra kazanan at numarasını girip kaydedin; işlenmiş sonuç bültenleri de otomatik eşleştirilir.</p>`;
-  }
-}
-function saveShadowComparison() {
-  const date = $("systemCompareDate")?.value || "";
-  const city = $("systemCompareCity")?.value.trim() || "";
-  const status = $("systemCompareStatus");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !city) {
-    status.textContent = "Geçerli bir tarih ve hipodrom girin.";
-    status.classList.add("error");
-    return;
-  }
-  const shadowPicks = {};
-  const winners = {};
-  for (let raceNo = 1; raceNo <= 6; raceNo += 1) {
-    const raw = $(`shadowPick${raceNo}`)?.value.trim() || "";
-    if (!raw || !/^\d+(?:[\s,;]+\d+)*$/.test(raw)) {
-      status.textContent = `${raceNo}. koşu için at numaralarını virgülle ayırarak girin.`;
-      status.classList.add("error");
-      return;
-    }
-    const numbers = [...new Set(raw.split(/[\s,;]+/).map(Number))];
-    if (numbers.some((number) => !Number.isSafeInteger(number) || number < 1 || number > 99)) {
-      status.textContent = `${raceNo}. koşudaki at numaralarını kontrol edin.`;
-      status.classList.add("error");
-      return;
-    }
-    const prediction = comparisonPrediction(date, city, raceNo);
-    const available = new Set((prediction?.horses || []).map((horse) => Number(horse.number)));
-    if (available.size && numbers.some((number) => !available.has(number))) {
-      status.textContent = `${raceNo}. koşudaki numaralardan biri kayıtlı bültende bulunmuyor.`;
-      status.classList.add("error");
-      return;
-    }
-    const winnerRaw = $(`winnerPick${raceNo}`)?.value.trim() || "";
-    if (winnerRaw && !/^[1-9]\d?$/.test(winnerRaw)) {
-      status.textContent = `${raceNo}. koşunun kazanan at numarası 1–99 arasında olmalı.`;
-      status.classList.add("error");
-      return;
-    }
-    shadowPicks[raceNo] = numbers;
-    if (winnerRaw) winners[raceNo] = Number(winnerRaw);
-  }
-  const next = { id: `${date}:${normalize(city)}`, date, city: city.slice(0, 80), shadowPicks, winners, savedAt: new Date().toISOString() };
-  state.shadowComparisons = [next, ...state.shadowComparisons.filter((item) => item.id !== next.id)].slice(0, 200);
-  saveState().then((saved) => {
-    status.textContent = saved ? "Gölge seçimleri ve girilen kazananlar bu cihazda kaydedildi." : "Seçimler kaydedilemedi; tarayıcı hafızasını kontrol edin.";
-    status.classList.toggle("error", !saved);
-    renderSystemComparison();
-  });
+  const pending = races.filter((prediction) => !comparisonWinner(date, city, Number(prediction.no))).length;
+  const externalSummary = externalCompared
+    ? `<div class="system-comparison-row"><span>Dış sinyal</span><strong>${externalHits}/${externalCompared} isabet</strong></div>`
+    : "";
+  scoreboard.innerHTML = `<div class="system-comparison-status"><div class="system-comparison-row"><span>Ana sistem</span><strong>${mainHits}/${mainCompared} isabet</strong></div>${externalSummary}<small>${pending ? `${pending} koşu sonuç bekliyor.` : "Eşleşen tüm koşuların sonucu işlendi."} Kayıtlı sonuçlar geldikçe bu takip otomatik yenilenir.</small></div>`;
 }
 
 function resetHistory() {
@@ -2656,7 +2698,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     memoryPanel.classList.remove("panel", "panel-details");
     learningContent.prepend(memoryPanel);
   }
-  state = await restoreState();
+  let restoreFailed = false;
+  try {
+    state = await restoreState();
+  } catch {
+    state = loadLegacyState();
+    restoreFailed = true;
+  }
   initializeMemoryNotes();
   initializeShadowSignalControls();
   window.addEventListener("beforeinstallprompt", (event) => {
@@ -2676,12 +2724,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("couponDateInput").value = todayLocal;
   $("resultsDateInput").value = todayLocal;
   $("manualCouponDate").value = todayLocal;
-  $("systemCompareDate").value = todayLocal;
-  const latestShadowComparison = [...state.shadowComparisons].sort((a, b) => String(b.savedAt || "").localeCompare(String(a.savedAt || "")))[0];
-  if (latestShadowComparison) {
-    $("systemCompareDate").value = latestShadowComparison.date || todayLocal;
-    $("systemCompareCity").value = latestShadowComparison.city || "İzmir";
-  }
   const savedProgramDraft = state.bulletins.find((item) => item.id === "draft-program");
   const savedResultDraft = state.bulletins.find((item) => item.id === "draft-result");
   if (savedProgramDraft) {
@@ -2712,7 +2754,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("loadArchivedResultsButton")?.addEventListener("click", loadArchivedResults);
   $("hamBultenInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("analystSignalInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), analystNotes: $("analystSignalInput").value }));
-  $("hamBultenInput")?.addEventListener("paste", () => window.setTimeout(() => analyze(), 0));
   $("couponDateInput")?.addEventListener("change", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("couponCityInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }));
   $("butceInput")?.addEventListener("input", () => saveBulletinDraft("program", { text: $("hamBultenInput").value, date: $("couponDateInput").value, city: $("couponCityInput").value.trim(), budget: $("butceInput").value }));
@@ -2727,9 +2768,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     saveBulletinDraft("result", { text: $("sonucluBultenInput").value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim() });
   });
   $("manualCouponForm")?.addEventListener("submit", addManualCoupon);
-  $("saveShadowPredictionButton")?.addEventListener("click", saveShadowComparison);
-  $("systemCompareDate")?.addEventListener("change", renderSystemComparison);
-  $("systemCompareCity")?.addEventListener("change", renderSystemComparison);
   $("analyzeButton")?.addEventListener("click", analyze);
   $("clearButton")?.addEventListener("click", () => { $("hamBultenInput").value = ""; saveBulletinDraft("program", { text: "", date: $("couponDateInput").value, city: $("couponCityInput").value.trim() }); $("bultenUyariAlani").innerHTML = ""; });
   $("chooseAnalystImageButton")?.addEventListener("click", () => $("analystImageInput")?.click());
@@ -2831,7 +2869,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   compactResultsTools();
   updateMemory();
   renderTrainingReport();
-  if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+  $("appStatus").textContent = restoreFailed ? "● Yerel yedek kullanılıyor" : "● Hazır";
+  if (restoreFailed) $("appStatus").title = "Ana hafıza yüklenemedi; tarayıcı yedeğiyle devam ediliyor.";
+  document.querySelector(".shell")?.removeAttribute("inert");
+  if ("serviceWorker" in navigator && location.protocol !== "file:") {
+    const alreadyControlled = Boolean(navigator.serviceWorker.controller);
+    if (alreadyControlled) {
+      navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true });
+    }
+    navigator.serviceWorker.register("./service-worker.js", { updateViaCache: "none" })
+      .then((registration) => registration.update())
+      .catch(() => {});
+  }
   loadArchiveSummary();
   refreshRemoteMemory();
 });

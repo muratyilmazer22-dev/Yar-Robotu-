@@ -96,7 +96,10 @@
           return index >= 0 ? cells[index] || '' : '';
         };
         const numberIndex = headers.findIndex((header) => header === 'n' || header === 'no' || header.includes('at no') || header.includes('horse no') || header.includes('horse number') || header.includes('program no'));
-        horseNumber = numberIndex >= 0 ? parseNumber(cells[numberIndex]) : horseMatch ? Number(horseMatch[1]) : null;
+        const combinedNumberMatch = horseCellIndex === 0 && /^(?:n|no|at no|horse no|horse number|program no)\s+at (?:ismi|adi|name)\b/.test(headers[0])
+          ? rowName.match(/^\s*(\d{1,2})\s+(.+)$/)
+          : null;
+        horseNumber = numberIndex >= 0 ? parseNumber(cells[numberIndex]) : horseMatch ? Number(horseMatch[1]) : combinedNumberMatch ? Number(combinedNumberMatch[1]) : null;
         const explicitRankIndex = headers.findIndex((header) => header.includes('sira') || header.includes('sonuc') || header.includes('result') || header.includes('rank') || header.includes('placing') || header.includes('position'));
         const shortRankIndex = headers.indexOf('s');
         const hasResultTimeColumn = headers.some((header) => ['derece', 'time', 'zaman', 'finish time'].includes(header));
@@ -117,7 +120,7 @@
         const odds = parseNumber(column('gny'));
         const couplingGroup = column('ekuri') || column('ekuri grubu') || column('ekuri no');
         const weight = parseNumber(weightText);
-        const name = rowName.replace(/\s*\(\d{1,2}\).*$/, '').replace(/^\s*\d{1,2}\s*[-–.)]\s*/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
+        const name = (combinedNumberMatch ? combinedNumberMatch[2] : rowName).replace(/\s*\(\d{1,2}\).*$/, '').replace(/^\s*\d{1,2}\s*[-–.)]\s*/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
         if (!isUsableHorseName(name)) continue;
         current.horses.push({
           no: horseNumber,

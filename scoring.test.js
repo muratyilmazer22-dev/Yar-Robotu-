@@ -270,3 +270,35 @@ test('missing horse numbers do not collapse distinct runners in the main ranking
   assert.ok(ranked.every((horse) => horse.number === null));
   assert.deepEqual(new Set(ranked.map((horse) => horse.name)), new Set(['SANÇARLI BEY', 'FIRTINA BİÇEN']));
 });
+
+test('analysis explains positive evidence, counter-signals, and missing-data risks', () => {
+  const ranked = analyzeRace({
+    horses: [
+      { number: 1, hp: 90, last6: '111111', agf: 40, odds: 2 },
+      { number: 2, hp: 30, last6: '888888' }
+    ]
+  });
+  const leader = ranked[0];
+
+  assert.ok(leader.reasoning.positiveDrivers.length > 0);
+  assert.ok(Array.isArray(leader.reasoning.counterSignals));
+  assert.ok(Number.isFinite(leader.reasoning.rankStability));
+  assert.ok(leader.reasoning.baseRank >= 1);
+  assert.ok(leader.reasoning.withoutMarketRank >= 1);
+  assert.ok(leader.reasoning.riskFlags.some((flag) => flag.includes('Eksik sinyaller')));
+});
+
+test('reasoning reports when model ranks change under baseline and market-free scenarios', () => {
+  const { BASE_WEIGHTS } = require('./scoring');
+  const ranked = analyzeRace({
+    horses: [
+      { number: 1, hp: 100, agf: 1, odds: 20 },
+      { number: 2, hp: 10, agf: 99, odds: 1.1 }
+    ]
+  }, { modelWeights: { ...BASE_WEIGHTS, rating: 0.05, market: 0.95 } });
+  const marketLeader = ranked[0];
+
+  assert.equal(marketLeader.number, 2);
+  assert.ok(marketLeader.reasoning.rankShift >= 1);
+  assert.equal(marketLeader.reasoning.withoutMarketRank, 2);
+});

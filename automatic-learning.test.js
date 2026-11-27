@@ -140,6 +140,6 @@ test('verified shadow analyst signals become training features only on an exact 
   const unrelated = raceToTrainingExample({ ...row, raceNo: 4 }, { shadowSignalsByRace });
 
   assert.equal(example.horses.find((horse) => horse.number === 1).features.analystFit, 100);
-  assert.equal(example.horses.find((horse) => horse.number === 2).features.analystFit, 50);
+  assert.equal(example.horses.find((horse) => horse.number === 2).features.analystFit, null);
   assert.equal(unrelated.horses.every((horse) => horse.features.analystFit === null), true);
 });

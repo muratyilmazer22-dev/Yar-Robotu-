@@ -244,6 +244,24 @@ test('ignores percentage-only cells instead of treating them as unnamed runners'
   assert.deepEqual(race.horses.map((horse) => [horse.horseNumber, horse.name]), [[1, 'KIR AT']]);
 });
 
+test('reads the horse number when the compact N and horse-name headers are pasted together', () => {
+  const bulletin = [
+    '7. Koşu 21:30 Maiden 1400 Kum',
+    'N At İsmi\tYaş\tSıklet',
+    '1 ATAERİ KG SK\t3y d e\t62',
+    '2 BESNİ KG DB\t3y a e\t61',
+    '3 KÜÇÜK ŞOVALYE KG DB SK\t3y k e\t57'
+  ].join('\n');
+
+  const [race] = parseRaces(bulletin);
+
+  assert.deepEqual(race.horses.map((horse) => [horse.horseNumber, horse.name]), [
+    [1, 'ATAERİ'],
+    [2, 'BESNİ'],
+    [3, 'KÜÇÜK ŞOVALYE']
+  ]);
+});
+
 test('keeps the first and second race legs separate at their numbered headings', () => {
   const bulletin = [
     '1. Koşu 14:00 Maiden 1400 Kum',

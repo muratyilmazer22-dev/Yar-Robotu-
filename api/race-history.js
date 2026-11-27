@@ -23,11 +23,14 @@ module.exports = async function handler(request, response) {
     response.setHeader("Allow", "GET");
     return response.status(405).json({ error: "Method not allowed" });
   }
-  if (!process.env.DATABASE_URL) {
+  const databaseUrl = process.env.SUPABASE_POSTGRES_URL_NON_POOLING
+    || process.env.SUPABASE_POSTGRES_URL
+    || process.env.DATABASE_URL;
+  if (!databaseUrl) {
     return response.status(503).json({ error: "Historical archive is not configured" });
   }
 
-  const pool = new Pool({ connectionString: secureDatabaseConnectionString(process.env.DATABASE_URL), max: 1, connectionTimeoutMillis: 5000, idleTimeoutMillis: 1000 });
+  const pool = new Pool({ connectionString: secureDatabaseConnectionString(databaseUrl), max: 1, connectionTimeoutMillis: 5000, idleTimeoutMillis: 1000 });
   try {
     const db = drizzle(pool);
     const today = new Date().toISOString().slice(0, 10);
