@@ -251,7 +251,30 @@
 
     #ogrenmeLogAlani .alert {
       margin: 10px 0;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface2);
+      color: var(--text);
       line-height: 1.5;
+    }
+
+    #ogrenmeLogAlani .alert.success {
+      border-color: color-mix(in srgb, var(--green) 42%, var(--line));
+      background: color-mix(in srgb, var(--green) 11%, var(--surface));
+      color: var(--green);
+    }
+
+    #ogrenmeLogAlani .alert.warning {
+      border-color: color-mix(in srgb, var(--amber) 42%, var(--line));
+      background: color-mix(in srgb, var(--amber) 9%, var(--surface));
+      color: var(--text);
+    }
+
+    #ogrenmeLogAlani .alert.error {
+      border-color: color-mix(in srgb, var(--red) 42%, var(--line));
+      background: color-mix(in srgb, var(--red) 9%, var(--surface));
+      color: var(--text);
     }
 
     .result-image-import > summary,

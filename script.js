@@ -1987,7 +1987,10 @@ async function saveResultForCorrection(submission, message, matchingStatus = "aw
   };
   state.bulletins = [...state.bulletins.filter((item) => item.id !== submission.id && item.id !== draft.id), preserved, draft];
   const persistence = await persistCurrentMemory();
-  showMessage($("ogrenmeLogAlani"), `${message} Sonuç metni ve düzeltme taslağı hafızaya alındı; geçerli bir sonuç tablosu olmadan karşılaştırma yapılmadı. ${resultPersistenceNote(persistence)}`, persistence.saved ? "" : "error");
+  const statusMessage = persistence.saved
+    ? `✅ Sonuç hafızaya kaydedildi. Ancak karşılaştırma ve öğrenme yapılmadı: ${message} Metin düzeltmeniz için kutuda bırakıldı. ${resultPersistenceNote(persistence)}`
+    : `❌ Sonuç hafızaya kaydedilemedi: ${message} ${resultPersistenceNote(persistence)}`;
+  showMessage($("ogrenmeLogAlani"), statusMessage, persistence.saved ? "success" : "error");
   updateMemory();
 }
 async function compareResults() {
@@ -2128,7 +2131,10 @@ async function compareResults() {
     const mismatchNote = racesWithWinnerMismatch ? ` Kazananın numarası aynı olsa da at adı ${racesWithWinnerMismatch} koşuda tahminle uyuşmadı; yanlış hipodrom eşleşmesi olabileceğinden öğrenme durduruldu.` : "";
     const persistence = await persistCurrentMemory();
     const note = resultPersistenceNote(persistence);
-    showMessage(target, `Sonuç arşivlendi ancak güvenilir tahmin eşleşmesi bulunamadı. Öğrenme güncellenmedi; ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} ${note}`, persistence.saved ? "" : "error");
+    const statusMessage = persistence.saved
+      ? `✅ Sonuç hafızaya kaydedildi; ancak güvenilir tahmin eşleşmesi bulunamadığı için karşılaştırma ve öğrenme yapılmadı. ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} ${note}`
+      : `❌ Sonuç arşivlendi ancak kalıcı hafıza kaydı doğrulanamadı. ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} ${note}`;
+    showMessage(target, statusMessage, persistence.saved ? "warning" : "error");
     updateMemory();
     return;
   }
@@ -2136,7 +2142,8 @@ async function compareResults() {
   state.outcomes = merged.outcomes;
   archivedSubmission = { ...archivedSubmission, matchingStatus: "matched", matchingNote: "Sonuçlar kayıtlı tahminlerle otomatik eşleştirildi.", matchedAt: new Date().toISOString() };
   state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
-  if (merged.added || merged.corrected) trainModel();
+  const newLearningData = merged.added > 0 || merged.corrected > 0;
+  if (newLearningData) trainModel();
   const persistence = await persistCurrentMemory();
   const saved = persistence.saved;
   if (saved) {
@@ -2148,11 +2155,17 @@ async function compareResults() {
   const duplicates = outcomes.length - merged.added - merged.corrected;
   const winnerMismatchNote = racesWithWinnerMismatch ? `${racesWithWinnerMismatch} koşu kazanan at kimliği uyuşmadığı için dışarıda bırakıldı.` : "";
   const report = state.trainingReport || {};
-  const learningStatus = report.updated
-    ? "İleri tarih doğrulaması geçti; yeni model ağırlıkları etkinleştirildi."
-    : report.verified
-      ? "Sonuçlar öğrenme arşivine eklendi; doğrulama eşiği geçilmediği için mevcut ağırlıklar korundu."
-      : `Sonuçlar öğrenme arşivine eklendi; model için henüz yeterli doğrulama verisi yok (en az ${MODEL_MIN_RACES} uygun yarış gerekli).`;
+  const learningDateCount = new Set(state.outcomes
+    .filter((item) => window.RaceLearningEvaluation.isPersonalBulletinOutcome(item) && item.reviewedByUser === true)
+    .map((item) => String(item.at || "").slice(0, 10))
+    .filter(Boolean)).size;
+  const learningStatus = !newLearningData
+    ? "Bu sonuçlar daha önce öğrenme hafızasına alınmış; yeni eğitim yapılmadı ve model ağırlıkları değiştirilmedi."
+    : report.updated
+      ? "İleri tarih doğrulaması geçti; yeni model ağırlıkları etkinleştirildi."
+      : report.verified
+        ? "Yeni sonuçlar öğrenme arşivine eklendi; doğrulama eşiği geçilmediği için mevcut ağırlıklar korundu."
+        : `Yeni sonuçlar öğrenme arşivine eklendi; model henüz güncellenmedi. Gerekli eşik: en az ${MODEL_MIN_RACES} eğitim yarışı, 5 ileri-tarih doğrulama yarışı ve 5 ayrı yarış günü. Şu an ${report.sampleSize || 0} uygun yarış / ${learningDateCount} ayrı gün var.`;
   const auditRaces = parsed.races.flatMap((race) => {
     const runs = matchingPredictions.filter((item) => Number(item.no) === Number(race.no)).sort((a, b) => String(a.predictionCreatedAt || "").localeCompare(String(b.predictionCreatedAt || "")));
     const winners = race.horses.filter((horse) => horse.place === 1);
@@ -2186,8 +2199,8 @@ async function compareResults() {
   }).length;
   const outcomeDetails = `<details class="result-comparison-details"><summary>Koşu ayrıntılarını göster · ${evaluatedRaceCount} koşu</summary><section class="card"><h3>Karşılaştırma raporu</h3><p class="sub">${outcomes.length} tahmin sürümü · ${stableRaceCount}/${evaluatedRaceCount} koşuda model lideri sabit · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length}.</p><p class="sub">${merged.added} yeni · ${merged.corrected} düzeltilen · ${duplicates} yinelenen · ${racesWithoutWinner + racesWithoutPrediction} atlanan tahmin sonucu. ${escapeHtml(winnerMismatchNote)} ${escapeHtml(learningStatus)}</p>${auditRaces}</section></details>`;
   const summaryText = saved
-    ? `Sonuç hafızaya işlendi. ${evaluatedRaceCount} koşu karşılaştırıldı · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length} tahmin sürümünde isabet etti. ${resultPersistenceNote(persistence)} ${learningStatus}`
-    : `Karşılaştırma tamamlandı ancak kalıcı hafıza kaydı doğrulanamadı. ${resultPersistenceNote(persistence)}`;
+    ? `✅ Sonuç hafızaya kaydedildi ve ${evaluatedRaceCount} koşu karşılaştırıldı · ilk tercih ${leadersCorrect}/${outcomes.length} · ilk üç ${topThreeCorrect}/${outcomes.length} tahmin sürümünde isabet etti. ${resultPersistenceNote(persistence)} ${learningStatus}`
+    : `❌ Karşılaştırma tamamlandı ancak kalıcı hafıza kaydı doğrulanamadı. ${resultPersistenceNote(persistence)}`;
   showMessage(target, summaryText, saved ? "success" : "error");
   target.insertAdjacentHTML("beforeend", outcomeDetails);
   renderTrainingReport();
