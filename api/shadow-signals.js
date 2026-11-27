@@ -1,5 +1,4 @@
 const { createHash } = require('node:crypto');
-const { db: defaultDb } = require('../lib/db');
 const { shadowRaceSignals } = require('../lib/db/schema');
 const { verifyFirebaseIdToken: defaultVerifyToken } = require('../lib/history-import-security');
 const { cleanSignals, raceKey } = require('../lib/shadow-signal-learning');
@@ -10,7 +9,7 @@ function isCalendarDate(value) {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
-function createShadowSignalsHandler({ database = defaultDb, verifyToken = defaultVerifyToken } = {}) {
+function createShadowSignalsHandler({ database, verifyToken = defaultVerifyToken } = {}) {
   return async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -58,8 +57,9 @@ function createShadowSignalsHandler({ database = defaultDb, verifyToken = defaul
     if (!rows.length) return res.status(400).json({ error: 'Tarih, hipodrom, koşu numarası veya yorum sinyali doğrulanamadı.' });
 
     try {
+      const activeDatabase = database || require('../lib/db').db;
       for (const row of rows) {
-        await database.insert(shadowRaceSignals).values(row).onConflictDoUpdate({
+        await activeDatabase.insert(shadowRaceSignals).values(row).onConflictDoUpdate({
           target: shadowRaceSignals.signalId,
           set: {
             sourcePublishedAt: row.sourcePublishedAt,
