@@ -78,7 +78,13 @@ module.exports = async function handler(req, res) {
     const recognizedText = String(text || "").trim();
     if (!recognizedText) return res.status(422).json({ error: "Görselden metin okunamadı. Daha net bir görüntü seçin." });
     return res.status(200).json({ text: recognizedText.slice(0, 50000) });
-  } catch {
+  } catch (error) {
+    console.error("[result-image-ocr] Model request failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message : "Unknown model error",
+      status: Number.isInteger(error?.status) ? error.status : undefined,
+      statusCode: Number.isInteger(error?.statusCode) ? error.statusCode : undefined
+    });
     return res.status(502).json({ error: "Görsel şu an okunamadı. Biraz sonra yeniden deneyin." });
   }
 };
