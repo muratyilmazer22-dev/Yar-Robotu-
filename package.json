@@ -7,6 +7,8 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.119.2",
     "@vercel/blob": "^2.9.0",
     "ai": "^7.0.179",
     "drizzle-orm": "^0.45.4",
