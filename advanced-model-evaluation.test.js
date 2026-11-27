@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { BASE_WEIGHTS } = require('./lib/automatic-learning');
-const { normalizeProbabilities, marketProbabilities, summarizeProbabilities, summarizePlackettLuceRanking, selectMarketBlend, evaluateWalkForward } = require('./lib/advanced-model-evaluation');
+const { normalizeProbabilities, marketProbabilities, summarizeProbabilities, summarizePlackettLuceRanking, summarizeWinnerRankContextsByModel, selectMarketBlend, evaluateWalkForward } = require('./lib/advanced-model-evaluation');
 
 test('probability normalization rejects invalid or degenerate inputs', () => {
   assert.deepEqual(normalizeProbabilities([2, 2]), [0.5, 0.5]);
@@ -48,6 +48,33 @@ test('Plackett-Luce ranking report evaluates NDCG@3 and ordered top-three likeli
   assert.ok(Math.abs(report.topThreeSequenceLogLoss - -Math.log(0.45)) < 1e-4);
   assert.ok(reversed.ndcgAt3 < report.ndcgAt3);
   assert.ok(reversed.topThreeSequenceLogLoss > report.topThreeSequenceLogLoss);
+});
+
+test('walk-forward context rankings track out-of-sample low-ranked winners by venue, distance, and surface', () => {
+  const horses = [
+    { number: 1, finishPosition: 2 },
+    { number: 2, finishPosition: 3 },
+    { number: 3, finishPosition: 4 },
+    { number: 4, finishPosition: 1 }
+  ];
+  const report = summarizeWinnerRankContextsByModel([{
+    date: '2026-05-14',
+    city: 'İstanbul',
+    surface: 'Kum',
+    distance: 1200,
+    winner: 4,
+    horses,
+    fixed: [0.7, 0.15, 0.1, 0.05],
+    learned: [0.7, 0.15, 0.1, 0.05],
+    market: [0.1, 0.2, 0.3, 0.4],
+    marketBlend: [0.4, 0.25, 0.2, 0.15]
+  }]);
+
+  assert.equal(report.learned.byCity[0].context, 'İstanbul');
+  assert.equal(report.learned.byCity[0].lowRankWinnerRate, 100);
+  assert.equal(report.learned.byDistanceBand[0].lowRankWinners, 1);
+  assert.equal(report.learned.bySurface[0].races, 1);
+  assert.equal(report.market.byCity[0].leaderHitRate, 100);
 });
 
 test('market blend weight is chosen only with enough earlier calibration races', () => {
