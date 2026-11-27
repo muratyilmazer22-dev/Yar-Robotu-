@@ -291,6 +291,46 @@ test('creates valid first and second six-leg pools from a full bulletin with abb
   assert.deepEqual(starts.map((start) => auditCouponPool(races.filter((race) => race.no >= start && race.no < start + 6)).ok), [true, true]);
 });
 
+test('parses explicit hash-prefixed horse numbers in the second six-leg pool', () => {
+  const bulletin = Array.from({ length: 8 }, (_, index) => [
+    `${index + 1}. Koşu 14:00 Maiden 1400 Kum`,
+    ...(index === 0 || index === 2 ? ["6'lı Ganyan Bu koşudan başlar"] : []),
+    'At İsmi\tAGF',
+    `#${index + 1} AT ${index + 1}\t%24`
+  ].join('\n')).join('\n');
+  const races = parseRaces(bulletin);
+  const starts = getPoolStarts(races, bulletin);
+  const pools = starts.map((start) => races.filter((race) => race.no >= start && race.no < start + 6));
+
+  assert.deepEqual(starts, [1, 3]);
+  assert.deepEqual(races.find((race) => race.no === 8).horses.map((horse) => [horse.horseNumber, horse.name]), [[8, 'AT 8']]);
+  assert.deepEqual(pools.map((pool) => auditCouponPool(pool).ok), [true, true]);
+});
+
+test('builds both overlapping six-leg pools when the final race rows are pasted as plain text', () => {
+  const bulletin = Array.from({ length: 8 }, (_, index) => {
+    const raceNo = index + 1;
+    const heading = `${raceNo}. Koşu 14:00 Maiden 1400 Kum`;
+    const marker = raceNo === 1 || raceNo === 3 ? "6'LI GANYAN Bu koşudan başlar" : '';
+    if (raceNo === 8) {
+      return [heading, marker, 'N At İsmi Yaş Orijin Sıklet Jokey',
+        '1 CID CAMPEADOR (USA) 2y a e LIAM\'S MAP 54,5 PACO LOPEZ',
+        '9 FIGHT AND PRAY (USA) 2y d e EPICENTER 54,5 DIEGO HERRERA'].filter(Boolean).join('\n');
+    }
+    return [heading, marker, 'At No\tAt İsmi\tYaş', `1\tBİRİNCİ AT ${raceNo}\t3y d e`, `2\tİKİNCİ AT ${raceNo}\t3y a e`].filter(Boolean).join('\n');
+  }).join('\n');
+  const races = parseRaces(bulletin);
+  const starts = getPoolStarts(races, bulletin);
+  const pools = starts.map((start) => races.filter((race) => race.no >= start && race.no < start + 6));
+
+  assert.deepEqual(starts, [1, 3]);
+  assert.deepEqual(races.find((race) => race.no === 8).horses.map((horse) => [horse.horseNumber, horse.name]), [
+    [1, 'CID CAMPEADOR (USA)'],
+    [9, 'FIGHT AND PRAY (USA)']
+  ]);
+  assert.deepEqual(pools.map((pool) => auditCouponPool(pool).ok), [true, true]);
+});
+
 test('falls back to a clear parenthesized horse number when the number cell is blank', () => {
   const [race] = parseRaces([
     '1. Koşu 14:00 Maiden 1400 Kum',
