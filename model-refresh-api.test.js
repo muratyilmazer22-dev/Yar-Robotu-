@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createModelRefreshHandler, isAuthorized } = require('./model-refresh');
+const { createModelRefreshHandler, isAuthorized } = require('./api/model-refresh');
 
 function response() {
   return {

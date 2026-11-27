@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createShadowSignalsHandler } = require('./shadow-signals');
+const { createShadowSignalsHandler } = require('./api/shadow-signals');
 
 function responseStub() {
   return {

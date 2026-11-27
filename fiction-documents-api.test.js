@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createFictionDocumentsHandler, validateDocument } = require('./fiction-documents');
+const { createFictionDocumentsHandler, validateDocument } = require('./api/fiction-documents');
 
 function responseStub() {
   return {
