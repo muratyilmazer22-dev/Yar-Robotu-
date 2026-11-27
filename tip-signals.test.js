@@ -19,7 +19,7 @@ test('parses newspaper favorite, place, and surprise columns for use as soft mod
   assert.equal(scoreAnalystSignal(4, signals[1]), 92);
   assert.equal(scoreAnalystSignal(2, signals[1]), 76);
   assert.equal(scoreAnalystSignal(6, signals[1]), 52);
-  assert.equal(scoreAnalystSignal(9, signals[1]), 50);
+  assert.equal(scoreAnalystSignal(9, signals[1]), null);
   assert.equal(scoreAnalystSignal(9, {}), null);
 });
 
