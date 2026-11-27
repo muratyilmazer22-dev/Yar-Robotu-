@@ -69,7 +69,7 @@ module.exports = async function handler(req, res) {
               ? "Bu görsel bir at yarışı gazetesi veya uzman tahmin notu olabilir. Yalnızca görüntüde açıkça basılı olan tahmin/not metnini aynen aktar; koşu numarası, at numarası/adı ve Banko, Favori, Plase, Rakip, Sürpriz gibi etiketleri koru. Sıra, derece veya resmi yarış sonucu bilgilerini tahmin diye yorumlama; tahmin veya eksik bilgi üretme. Okunamayan bölümü 'OKUNAMADI' yaz. Görselde uzman tahmini/notu yoksa tek başına [NO_EXPERT_NOTES] döndür. Markdown, tablo kod çiti veya açıklama ekleme."
               : mode === "memory"
                 ? "Görselde bulunan tüm okunabilir metni, başlıkları, tablo satırlarını ve sayısal değerleri mümkün olduğunca aynen aktar. At yarışı notu, NotebookLM özeti, galop/sprint derecesi, soy kütüğü veya at analizi olabilir. İçeriği özetleme, yorumlama, sınıflandırma ya da eksik bilgi üretme; özgün sıralamayı ve birimleri koru. Okunamayan bölümü [OKUNAMADI] olarak belirt. Görselde metin yoksa kısa bir uyarı döndür. Markdown kod çiti veya ek açıklama ekleme."
-                : "Bu görsel at yarışı bülteni veya sonuç kaydı olabilir. Sütun başlıklarının belirli bir biçimde olmasını şart koşmadan görüntüdeki tüm okunabilir yarış, koşu ve at bilgilerini; görünen numara, ad, sıra/sonuç, derece, tarih ve hipodrom metinlerini özgün sırasını koruyarak aktar. İçeriği yalnızca okunabilir biçimde yapılandır; sonuç olarak açıkça belirtilmeyen sayıları bitiriş sırası diye yorumlama, tahmin/eksik bilgi üretme. Okunamayan hücreyi 'OKUNAMADI' yaz. Sonuç ve program bilgilerini ayırt edemiyorsan ikisini de aynen aktar ve belirsiz olduğunu belirt. Markdown tablo çiti ekleme."
+                : "Bu görselde yalnızca gerçek at yarışı sonuç tablosunu çıkar. Tarayıcı çerçevesini, adres çubuğunu, site başlığını, TJK gezinme menülerini, butonları, sekmeleri, sayfa altlığını, reklamları ve tablo dışındaki arayüz metinlerini tamamen yok say. Her yarış için görünen koşu numarası, at numarası/adı, bitiriş sırası ve dereceyi özgün sırada aktar; tahmin veya eksik veri üretme. OCR çıktısı yalnızca sonuç tablosu satırlarını içermeli; tablo görünmüyorsa ya da okunamıyorsa tek başına [NO_RACE_RESULTS] döndür. Sonuç sırasını açıkça göstermeyen sayıları bitiriş sırası diye yorumlama. Markdown kod çiti veya ek açıklama ekleme."
           },
           { type: "file", mediaType: match[1], data: new Uint8Array(imageBuffer) }
         ]
@@ -78,7 +78,13 @@ module.exports = async function handler(req, res) {
     const recognizedText = String(text || "").trim();
     if (!recognizedText) return res.status(422).json({ error: "Görselden metin okunamadı. Daha net bir görüntü seçin." });
     return res.status(200).json({ text: recognizedText.slice(0, 50000) });
-  } catch {
+  } catch (error) {
+    console.error("[result-image-ocr] Model request failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message : "Unknown model error",
+      status: Number.isInteger(error?.status) ? error.status : undefined,
+      statusCode: Number.isInteger(error?.statusCode) ? error.statusCode : undefined
+    });
     return res.status(502).json({ error: "Görsel şu an okunamadı. Biraz sonra yeniden deneyin." });
   }
 };

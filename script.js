@@ -456,6 +456,7 @@ let singleEvidenceCache = null;
 let firebaseSdk = null;
 let firebaseAccount = null;
 let firebaseSyncReady = false;
+let lastFirebaseSyncSucceeded = null;
   let firebaseSaveTimer = null;
   let bulletinSaveTimer = null;
   let firebaseSyncChain = Promise.resolve();
@@ -559,10 +560,12 @@ function queueFirebaseMemorySync(immediate = false) {
       state = { ...state, bulletins: cloudSnapshot.bulletins, profiles: { ...DEFAULT_PROFILES } };
       await persistStateLocally();
       await firebaseSdk.saveMemory(account, cloudSnapshot);
-      setFirebaseStatus(`Hafıza Firebase ve Blob hesabınızla eşitlendi: ${account.email || account.uid}`);
+      lastFirebaseSyncSucceeded = true;
+      setFirebaseStatus(`Hafıza bu cihaz ve hesabınızla eşitlendi: ${account.email || account.uid}`);
       return true;
     }).catch(() => {
-      setFirebaseStatus("Firebase eşitlemesi başarısız. Yerel kayıtlar korunuyor; Firestore kurallarını ve bağlantıyı kontrol edin.", true);
+      lastFirebaseSyncSucceeded = false;
+      setFirebaseStatus("Hesap eşitlemesi başarısız. Bu cihazdaki kayıt korunuyor; bağlantı ve Firestore kurallarını kontrol edin.", true);
       return false;
     });
     firebaseSyncChain.then(resolveSync);
@@ -669,13 +672,15 @@ async function initializeFirebaseMemory() {
     });
   }
 }
-function saveState() {
+async function saveState() {
   singleEvidenceCache = null;
   state.localUpdatedAt = new Date().toISOString();
-  const localSave = persistStateLocally();
-  if (firebaseAccount && firebaseSyncReady) queueFirebaseMemorySync();
+  lastFirebaseSyncSucceeded = null;
+  const localSaved = await persistStateLocally();
+  if (!localSaved) return false;
+  if (firebaseAccount && firebaseSyncReady) await queueFirebaseMemorySync(true);
   updateMemory();
-  return localSave;
+  return true;
 }
 function imageForMemory(image) {
   if (!image) return image;
@@ -1974,7 +1979,14 @@ async function extractResultsFromImage() {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Görsel okunamadı. Daha net bir görüntü seçip tekrar deneyin.");
     const recognizedText = String(payload.text || "").trim();
-    if (!recognizedText) throw new Error("Görselde okunabilir sonuç metni bulunamadı.");
+    if (!recognizedText || recognizedText === "[NO_RACE_RESULTS]") {
+      throw new Error("Görselde yarış sonuç tablosu bulunamadı. Site menüsü yerine yalnızca sonuç tablosunu içeren bir fotoğraf seçin.");
+    }
+    const recognizedRaces = window.RaceParser.parseRaces(recognizedText);
+    const hasResultOrder = recognizedRaces.some((race) => race.horses.some((horse) => Number(horse.rank) > 0));
+    if (!hasResultOrder) {
+      throw new Error("OCR çıktısında doğrulanabilir at sırası bulunamadı; metin kutusu değiştirilmedi. Sonuç tablosunu kırpıp tekrar deneyin.");
+    }
     const textarea = $("sonucluBultenInput");
     textarea.value = [textarea.value.trim(), recognizedText].filter(Boolean).join("\n\n");
     saveBulletinDraft("result", { text: textarea.value, date: $("resultsDateInput").value, city: $("resultsCityInput").value.trim(), ...(storedResultImage ? { image: storedResultImage } : {}) });
@@ -2015,9 +2027,12 @@ function inferResultPredictionContext(races) {
   return candidates[0] || null;
 }
 async function persistCurrentMemory() {
-  const localSaved = await saveState();
+  singleEvidenceCache = null;
+  state.localUpdatedAt = new Date().toISOString();
+  const localSaved = await persistStateLocally();
   const cloudEnabled = Boolean(firebaseAccount && firebaseSyncReady);
   const cloudSaved = localSaved && cloudEnabled ? await queueFirebaseMemorySync(true) : null;
+  updateMemory();
   return { localSaved, cloudEnabled, cloudSaved, saved: localSaved && (!cloudEnabled || cloudSaved === true) };
 }
 function resultPersistenceNote(persistence) {
@@ -2052,6 +2067,14 @@ async function compareResults() {
     showMessage(target, "Arşivlemek için sonuç metni girin veya bir fotoğraf yükleyin.", "error");
     return;
   }
+  const parsed = parseRaces(resultText);
+  if (!parsed.races.length) {
+    const message = resultText
+      ? "Metinde yarış/at satırı bulunamadı. Site gezinme yazıları sonuç değildir; doğru tabloyu yapıştırın veya fotoğraftan yeniden okuyun. Hatalı metin hafızaya eklenmedi."
+      : "Fotoğrafı hafızaya almadan önce Görselden metni oku düğmesine basın ve sonuç tablosunun metne aktarıldığını doğrulayın.";
+    showMessage(target, message, "error");
+    return;
+  }
   let archivedSubmission = state.bulletins
     .filter((item) => item.kind === "result" && item.text === resultText && (!storedResultImage
       || item.image?.savedAt === storedResultImage.savedAt
@@ -2074,11 +2097,6 @@ async function compareResults() {
   }
   archivedSubmission = { ...archivedSubmission, reviewedByUser: true, reviewedAt: new Date().toISOString() };
   state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
-  const parsed = parseRaces(resultText);
-  if (!parsed.races.length) {
-    await saveResultForCorrection(archivedSubmission, "Koşu ve sonuç satırları metinden güvenilir biçimde ayrıştırılamadı. Sonuçları tablo biçiminde düzenleyip yeniden deneyin.");
-    return;
-  }
   if (new Set(parsed.races.map((race) => race.no)).size !== parsed.races.length) {
     await saveResultForCorrection(archivedSubmission, "Sonuç bülteninde aynı koşu numarası birden fazla bulundu. Yinelenen koşuyu düzeltip yeniden deneyin.");
     return;
@@ -2577,7 +2595,10 @@ function initializeMemoryNotes() {
       input.value = "";
       updateMemoryNoteCharacterCount();
       const categoryLabel = MEMORY_NOTE_CATEGORIES[category] || MEMORY_NOTE_CATEGORIES.general;
-      status.textContent = `Kaydedildi — sistem öğrendi. ${categoryLabel} notu hafıza bankasına eklendi; tahmin puanları otomatik değiştirilmedi.`;
+      const savedLocation = firebaseAccount && firebaseSyncReady
+        ? lastFirebaseSyncSucceeded === true ? "Bu cihaz ve hesabınızla eşitlendi." : "Bu cihazda kaydedildi; hesap eşitleme durumu yukarıda gösteriliyor."
+        : "Bu cihazda kaydedildi. Diğer cihazlarla eşitlemek için e-posta bağlantısıyla giriş yapın.";
+      status.textContent = `${categoryLabel} notu hafıza bankasına eklendi. ${savedLocation} Bu not algoritmayı eğitmez; model durumu bölümünde yalnızca doğrulanmış sonuç eğitimini görebilirsiniz.`;
       status.classList.add("success");
     } catch (error) {
       state.memoryNotes = previousNotes;
@@ -2602,7 +2623,7 @@ function initializeMemoryNotes() {
       const saved = await saveState();
       if (!saved) state.memoryNotes = previousNotes;
       updateMemory();
-      status.textContent = saved ? "Not hafıza bankasından silindi." : "Silme işlemi cihaz hafızasına kaydedilemedi; not korundu.";
+      status.textContent = saved ? firebaseAccount && firebaseSyncReady && lastFirebaseSyncSucceeded !== true ? "Not bu cihazdan silindi; hesap eşitlemesi başarısız olabilir. Üstteki bağlantı durumunu kontrol edin." : "Not hafıza bankasından silindi ve cihaz kaydı güncellendi." : "Silme işlemi cihaz hafızasına kaydedilemedi; not korundu.";
       status.classList.toggle("error", !saved);
       return;
     }
@@ -2759,6 +2780,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   initializeMemoryNotes();
   initializeShadowSignalControls();
+  void initializeFirebaseMemory();
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;
