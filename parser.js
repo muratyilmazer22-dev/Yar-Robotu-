@@ -85,7 +85,37 @@
       if (!current) continue;
 
       const cells = splitCells(raw);
-      if (!cells) continue;
+      if (!cells) {
+        const plainHorseMatch = line.match(/^(\d{1,2})\s+(.+?)\s+(\d{1,2}y\s+[a-z]\s+[a-z])(?:\s|$)/i);
+        if (plainHorseMatch) {
+          const horseNumber = Number(plainHorseMatch[1]);
+          const name = plainHorseMatch[2].trim();
+          if (isUsableHorseName(name)) {
+            current.horses.push({
+              no: horseNumber,
+              horseNumber,
+              name,
+              sire: '',
+              dam: '',
+              damSire: '',
+              origin: '',
+              age: plainHorseMatch[3],
+              weight: null,
+              handicapPoints: null,
+              programStartNumber: null,
+              daysSinceLastRace: null,
+              jockey: '',
+              form: '',
+              agf: null,
+              odds: null,
+              couplingGroup: '',
+              scratched: /koşmaz|scratched/i.test(name),
+              rank: 0
+            });
+          }
+        }
+        continue;
+      }
       const normalizedHeaders = cells.map(normalizeHeader);
       const nameIndex = normalizedHeaders.findIndex(isHorseNameHeader);
       if (nameIndex >= 0) {
