@@ -11,5 +11,14 @@
     "ai": "^7.0.179",
     "drizzle-orm": "^0.45.4",
     "pg": "^8.23.1"
+  },
+  "overrides": {
+    "@vercel/blob": {
+      "@vercel/oidc": {
+        "@vercel/cli-config": {
+          "zod": "^4.6.7"
+        }
+      }
+    }
   }
 }
