@@ -18,6 +18,16 @@ test('seven-race programs expose first altılı as 1–6 and second altılı as 
   assert.deepEqual(getPoolStarts(races), [1, 2]);
 });
 
+test('an official 6’lı Ganyan marker overrides the generic first pool and starts from its marked race', () => {
+  const races = Array.from({ length: 7 }, (_, index) => ({ no: index + 1 }));
+  const bulletin = `1. Koşu 14:00 Şartlı 3 1400 Kum
+7’li Ganyan Bu koşudan başlar
+2. Koşu 14:30 Şartlı 1 1300 Kum
+    6'LI GANYAN Bu koşudan başlar`;
+
+  assert.deepEqual(getPoolStarts(races, bulletin), [2]);
+});
+
 test('second altılı always starts at the next race even when the program has more than seven races', () => {
   const races = Array.from({ length: 8 }, (_, index) => ({ no: index + 1 }));
 

@@ -829,7 +829,7 @@ function restoreStoredAnalysis() {
   renderAnalysis(parsed.races);
 
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
-  const poolStarts = window.CouponOptimizer.getPoolStarts(sortedRaces);
+  const poolStarts = window.CouponOptimizer.getPoolStarts(sortedRaces, source.text);
   const budget = parseNumber(source.budget || $("butceInput")?.value) || 80;
   const unit = parseNumber(source.unit || $("birimInput")?.value) || 1.25;
   lastCoupons = {};
@@ -1435,7 +1435,7 @@ async function runAnalysis() {
   const sortedRaces = [...parsed.races].sort((a, b) => a.no - b.no);
   const poolCards = [];
   let autoSavedCouponCount = 0;
-  const poolStarts = window.CouponOptimizer.getPoolStarts(sortedRaces);
+  const poolStarts = window.CouponOptimizer.getPoolStarts(sortedRaces, input);
   lastCoupons = {};
   for (const [poolIndex, start] of poolStarts.entries()) {
     const end = start + 5;
