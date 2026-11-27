@@ -1,9 +1,8 @@
 const { desc, eq, sql } = require('drizzle-orm');
-const { db } = require('../lib/db');
 const { raceHistory, robotMemory, modelTrainingRuns } = require('../lib/db/schema');
 const { MODEL_KEY, MODEL_VERSION } = require('../lib/model-version');
 
-function createModelMemoryHandler({ database = db } = {}) {
+function createModelMemoryHandler({ database } = {}) {
   return async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -13,14 +12,15 @@ function createModelMemoryHandler({ database = db } = {}) {
     }
 
     try {
-      const [archive] = await database.select({
+      const activeDatabase = database || require('../lib/db').db;
+      const [archive] = await activeDatabase.select({
         raceCount: sql`count(*)::int`,
         completedRaceCount: sql`count(*) FILTER (WHERE CASE WHEN jsonb_typeof(${raceHistory.results}->'runners') = 'array' THEN jsonb_array_length(${raceHistory.results}->'runners') > 0 ELSE false END)::int`,
         firstDate: sql`min(${raceHistory.raceDate})`,
         lastDate: sql`max(${raceHistory.raceDate})`
       }).from(raceHistory);
-      const [automaticModel] = await database.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, MODEL_KEY)).limit(1);
-      const recentTrainingRuns = await database.select({
+      const [automaticModel] = await activeDatabase.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, MODEL_KEY)).limit(1);
+      const recentTrainingRuns = await activeDatabase.select({
         id: modelTrainingRuns.id,
         modelVersion: modelTrainingRuns.modelVersion,
         trainedAt: modelTrainingRuns.trainedAt,
