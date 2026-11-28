@@ -1,8 +1,34 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluateCouponLegs, synchronizeCouponResults } = require('./lib/coupon-results');
+const { evaluateCouponLegs, synchronizeCouponResults, auditFixedPicks } = require('./lib/coupon-results');
 
 const legs = Array.from({ length: 6 }, (_, index) => ({ raceNo: index + 1, horses: [{ number: index + 1 }] }));
+
+test('fixed first three and four report a lower-ranked winner and compare top picks', () => {
+  const ranked = [3, 4, 1, 9, 5].map((number) => ({
+    number,
+    name: `At ${number}`,
+    features: { pedigree: number === 9 ? 90 : 60, trackFit: number === 9 ? 80 : 55, jockeyFit: number === 9 ? 75 : 50 }
+  }));
+  const audit = auditFixedPicks(ranked, 9);
+
+  assert.equal(audit.winnerRank, 4);
+  assert.equal(audit.top3Hit, false);
+  assert.equal(audit.top4Hit, true);
+  assert.equal(audit.winnerHorse.name, 'At 9');
+  assert.deepEqual(audit.comparisonHorses.map(({ horse, rank }) => [horse.number, rank]), [[3, 1], [4, 2], [1, 3]]);
+});
+
+test('fixed-pick audit treats a winning ekuri member as a hit for the grouped selection', () => {
+  const audit = auditFixedPicks([
+    { number: 3, members: [{ number: 3 }, { number: 4 }] },
+    { number: 1, members: [{ number: 1 }] }
+  ], 4);
+
+  assert.equal(audit.winnerRank, 1);
+  assert.equal(audit.top3Hit, true);
+  assert.equal(audit.top4Hit, true);
+});
 
 test('reports a five-of-six coupon and identifies the first missed leg', () => {
   const result = evaluateCouponLegs(legs, Array.from({ length: 6 }, (_, index) => ({ raceNo: index + 1, winnerNumber: index === 0 ? 9 : index + 1 })));
