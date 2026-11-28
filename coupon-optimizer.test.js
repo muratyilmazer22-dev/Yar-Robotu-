@@ -79,6 +79,44 @@ test('a supported surprise candidate is promoted to the second coupon slot witho
   assert.equal(result.candidateIndex, 1);
 });
 
+test('a clear two-signal market favorite leads coupon coverage even below the model leader', () => {
+  const result = prioritizeCoverageCandidate([
+    { number: 3, name: 'Model leader', modelShare: 0.55, signal: 'Sinyaller uyumlu', marketRank: 2, agf: 20, odds: 3.4 },
+    { number: 1, name: 'Market favorite', modelShare: 0.3, signal: 'Sinyaller uyumlu', marketRank: 1, agf: 37, odds: 1.95, marketScore: 88, performanceScore: 80, independentCoverage: 75, coverage: 72, marketAgreement: 90 },
+    { number: 6, name: 'Value runner', modelShare: 0.15, signal: 'Sürpriz adayı', independentCoverage: 60, coverage: 55, performanceScore: 74, marketScore: 60 }
+  ]);
+
+  assert.deepEqual(result.ranked.map((horse) => horse.number), [1, 3, 6]);
+  assert.equal(result.ranked[0].modelRank, 2);
+  assert.deepEqual(result.marketFavorite, { number: 1, name: 'Market favorite', modelRank: 2, marketRank: 1, agf: 37, odds: 1.95 });
+  assert.equal(result.marketFavoriteIndex, 0);
+  assert.equal(result.candidateIndex, 2);
+});
+
+test('does not promote a high-AGF favorite without strong independent model evidence', () => {
+  const result = prioritizeCoverageCandidate([
+    { number: 3, name: 'Model leader', modelShare: 0.55, marketRank: 2, agf: 20, odds: 3.4 },
+    { number: 1, name: 'Unsupported favorite', modelShare: 0.3, marketRank: 1, agf: 37, odds: 1.95, marketScore: 95, performanceScore: 51, independentCoverage: 72, coverage: 70, marketAgreement: 90 },
+    { number: 6, name: 'Third runner', modelShare: 0.15 }
+  ]);
+
+  assert.deepEqual(result.ranked.map((horse) => horse.number), [3, 1, 6]);
+  assert.equal(result.marketFavorite, null);
+  assert.equal(result.marketFavoriteIndex, -1);
+});
+
+test('keeps an already-leading market favorite and uses the next coupon slot normally', () => {
+  const result = prioritizeCoverageCandidate([
+    { number: 1, name: 'Market leader', modelShare: 0.65, signal: 'Sinyaller uyumlu', marketRank: 1, agf: 37, odds: 1.95, marketScore: 90, performanceScore: 82, independentCoverage: 78, coverage: 74, marketAgreement: 92 },
+    { number: 2, name: 'Second choice', modelShare: 0.35, signal: 'Sinyaller uyumlu', marketRank: 2, agf: 18, odds: 3.5 }
+  ]);
+
+  assert.deepEqual(result.ranked.map((horse) => horse.number), [1, 2]);
+  assert.equal(result.ranked[0].marketFavorite, true);
+  assert.equal(result.marketFavoriteIndex, 0);
+  assert.equal(result.marketFavorite.modelRank, 1);
+});
+
 test('surprise labels without enough independent evidence do not get promoted', () => {
   const result = prioritizeCoverageCandidate([
     { number: 1, modelShare: 0.7, signal: 'Sinyaller uyumlu' },

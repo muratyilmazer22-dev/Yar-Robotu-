@@ -122,10 +122,36 @@ test('strong disagreement between AGF and odds reduces market influence and trus
   assert.ok(oddsLeader.marketAgreement < 50);
 });
 
+test('known names do not receive a static pedigree estimate without sourced evidence', () => {
+  const race = { distance: 1400, horses: [{ number: 1, sire: 'TOROK', hp: 80 }, { number: 2, sire: 'TOROK', hp: 40 }] };
+  const ranked = analyzeRace(race);
+  assert.ok(ranked.every((horse) => horse.features.pedigree === null));
+  assert.ok(ranked.every((horse) => horse.pedigreeSource === 'Veri yok'));
+});
+
 test('unknown race distance does not fabricate pedigree fit from a speed/stamina profile', () => {
   const race = { distance: null, horses: [{ number: 1, sire: 'TOROK', hp: 80 }, { number: 2, sire: 'TOROK', hp: 40 }] };
   const ranked = analyzeRace(race);
   assert.ok(ranked.every((horse) => horse.features.pedigree === null));
+});
+
+test('zero in the recent form history is retained as a worst-place result', () => {
+  const modelWeights = Object.fromEntries(Object.keys(require('./scoring').BASE_WEIGHTS).map((name) => [name, name === 'form' ? 1 : 0]));
+  const ranked = analyzeRace({
+    horses: [
+      { number: 1, last6: '000000' },
+      { number: 2, last6: '111111' }
+    ]
+  }, { modelWeights });
+
+  assert.equal(ranked[0].number, 2);
+  assert.equal(ranked.find((horse) => horse.number === 1).features.form, 0);
+  assert.equal(ranked.find((horse) => horse.number === 2).features.form, 90);
+});
+
+test('a zero inside otherwise numeric form is not discarded from the average', () => {
+  const ranked = analyzeRace({ horses: [{ number: 1, last6: '655008' }, { number: 2, last6: '555555' }] });
+  assert.ok(Math.abs(ranked.find((horse) => horse.number === 1).features.form - 26.6667) < 0.001);
 });
 
 test('historical race-time performance influences ranking when available', () => {
@@ -172,17 +198,16 @@ test('bulletin KGS fills the rest signal when archive history is unavailable', (
   assert.equal(unknown.features.restFit, null);
 });
 
-test('newspaper analyst picks influence ranking only when explicitly supplied', () => {
+test('legacy newspaper analyst values and weights do not affect rankings', () => {
   const race = {
     distance: 1400,
     horses: [{ number: 1, hp: 80, analystFit: 50 }, { number: 2, hp: 80, analystFit: 92 }]
   };
-  const withSignal = analyzeRace(race);
-  const withoutSignal = analyzeRace({ ...race, horses: race.horses.map(({ analystFit, ...horse }) => horse) });
+  const baseline = analyzeRace(race);
+  const withLegacyWeights = analyzeRace(race, { modelWeights: { analystFit: 100 } });
 
-  assert.equal(withSignal[0].number, 2);
-  assert.equal(withSignal[0].features.analystFit, 92);
-  assert.equal(withoutSignal.find((horse) => horse.number === 1).features.analystFit, null);
+  assert.equal(Object.hasOwn(baseline[0].features, 'analystFit'), false);
+  assert.deepEqual(withLegacyWeights.map((horse) => horse.number), baseline.map((horse) => horse.number));
 });
 
 test('learned class-history evidence influences the ranking without replacing other features', () => {
@@ -324,4 +349,19 @@ test('a market-lifted leader with incomplete independent evidence is marked low 
   assert.equal(leader.confidence, 'Düşük');
   assert.equal(leader.performanceScore, 60);
   assert.ok(leader.reasoning.riskFlags.some((flag) => flag.includes('piyasa hariç model sırası #2')));
+});
+
+test('same-class horse-jockey pairing performance influences the race ranking', () => {
+  const { BASE_WEIGHTS } = require('./scoring');
+  const modelWeights = Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, key === 'jockeyPairFit' ? 1 : 0]));
+  const ranked = analyzeRace({
+    horses: [
+      { number: 1, jockeyPairFit: 90 },
+      { number: 2, jockeyPairFit: 10 }
+    ]
+  }, { modelWeights });
+
+  assert.equal(ranked[0].number, 1);
+  assert.ok(ranked[0].score > ranked[1].score);
+  assert.equal(ranked[0].features.jockeyPairFit, 90);
 });

@@ -8,10 +8,12 @@ test('model memory GET returns the current snapshot without writing to the datab
   const archive = {
     raceCount: 12,
     completedRaceCount: 10,
+    distinctRaceDays: 9,
     firstDate: '2026-01-01',
     lastDate: '2026-01-12'
   };
   const automaticModel = { model: MODEL_VERSION, weights: { form: 1 } };
+  const latestTrainingRun = { id: 4, modelVersion: 'previous-model', accepted: false };
   const trainingRuns = [{ id: 3, modelVersion: MODEL_VERSION, accepted: true }];
   let queryIndex = 0;
   let writes = 0;
@@ -35,7 +37,18 @@ test('model memory GET returns the current snapshot without writing to the datab
               })
             };
           }
-          assert.equal(currentQuery, 2);
+          if (currentQuery === 2) {
+            assert.equal(table, modelTrainingRuns);
+            return {
+              orderBy: () => ({
+                limit: async (limit) => {
+                  assert.equal(limit, 1);
+                  return [latestTrainingRun];
+                }
+              })
+            };
+          }
+          assert.equal(currentQuery, 3);
           assert.equal(table, modelTrainingRuns);
           return {
             where: () => ({
@@ -68,8 +81,12 @@ test('model memory GET returns the current snapshot without writing to the datab
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers['Cache-Control'], 'no-store');
   assert.equal(response.body.raceCount, 12);
+  assert.equal(response.body.completedRaceCount, 10);
+  assert.equal(response.body.distinctRaceDays, 9);
   assert.equal(response.body.automaticModel, automaticModel);
   assert.equal(response.body.model, MODEL_VERSION);
+  assert.equal(response.body.source, 'official-tjk-archive');
+  assert.equal(response.body.latestTrainingRun, latestTrainingRun);
   assert.deepEqual(response.body.recentTrainingRuns, trainingRuns);
   assert.equal(writes, 0);
 });

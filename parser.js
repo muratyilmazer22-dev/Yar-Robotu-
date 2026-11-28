@@ -12,6 +12,15 @@
     return match ? Number(match[0]) : null;
   }
 
+  function parseAgfValues(value) {
+    const matches = [...String(value || '').matchAll(/%\s*(\d+(?:[.,]\d+)?)/g)]
+      .map((match) => Number(match[1].replace(',', '.')))
+      .filter((number) => Number.isFinite(number) && number >= 0 && number <= 100);
+    if (matches.length) return matches;
+    const fallback = parseNumber(value);
+    return fallback !== null && fallback >= 0 && fallback <= 100 ? [fallback] : [];
+  }
+
   function isUsableHorseName(value) {
     const name = String(value || '').trim();
     return Boolean(name) && !/^(?:%?\s*\d+(?:[.,]\d+)?\s*%?|[-–—]+)$/.test(name);
@@ -45,6 +54,13 @@
     return { sire, dam, damSire };
   }
 
+  function raceStatusFromText(value) {
+    const text = fold(value);
+    if (/\b(?:sonuc(?:lari|lu)?|kosuldu|tamamlandi|bitti|finished|results?)\b/.test(text)) return 'finished';
+    if (/\b(?:canli|devam ediyor|kosuyor|running|in progress)\b/.test(text)) return 'in-progress';
+    return 'scheduled';
+  }
+
   function parseRaceConditions(text) {
     const lines = String(text || '').split(/\r?\n/).map(fold);
     const weatherMatch = lines.map((line) => line.match(/(?:hava durumu|hava)\s*[:：-]\s*(parcali bulutlu|az bulutlu|gunesli|acik|bulutlu|kapali|yagmurlu|saganak|sisli|ruzgarli|karli|kar yagisli)/)).find(Boolean);
@@ -70,6 +86,7 @@
         current = {
           no: Number(raceHeader[1]),
           time: raceHeader[2] || '',
+          status: raceStatusFromText(detail),
           title: detail.split(',')[0].trim() || 'Koşu',
           raceType: detail.split(',')[0].trim() || '',
           distance: distanceMatch ? Number(distanceMatch[1]) : null,
@@ -83,6 +100,11 @@
         continue;
       }
       if (!current) continue;
+      const explicitStatus = raceStatusFromText(line);
+      if (explicitStatus !== 'scheduled') {
+        current.status = explicitStatus;
+        continue;
+      }
 
       const cells = splitCells(raw);
       if (!cells) {
@@ -139,22 +161,26 @@
           return index >= 0 ? cells[index] || '' : '';
         };
         const numberIndex = headers.findIndex(isHorseNumberHeader);
+        const compactIndexIsRowOrdinal = current.status === 'finished' && numberIndex >= 0 && headers[numberIndex] === 'n';
+        const parenthesesAreResultPlaces = current.status === 'finished' && numberIndex < 0;
         const combinedNumberMatch = horseCellIndex === 0 && /^(?:n|no|at no|at numarasi|horse no|horse number|runner no|program no|program numarasi)\s+at (?:ismi|adi|name)\b/.test(headers[0])
           ? rowName.match(/^\s*(\d{1,2})\s+(.+)$/)
           : null;
-        horseNumber = (numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null) ?? (horseMatch ? Number(horseMatch[1]) : null) ?? (combinedNumberMatch ? Number(combinedNumberMatch[1]) : null) ?? (hashNumberMatch ? Number(hashNumberMatch[1]) : null);
-        if (numberIndex >= 0 && (!Number.isSafeInteger(horseNumber) || horseNumber < 1)) continue;
+        horseNumber = compactIndexIsRowOrdinal || parenthesesAreResultPlaces
+          ? null
+          : (numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null) ?? (horseMatch ? Number(horseMatch[1]) : null) ?? (combinedNumberMatch ? Number(combinedNumberMatch[1]) : null) ?? (hashNumberMatch ? Number(hashNumberMatch[1]) : null);
+        if (numberIndex >= 0 && !compactIndexIsRowOrdinal && (!Number.isSafeInteger(horseNumber) || horseNumber < 1)) continue;
         const explicitRankIndex = headers.findIndex((header) => header.includes('sira') || header.includes('sonuc') || header.includes('result') || header.includes('rank') || header.includes('placing') || header.includes('position'));
         const shortRankIndex = headers.indexOf('s');
         const hasResultTimeColumn = headers.some((header) => ['derece', 'time', 'zaman', 'finish time'].includes(header));
         const rankIndex = explicitRankIndex >= 0 ? explicitRankIndex : hasResultTimeColumn ? shortRankIndex : -1;
-        assumedRank = rankIndex >= 0 ? parseNumber(cells[rankIndex]) : null;
+        assumedRank = rankIndex >= 0 ? parseNumber(cells[rankIndex]) : current.status === 'finished' && horseMatch ? Number(horseMatch[1]) : null;
         const origin = column('orijin');
         const pedigree = parseOrigin(origin);
         const weightText = column('siklet');
         const agfText = column('agf');
-        const agfValue = parseNumber(agfText);
-        const agf = agfValue !== null && agfValue >= 0 && agfValue <= 100 ? agfValue : null;
+        const agfValues = parseAgfValues(agfText);
+        const agf = agfValues.at(-1) ?? null;
         const form = column('form');
         const age = column('yas');
         const jockey = column('jokey');
@@ -169,6 +195,8 @@
         current.horses.push({
           no: horseNumber,
           horseNumber,
+          bulletinRowNumber: numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null,
+          parentheticalHorseNumber: horseMatch ? Number(horseMatch[1]) : null,
           name,
           sire: pedigree.sire,
           dam: pedigree.dam,
@@ -182,6 +210,8 @@
           jockey,
           form,
           agf,
+          agfPrevious: agfValues.length > 1 ? agfValues[0] : null,
+          agfValues,
           odds,
           couplingGroup: couplingGroup.trim(),
           scratched: /koşmaz|scratched/i.test(rowName),
@@ -200,12 +230,10 @@ rank: Number.isFinite(assumedRank) ? assumedRank : 0
         continue;
       }
 
-      const resultEvidence = cells.some((cell) => /\b\d{1,2}\.\d{2}\.\d{2}\b/.test(cell));
-      if (!resultEvidence) assumedRank = null;
-      const resultPlaceMatch = resultEvidence ? rowName.match(/\((\d{1,2})\)/) : null;
-      if (resultPlaceMatch && !Number.isFinite(assumedRank)) assumedRank = Number(resultPlaceMatch[1]);
       const horseMatch = rowName.match(/\((\d{1,2})\)/);
-      horseNumber = horseMatch ? Number(horseMatch[1]) : legacyNo;
+      horseNumber = current.status === 'finished' ? null : horseMatch ? Number(horseMatch[1]) : legacyNo;
+      if (current.status === 'finished' && horseMatch && !Number.isFinite(assumedRank)) assumedRank = Number(horseMatch[1]);
+      if (current.status !== 'finished') assumedRank = null;
       const name = rowName.replace(/\s*\(\d{1,2}\).*$/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
       if (!name) continue;
       const origin = cells.find((cell, index) => index > 1 && /[-–—].*\//.test(cell)) || '';
@@ -238,6 +266,21 @@ rank: Number.isFinite(assumedRank) ? assumedRank : 0
     }
 
     if (current) races.push(current);
+    for (const race of races) {
+      const activeHorses = race.horses.filter((horse) => !horse.scratched);
+      const rowNumbersAreSequential = race.horses.every((horse, index) => horse.bulletinRowNumber === index + 1);
+      const printedNumbers = activeHorses.map((horse) => horse.parentheticalHorseNumber);
+      const printedNumbersAreComplete = printedNumbers.length > 0
+        && printedNumbers.every((number) => Number.isSafeInteger(number) && number > 0)
+        && new Set(printedNumbers).size === activeHorses.length
+        && printedNumbers.every((number) => number <= activeHorses.length);
+      if (race.status !== 'finished' && rowNumbersAreSequential && printedNumbersAreComplete) {
+        for (const horse of activeHorses) {
+          horse.horseNumber = horse.parentheticalHorseNumber;
+          horse.no = horse.parentheticalHorseNumber;
+        }
+      }
+    }
     return races.filter((race) => race.horses.length > 0);
   }
 

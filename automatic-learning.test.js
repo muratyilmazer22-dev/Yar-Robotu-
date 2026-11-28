@@ -4,7 +4,6 @@ const { MODEL_KEY, MODEL_VERSION, BASE_WEIGHTS, TRAINING_WINDOW_DAYS, MINIMUM_PR
 const { createIndex } = require('./lib/race-context');
 const classHistory = require('./class-history');
 const pedigreeHistory = require('./lib/pedigree-history');
-const { raceKey } = require('./lib/shadow-signal-learning');
 
 test('model storage key is version-specific and cannot read the legacy shared key', () => {
   assert.equal(MODEL_KEY, `automatic-learning-model:${MODEL_VERSION}`);
@@ -35,9 +34,21 @@ test('archive training refuses races with missing or invalid finishing positions
   assert.equal(raceToTrainingExample(row), null);
 });
 
+test('archive training retains zero finish codes so poor recent form stays poor', () => {
+  const example = raceToTrainingExample({
+    raceDate: '2026-11-20',
+    program: { runners: [{ no: 1, name: 'FORM ZERO', form: '000000', analystFit: 99 }, { no: 2, name: 'FORM ONE', form: '111111', analystFit: 1 }] },
+    results: { runners: [{ no: 1, finishPosition: 2 }, { no: 2, finishPosition: 1 }] }
+  });
+
+  assert.equal(example.horses.find((horse) => horse.number === 1).features.form, 0);
+  assert.equal(example.horses.find((horse) => horse.number === 2).features.form, 90);
+  assert.equal(Object.hasOwn(example.horses[0].features, 'analystFit'), false);
+});
+
 test('archive training examples include prior venue, weather, and track performance only', () => {
   const previous = {
-    race_date: '2026-11-01', city: 'Ankara',
+    race_date: '2026-11-01', city: 'Ankara', sourceUrls: { tjk: 'https://www.tjk.org/TR/test' },
     program: { raceType: 'Grup 1', distance: 1200, weather: 'Yağmurlu', surface: 'Kum', trackCondition: 'Islak', runners: [
       { no: 1, name: 'KIR AT', handicapPoints: 90, sire: 'TOROK', damSire: 'LUXOR' },
       { no: 2, name: 'RAKİP A', handicapPoints: 85 },
@@ -150,7 +161,7 @@ test('model promotion requires enough untouched holdout races and non-degrading 
   assert.equal(tooSmall.passed, false);
 });
 
-test('verified shadow analyst signals become training features only on an exact race identity', () => {
+test('legacy shadow signal data is ignored by future training without deleting its source records', () => {
   const row = {
     raceDate: '2026-11-25',
     city: 'İstanbul',
@@ -158,11 +169,8 @@ test('verified shadow analyst signals become training features only on an exact 
     program: { raceType: 'Handikap', surface: 'Kum', distance: 1400, runners: [{ no: 1, name: 'AT A', handicapPoints: 80 }, { no: 2, name: 'AT B', handicapPoints: 60 }] },
     results: { runners: [{ no: 1, finishPosition: 1, odds: 2 }, { no: 2, finishPosition: 2, odds: 4 }] }
   };
-  const shadowSignalsByRace = new Map([[raceKey(row.raceDate, row.city, row.raceNo), { banko: [1] }]]);
-  const example = raceToTrainingExample(row, { shadowSignalsByRace });
-  const unrelated = raceToTrainingExample({ ...row, raceNo: 4 }, { shadowSignalsByRace });
+  const example = raceToTrainingExample(row, { shadowSignalsByRace: new Map([['legacy-record', { banko: [1] }]]) });
 
-  assert.equal(example.horses.find((horse) => horse.number === 1).features.analystFit, 100);
-  assert.equal(example.horses.find((horse) => horse.number === 2).features.analystFit, null);
-  assert.equal(unrelated.horses.every((horse) => horse.features.analystFit === null), true);
+  assert.equal(Object.hasOwn(example.horses[0].features, 'analystFit'), false);
+  assert.equal(Object.hasOwn(example.horses[1].features, 'analystFit'), false);
 });

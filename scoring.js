@@ -3,33 +3,7 @@
   if (typeof module === 'object' && module.exports) module.exports = engine;
   else root.RaceScoring = engine;
 })(typeof globalThis === 'undefined' ? this : globalThis, function () {
-  const DEFAULT_DNA = {
-    DIESIS: { B: 2, I: 4, C: 10, S: 4, P: 0 },
-    SINGSPIEL: { B: 0, I: 2, C: 8, S: 8, P: 2 },
-    VICTORYGALLOP: { B: 4, I: 6, C: 12, S: 4, P: 0 },
-    NATIVEKHAN: { B: 2, I: 4, C: 8, S: 2, P: 0 },
-    LUXOR: { B: 6, I: 6, C: 4, S: 0, P: 0 },
-    KANEKO: { B: 4, I: 8, C: 6, S: 0, P: 0 },
-    MENDIP: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    TOROK: { B: 6, I: 6, C: 4, S: 0, P: 0 },
-    LIONHEART: { B: 8, I: 4, C: 4, S: 0, P: 0 },
-    SRIPAD: { B: 4, I: 6, C: 6, S: 2, P: 0 },
-    KURTINIADIS: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    TURBO: { B: 6, I: 6, C: 4, S: 0, P: 0 },
-    KAIZBERT: { B: 8, I: 6, C: 2, S: 0, P: 0 },
-    OZGUNHAN: { B: 2, I: 4, C: 8, S: 4, P: 0 },
-    FLIGHTLINE: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    GUNRUNNER: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    TAPIT: { B: 2, I: 4, C: 10, S: 4, P: 0 },
-    MUNNINGS: { B: 8, I: 4, C: 2, S: 0, P: 0 },
-    PRACTICALJOKE: { B: 6, I: 6, C: 4, S: 0, P: 0 },
-    INVINCIBLESPIRIT: { B: 8, I: 4, C: 2, S: 0, P: 0 },
-    CAIROPRINCE: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    GOODMAGIC: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    SMILINGTIGER: { B: 8, I: 4, C: 2, S: 0, P: 0 },
-    MALIBUMOON: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    DISTORTEDHUMOR: { B: 6, I: 6, C: 4, S: 0, P: 0 }
-  };
+  const DEFAULT_DNA = {};
 
   function normalizeName(value) {
     return String(value || '').toLocaleUpperCase('tr-TR').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9 ]/g, '').trim();
@@ -59,12 +33,12 @@
     return [...new Set(keys)];
   }
 
-  const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, groupFit: 0.05, classHistory: 0.08, timeFit: 0.06, rivalFit: 0.025, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.025, distanceFit: 0.02, restFit: 0.015, weightFit: 0.015, analystFit: 0.04 };
+  const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, groupFit: 0.05, classHistory: 0.08, timeFit: 0.06, rivalFit: 0.025, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.025, jockeyPairFit: 0.035, distanceFit: 0.02, restFit: 0.015, weightFit: 0.015 };
   const FEATURE_LABELS = {
     rating: "HP", form: "Son form", market: "AGF/oran", pedigree: "Pedigri", groupFit: "Grup gücü",
-    classHistory: "Sınıf geçmişi", timeFit: "Derece", rivalFit: "Rakip geçmişi", venueFit: "Hipodrom",
-    weatherFit: "Hava", trackFit: "Pist", jockeyFit: "Jokey", distanceFit: "Mesafe",
-    restFit: "Dinlenme aralığı", weightFit: "Kilo", analystFit: "Uzman yorumu"
+    classHistory: "Sınıf kalitesi", timeFit: "Derece", rivalFit: "Rakip geçmişi", venueFit: "Hipodrom",
+    weatherFit: "Hava", trackFit: "Pist", jockeyFit: "Jokey", jockeyPairFit: "At-jokey uyumu", distanceFit: "Mesafe",
+    restFit: "Dinlenme aralığı", weightFit: "Kilo"
   };
 
   function weightedFeatureScore(features, weights, referenceWeights = weights, marketAgreement = null) {
@@ -149,7 +123,7 @@
     const favoriteOdds = Math.min(...validOdds);
     const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0) || 1;
     const ranked = active.map((horse) => {
-      const recent = horse.last6 ? [...horse.last6].slice(0, 6).map(Number).filter((value) => value >= 1 && value <= 9) : [];
+      const recent = horse.last6 ? String(horse.last6).replace(/[^0-9]/g, '').slice(0, 6).split('').map(Number).filter((value) => value >= 0 && value <= 9).map((place) => place === 0 ? 10 : place) : [];
       const getProfileScore = profileScoreFn || ((name, distance) => {
         const profile = DEFAULT_DNA[normalizeName(name)];
         if (!profile) return null;
@@ -191,13 +165,13 @@
         weatherFit: horse.weatherFit !== null && horse.weatherFit !== undefined && Number.isFinite(Number(horse.weatherFit)) ? Number(horse.weatherFit) : null,
         trackFit: horse.trackFit !== null && horse.trackFit !== undefined && Number.isFinite(Number(horse.trackFit)) ? Number(horse.trackFit) : null,
         jockeyFit: horse.jockeyFit !== null && horse.jockeyFit !== undefined && Number.isFinite(Number(horse.jockeyFit)) ? Number(horse.jockeyFit) : null,
+        jockeyPairFit: horse.jockeyPairFit !== null && horse.jockeyPairFit !== undefined && Number.isFinite(Number(horse.jockeyPairFit)) ? Number(horse.jockeyPairFit) : null,
         distanceFit: horse.distanceFit !== null && horse.distanceFit !== undefined && Number.isFinite(Number(horse.distanceFit)) ? Number(horse.distanceFit) : null,
         restFit: horse.daysSinceLastRace !== null && horse.daysSinceLastRace !== undefined && horse.daysSinceLastRace !== "" && Number.isFinite(Number(horse.daysSinceLastRace)) && Number(horse.daysSinceLastRace) >= 0
           ? Math.max(20, Math.min(100, 100 - Math.abs(Number(horse.daysSinceLastRace) - 28) * 1.4))
           : horse.restFit !== null && horse.restFit !== undefined && Number.isFinite(Number(horse.restFit))
             ? Number(horse.restFit)
             : null,
-        analystFit: horse.analystFit !== null && horse.analystFit !== undefined && Number.isFinite(Number(horse.analystFit)) ? Number(horse.analystFit) : null,
         weightFit: horse.weightFit !== null && horse.weightFit !== undefined && Number.isFinite(Number(horse.weightFit)) ? Number(horse.weightFit) : null
       };
       const scoreResult = weightedFeatureScore(features, weights, weights, marketAgreement);
@@ -232,7 +206,8 @@
   function analyzeRace(race, options = {}) {
     const contextKeys = raceContextKeys(race);
     const contextualWeights = contextKeys.map((key) => options.contextWeights?.[key]).find(Boolean) || {};
-    const weights = { ...BASE_WEIGHTS, ...(options.modelWeights || {}), ...contextualWeights };
+    const savedWeights = { ...(options.modelWeights || {}), ...contextualWeights };
+    const weights = Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, savedWeights[key] ?? BASE_WEIGHTS[key]]));
     const scored = scoreRaceWithWeights(race, weights, options.profileScore);
     const shares = softmaxScores(scored, weights);
     const rankForScenario = (scenarioWeights) => new Map([...scored]
@@ -297,5 +272,5 @@
     }).sort((a, b) => b.modelShare - a.modelShare);
   }
 
-  return { DEFAULT_DNA, BASE_WEIGHTS, normalizeName, distanceBand, raceContextKeys, weightedFeatureScore, weightedFeatureScoreGradient, softmaxScores, analyzeRace };
+  return { DEFAULT_DNA, BASE_WEIGHTS, FEATURE_LABELS, normalizeName, distanceBand, raceContextKeys, weightedFeatureScore, weightedFeatureScoreGradient, softmaxScores, analyzeRace };
 });
