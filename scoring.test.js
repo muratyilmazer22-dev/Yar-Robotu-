@@ -350,3 +350,18 @@ test('a market-lifted leader with incomplete independent evidence is marked low 
   assert.equal(leader.performanceScore, 60);
   assert.ok(leader.reasoning.riskFlags.some((flag) => flag.includes('piyasa hariç model sırası #2')));
 });
+
+test('same-class horse-jockey pairing performance influences the race ranking', () => {
+  const { BASE_WEIGHTS } = require('./scoring');
+  const modelWeights = Object.fromEntries(Object.keys(BASE_WEIGHTS).map((key) => [key, key === 'jockeyPairFit' ? 1 : 0]));
+  const ranked = analyzeRace({
+    horses: [
+      { number: 1, jockeyPairFit: 90 },
+      { number: 2, jockeyPairFit: 10 }
+    ]
+  }, { modelWeights });
+
+  assert.equal(ranked[0].number, 1);
+  assert.ok(ranked[0].score > ranked[1].score);
+  assert.equal(ranked[0].features.jockeyPairFit, 90);
+});

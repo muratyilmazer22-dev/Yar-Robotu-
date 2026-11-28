@@ -13,33 +13,28 @@
 
   function classTypeLabel(value) {
     const text = classText(value);
-    const numbered = text.match(/(?:handikap|handicap|kv|kisa vade|sartli|grup)\s*[- ]?(\d{1,2})/);
-    if (text.includes("satis") || text.includes("selling")) return "Satış";
+    const numbered = text.match(/(?:handikap|handicap|kv|kisa vade|sartli|acik|open|grup|g)\s*[- ]?(\d{1,2})/);
+    const level = Number(numbered?.[1]);
     if (text.includes("maiden")) return "Maiden";
-    if (text.includes("grup") || text.includes("group")) return numbered ? `Grup ${numbered[1]}` : "Grup";
-    if (text.includes("acik") || text.includes("open")) return "Açık";
-    if (text.includes("kv") || text.includes("kisa vade") || text.includes("short term")) return numbered ? `Kısa Vade ${numbered[1]}` : "Kısa Vade";
+    if (text.includes("satis") || text.includes("selling")) return "Satış";
     if (text.includes("handikap") || text.includes("handicap")) return numbered ? `Handikap ${numbered[1]}` : "Handikap";
     if (text.includes("sartli") || text.includes("conditions")) return numbered ? `Şartlı ${numbered[1]}` : "Şartlı";
+    if (text.includes("kv") || text.includes("kisa vade") || text.includes("short term")) return level ? `Kısa Vade ${level}` : "Kısa Vade";
+    if (text.includes("grup") || text.includes("group")) return level ? `Grup ${level}` : "Grup";
+    if (text.includes("acik") || text.includes("open") || /\bg\s*\d/.test(text)) return level ? `Açık-${level} (G${level})` : "Açık";
     return "Diğer";
   }
 
   function classRank(value) {
     const text = classText(value);
-    const numbered = text.match(/(?:handikap|handicap|kv|kisa vade|sartli|grup)\s*[- ]?(\d{1,2})/);
-    if (numbered) {
-      const level = Number(numbered[1]);
-      if (text.includes("kv") || text.includes("kisa vade")) return 25 + level;
-      if (text.includes("grup")) return 35 - level;
-      if (text.includes("sartli")) return 15 + level;
-      return 5 + level;
-    }
-    if (text.includes("acik") || text.includes("open") || text.includes("grup")) return 30;
-    if (text.includes("kv") || text.includes("kisa vade")) return 25;
-    if (text.includes("handikap") || text.includes("handicap")) return 20;
-    if (text.includes("sartli") || text.includes("conditions")) return 15;
-    if (text.includes("satis") || text.includes("selling")) return 10;
+    const numbered = text.match(/(?:handikap|handicap|kv|kisa vade|sartli|acik|open|grup|g)\s*[- ]?(\d{1,2})/);
+    const level = Number(numbered?.[1]);
     if (text.includes("maiden")) return 5;
+    if (text.includes("satis") || text.includes("selling")) return 10;
+    if (text.includes("sartli") || text.includes("conditions")) return level >= 4 ? 18 : level >= 2 ? 16 : 12;
+    if (text.includes("handikap") || text.includes("handicap")) return level >= 21 ? 22 : level >= 16 ? 17 : level >= 13 ? 15 : 14;
+    if (text.includes("kv") || text.includes("kisa vade") || text.includes("short term")) return level === 6 ? 20 : level === 7 ? 21 : level === 8 ? 23 : level === 9 ? 24 : level ? 20 + level : 19;
+    if (text.includes("acik") || text.includes("open") || text.includes("grup") || /\\bg\\s*\\d/.test(text)) return level ? 31 + (10 - level) : 30;
     return null;
   }
 

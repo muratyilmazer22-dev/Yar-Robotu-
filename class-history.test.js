@@ -19,6 +19,9 @@ test('class labels are converted into ordered approximate tiers', () => {
   assert.equal(classTypeLabel('Şartlı 3'), 'Şartlı 3');
   assert.equal(classTypeLabel('Satış 2'), 'Satış');
   assert.ok(classRank('Kısa Vade 8') > classRank('Handikap 15'));
+  const tiers = ['Maiden', 'Satış', 'Şartlı 1', 'Handikap 13-15', 'Şartlı 2-3', 'Handikap 16-17', 'Şartlı 4-5', 'KV-6', 'KV-7', 'Handikap 21-24', 'KV-8', 'KV-9', 'Açık-3 (G3)', 'Açık-2 (G2)', 'Açık-1 (G1)'];
+  assert.ok(tiers.every((type, index) => index === 0 || classRank(type) > classRank(tiers[index - 1])));
+  assert.equal(classTypeLabel('Açık-3 (G3)'), 'Açık-3 (G3)');
 });
 
 test('uses earlier class-transition results and normalizes Turkish horse names', () => {
