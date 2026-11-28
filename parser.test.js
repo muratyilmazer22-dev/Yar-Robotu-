@@ -341,6 +341,39 @@ test('falls back to a clear parenthesized horse number when the number cell is b
   assert.equal(race.horses[0].horseNumber, 7);
 });
 
+test('parses TJK plain-text race rows and keeps program numbers separate from equipment labels', () => {
+  const bulletin = [
+    '2. Koşu 15.00Maiden/Dişi , 2 Yaşlı İngilizler, 57 kg, 1300 Kum',
+    'N At İsmi Yaş Orijin Sıklet Jokey',
+    '1 SUFERING KG DB SK 2y a d GÜNGÖR BABA- GÖLCÜK FIRTINASI / YOUNG PRINCE 59 M.AKYAVUZ',
+    '2 CAN BALAM SK 2y d d HAKEEM (USA)- GLIVANA / UNACCOUNTED FOR (USA) 57 E.ÇİZİK',
+    '4. GURURLAN KG SK 2y d d RHYTHM DIVINE- PRIZE FOR / UNACCOUNTED FOR (USA) 57 H.ÇİZİK',
+    '10 VEKOMA LIGHT SK YP 2y d d VEKOMA (USA)- DELIGHTFUL (USA) / BERNARDINI (USA) 57 V.ABİŞ',
+    '3. Koşu 15.30ŞARTLI 3/DHÖW , 4 ve Yukarı Araplar, 2000 Sentetik',
+    'N At İsmi Yaş Orijin Sıklet Jokey',
+    '1 İSKİT ALP KG K 5y a a SEMEND- KÜÇÜK SELİN / SIH TAHA 57,5 M.T.COŞKUN AP',
+    '6 ÇELİKOVİÇ DB SK 5y d a ŞAMİLBEY- SULH / KAIZBERT (RU) 57,5 E.ÇİZİK'
+  ].join('\n');
+
+  const races = parseRaces(bulletin);
+
+  assert.deepEqual(races.map((race) => race.no), [2, 3]);
+  assert.deepEqual(races[0].horses.map((horse) => [horse.horseNumber, horse.name]), [
+    [1, 'SUFERING'],
+    [2, 'CAN BALAM'],
+    [4, 'GURURLAN'],
+    [10, 'VEKOMA LIGHT']
+  ]);
+  assert.deepEqual(races[1].horses.map((horse) => [horse.horseNumber, horse.name]), [
+    [1, 'İSKİT ALP'],
+    [6, 'ÇELİKOVİÇ']
+  ]);
+  assert.equal(auditCouponPool([
+    ...races,
+    ...[4, 5, 6, 7].map((no) => ({ no, horses: [{ horseNumber: 1, scratched: false }] }))
+  ]).ok, true);
+});
+
 test('keeps the first and second race legs separate at their numbered headings', () => {
   const bulletin = [
     '1. Koşu 14:00 Maiden 1400 Kum',
