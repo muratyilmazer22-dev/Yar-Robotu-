@@ -2046,23 +2046,33 @@ function resultPersistenceNote(persistence) {
   if (persistence.cloudEnabled && !persistence.cloudSaved) return "Cihaz kaydı korundu ancak hesap eşitlemesi tamamlanamadı; bağlantı düzelince yeniden kaydedin.";
   return persistence.cloudSaved ? "Cihaza ve hesabınıza kaydedildi." : "Bu cihazda kaydedildi; başka cihazlarla eşitlemek için e-posta bağlantısıyla giriş yapın.";
 }
+async function persistResultAndClearDraft() {
+  const previousBulletins = state.bulletins;
+  state.bulletins = state.bulletins.filter((item) => item.id !== "draft-result");
+  clearTimeout(bulletinSaveTimer);
+  let persistence;
+  try {
+    persistence = await persistCurrentMemory();
+  } catch (error) {
+    state.bulletins = previousBulletins;
+    updateMemory();
+    throw error;
+  }
+  if (persistence.saved) {
+    $("sonucluBultenInput").value = "";
+  } else {
+    state.bulletins = previousBulletins;
+    updateMemory();
+  }
+  return persistence;
+}
 async function saveResultForCorrection(submission, message, matchingStatus = "awaiting_structured_result") {
   const preserved = { ...submission, matchingStatus, matchingNote: message };
-  const draft = {
-    id: "draft-result",
-    kind: "result",
-    status: "draft",
-    text: $("sonucluBultenInput")?.value || "",
-    date: $("resultsDateInput")?.value || "",
-    city: $("resultsCityInput")?.value.trim() || "",
-    updatedAt: new Date().toISOString(),
-    ...(storedResultImage ? { image: imageForMemory(storedResultImage) } : {})
-  };
-  state.bulletins = [...state.bulletins.filter((item) => item.id !== submission.id && item.id !== draft.id), preserved, draft];
-  const persistence = await persistCurrentMemory();
+  state.bulletins = [...state.bulletins.filter((item) => item.id !== submission.id), preserved];
+  const persistence = await persistResultAndClearDraft();
   const statusMessage = persistence.saved
-    ? `✅ Sonuç hafızaya kaydedildi. Ancak karşılaştırma ve öğrenme yapılmadı: ${message} Metin düzeltmeniz için kutuda bırakıldı. ${resultPersistenceNote(persistence)}`
-    : `❌ Sonuç hafızaya kaydedilemedi: ${message} ${resultPersistenceNote(persistence)}`;
+    ? `✅ Sonuç hafızaya kaydedildi. Ancak karşılaştırma ve öğrenme yapılmadı: ${message} Sonuç arşivde saklandı; ekran temizlendi. ${resultPersistenceNote(persistence)}`
+    : `❌ Sonuç hafızaya kaydedilemedi: ${message} Metin kaybolmaması için kutuda bırakıldı. ${resultPersistenceNote(persistence)}`;
   showMessage($("ogrenmeLogAlani"), statusMessage, persistence.saved ? "success" : "error");
   updateMemory();
 }
@@ -2205,11 +2215,11 @@ async function compareResults() {
   }
   if (!outcomes.length) {
     const mismatchNote = racesWithWinnerMismatch ? ` Kazananın numarası aynı olsa da at adı ${racesWithWinnerMismatch} koşuda tahminle uyuşmadı; yanlış hipodrom eşleşmesi olabileceğinden öğrenme durduruldu.` : "";
-    const persistence = await persistCurrentMemory();
+    const persistence = await persistResultAndClearDraft();
     const note = resultPersistenceNote(persistence);
     const statusMessage = persistence.saved
-      ? `✅ Sonuç hafızaya kaydedildi; ancak güvenilir tahmin eşleşmesi bulunamadığı için karşılaştırma ve öğrenme yapılmadı. ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} ${note}`
-      : `❌ Sonuç arşivlendi ancak kalıcı hafıza kaydı doğrulanamadı. ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} ${note}`;
+      ? `✅ Sonuç hafızaya kaydedildi; ancak güvenilir tahmin eşleşmesi bulunamadığı için karşılaştırma ve öğrenme yapılmadı. ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} Sonuç arşivde saklandı; ekran temizlendi. ${note}`
+      : `❌ Sonuç arşivlendi ancak kalıcı hafıza kaydı doğrulanamadı. ${racesWithoutWinner} koşuda birincilik tekil/doğrulanabilir değil, ${racesWithoutPrediction} koşu eşleşmedi.${mismatchNote} Metin kaybolmaması için kutuda bırakıldı. ${note}`;
     showMessage(target, statusMessage, persistence.saved ? "warning" : "error");
     updateMemory();
     return;
