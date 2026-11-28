@@ -54,6 +54,13 @@
     return { sire, dam, damSire };
   }
 
+  function raceStatusFromText(value) {
+    const text = fold(value);
+    if (/\b(?:sonuc(?:lari|lu)?|kosuldu|tamamlandi|bitti|finished|results?)\b/.test(text)) return 'finished';
+    if (/\b(?:canli|devam ediyor|kosuyor|running|in progress)\b/.test(text)) return 'in-progress';
+    return 'scheduled';
+  }
+
   function parseRaceConditions(text) {
     const lines = String(text || '').split(/\r?\n/).map(fold);
     const weatherMatch = lines.map((line) => line.match(/(?:hava durumu|hava)\s*[:：-]\s*(parcali bulutlu|az bulutlu|gunesli|acik|bulutlu|kapali|yagmurlu|saganak|sisli|ruzgarli|karli|kar yagisli)/)).find(Boolean);
@@ -79,6 +86,7 @@
         current = {
           no: Number(raceHeader[1]),
           time: raceHeader[2] || '',
+          status: raceStatusFromText(detail),
           title: detail.split(',')[0].trim() || 'Koşu',
           raceType: detail.split(',')[0].trim() || '',
           distance: distanceMatch ? Number(distanceMatch[1]) : null,
@@ -92,6 +100,11 @@
         continue;
       }
       if (!current) continue;
+      const explicitStatus = raceStatusFromText(line);
+      if (explicitStatus !== 'scheduled') {
+        current.status = explicitStatus;
+        continue;
+      }
 
       const cells = splitCells(raw);
       if (!cells) {
@@ -213,12 +226,9 @@ rank: Number.isFinite(assumedRank) ? assumedRank : 0
         continue;
       }
 
-      const resultEvidence = cells.some((cell) => /\b\d{1,2}\.\d{2}\.\d{2}\b/.test(cell));
-      if (!resultEvidence) assumedRank = null;
-      const resultPlaceMatch = resultEvidence ? rowName.match(/\((\d{1,2})\)/) : null;
-      if (resultPlaceMatch && !Number.isFinite(assumedRank)) assumedRank = Number(resultPlaceMatch[1]);
       const horseMatch = rowName.match(/\((\d{1,2})\)/);
       horseNumber = horseMatch ? Number(horseMatch[1]) : legacyNo;
+      if (current.status !== 'finished') assumedRank = null;
       const name = rowName.replace(/\s*\(\d{1,2}\).*$/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
       if (!name) continue;
       const origin = cells.find((cell, index) => index > 1 && /[-–—].*\//.test(cell)) || '';

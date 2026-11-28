@@ -180,7 +180,7 @@ test('does not mistake parenthesized program numbers for finishing positions', (
   ]);
 });
 
-test('uses dense printed runner numbers when TJK N is only the sequential row index and keeps the latest AGF snapshot', () => {
+test('uses parenthesized runner numbers without mistaking best-time data for result placings', () => {
   const bulletin = [
     '4. Koşu 19.00 ŞARTLI 5/DHÖ 2100 Sentetik',
     'N\tAt İsmi\tYaş\tOrijin\tSıklet\tJokey\tSt\tHP\tSon 6 Y.\tKGS\ts20\tEn İyi D.\tGny\tAGF',
@@ -195,9 +195,26 @@ test('uses dense printed runner numbers when TJK N is only the sequential row in
   assert.equal(eflah.horseNumber, 1);
   assert.equal(eflah.bulletinRowNumber, 2);
   assert.equal(eflah.programStartNumber, 5);
+  assert.equal(eflah.rank, 0);
+  assert.equal(race.status, 'scheduled');
   assert.equal(eflah.agf, 37);
   assert.equal(eflah.agfPrevious, 34);
   assert.deepEqual(eflah.agfValues, [34, 37]);
+});
+
+test('recognizes explicit completed and in-progress race labels independently', () => {
+  const races = parseRaces([
+    '1. Koşu 14:00 Sonuçlu',
+    'At No\tAt İsmi',
+    '1\tEFLAH (1)',
+    '2. Koşu 14:30 Canlı',
+    'At No\tAt İsmi',
+    '2\tAK AT (2)'
+  ].join('\n'));
+
+  assert.deepEqual(races.map((race) => race.status), ['finished', 'in-progress']);
+  assert.deepEqual(races.map((race) => race.horses[0].horseNumber), [1, 2]);
+  assert.deepEqual(races.map((race) => race.horses[0].rank), [0, 0]);
 });
 
 test('reads winner rank from result tables without a time column', () => {

@@ -1086,7 +1086,8 @@ function parseRaces(text) {
       ...race,
       type,
       horses,
-      finished: placed.length >= 2 && placed.some((horse) => horse.place === 1)
+      finished: race.status === "finished" || (placed.length >= 2 && placed.some((horse) => horse.place === 1)),
+      inProgress: race.status === "in-progress"
     };
   });
   const warnings = races.length ? window.BulletinQuality.auditRaces(races) : ["Koşu ve at satırı bulunamadı. Bülteni sekme ayrımları korunacak şekilde yeniden kopyalayın."];
@@ -1260,7 +1261,11 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     const contextLabels = [race.weather && `Hava: ${race.weather}`, race.trackCondition && `Pist: ${race.trackCondition}`, race.surfaceChange && `Pist değişikliği: ${race.surfaceChange}`].filter(Boolean).map(escapeHtml).join(" · ");
     const distanceLabel = Number.isFinite(Number(race.distance)) && Number(race.distance) > 0 ? `${escapeHtml(race.distance)} m` : "Mesafe belirtilmedi";
     const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${distanceLabel} ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}${contextLabels ? ` · ${contextLabels}` : ""}</span></h3>`;
-    if (race.finished) return `<article class="race">${heading}<p class="alert">Koşuldu · sonuç verisi bulundu. Bu ayak için tahmin gösterilmiyor.</p></article>`;
+    if (race.finished) {
+      const hasPlacings = race.horses.some((horse) => Number(horse.rank) === 1);
+      return `<article class="race">${heading}<p class="alert">Sonuçlu koşu · ${hasPlacings ? "resmî bitiriş sırası bulundu" : "sonuç sırası okunamadı"}. Bu ayak için tahmin gösterilmiyor.</p></article>`;
+    }
+    if (race.inProgress) return `<article class="race">${heading}<p class="alert">Yarış devam ediyor · sonuç bekleniyor. Bu ayak için tahmin gösterilmiyor.</p></article>`;
     const ranked = window.RaceEkuri.selectionUnits(scoreRace(race));
     const leaderGap = ranked.length > 1 ? Number((ranked[0].score - ranked[1].score).toFixed(1)) : 0;
     const evidence = singleSelectionEvidence();
@@ -1287,8 +1292,8 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
 function buildCoupon(races, budget, unit) {
   const audit = window.BulletinQuality.auditCouponPool(races);
   if (!audit.ok) {
-    if (audit.code === "finished-race") {
-      return { incompleteStarted: true, races, finishedNos: audit.finishedNos };
+    if (audit.code === "finished-race" || audit.code === "race-in-progress") {
+      return { incompleteStarted: true, races, finishedNos: audit.finishedNos || [], inProgressNos: audit.inProgressNos || [] };
     }
     return { error: audit.error };
   }
@@ -1371,12 +1376,19 @@ function formatCoupon(coupon, poolTitle) {
       const winner = race.finished ? race.horses.find((horse) => Number(horse.rank) === 1) : null;
       const winnerNumber = Number(winner?.horseNumber ?? winner?.no);
       const status = race.finished
-        ? `Koşuldu${winner && Number.isSafeInteger(winnerNumber) && winnerNumber > 0 ? ` · sonuç #${winnerNumber} ${escapeHtml(winner.name)}` : " · sonuç mevcut"}`
-        : "Açık · tahmin aşağıdaki koşu analizinde";
+        ? winner && Number.isSafeInteger(winnerNumber) && winnerNumber > 0
+          ? `Sonuçlandı · kazanan #${winnerNumber} ${escapeHtml(winner.name)}`
+          : "Sonuçlandı · bitiriş sırası okunamadı"
+        : race.inProgress
+          ? "Devam ediyor · sonuç bekleniyor"
+          : "Açık · tahmin aşağıdaki koşu analizinde";
       return `<li class="coupon-leg"><strong>${race.no}. Koşu</strong><div class="coupon-horses"><span class="coupon-horse">${status}</span></div></li>`;
     }).join("");
-    const finishedLabel = coupon.finishedNos.map((number) => `${number}. koşu`).join(", ");
-    return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)} · kupon oluşturulmadı</h3><p class="coupon-intro">${escapeHtml(finishedLabel)} tamamlandığı için bu altılı eksik kalıyor. Altı açık ayak olmadan sistem kuponu veya tutar hesaplanmaz.</p></header><ol class="coupon-legs">${legs}</ol></article>`;
+    const blockedLabels = [
+      ...coupon.finishedNos.map((number) => `${number}. koşu tamamlandı`),
+      ...coupon.inProgressNos.map((number) => `${number}. koşu devam ediyor`)
+    ];
+    return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)} · kupon oluşturulmadı</h3><p class="coupon-intro">Açık olmayan ayaklar: ${escapeHtml(blockedLabels.join(", "))}. Altı açık ayak olmadan sistem kuponu veya tutar hesaplanmaz.</p></header><ol class="coupon-legs">${legs}</ol></article>`;
   }
   if (coupon.completedOnly) return `<article class="card coupon-detail"><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Koşular tamamlandı; kupon oluşturulmadı.</p></article>`;
 
