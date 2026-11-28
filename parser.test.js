@@ -205,16 +205,18 @@ test('uses parenthesized runner numbers without mistaking best-time data for res
 test('recognizes explicit completed and in-progress race labels independently', () => {
   const races = parseRaces([
     '1. Koşu 14:00 Sonuçlu',
-    'At No\tAt İsmi',
-    '1\tEFLAH (1)',
+    'N\tAt İsmi',
+    '2\tEFLAH (1)',
+    '1\tERSANSHAH (2)',
     '2. Koşu 14:30 Canlı',
-    'At No\tAt İsmi',
-    '2\tAK AT (2)'
+    'N\tAt İsmi',
+    '1\tAK AT (2)',
+    '2\tKIR AT (1)'
   ].join('\n'));
 
   assert.deepEqual(races.map((race) => race.status), ['finished', 'in-progress']);
-  assert.deepEqual(races.map((race) => race.horses[0].horseNumber), [1, 2]);
-  assert.deepEqual(races.map((race) => race.horses[0].rank), [0, 0]);
+  assert.deepEqual(races[0].horses.map((horse) => [horse.horseNumber, horse.rank]), [[null, 1], [null, 2]]);
+  assert.deepEqual(races[1].horses.map((horse) => [horse.horseNumber, horse.rank]), [[2, 0], [1, 0]]);
 });
 
 test('reads winner rank from result tables without a time column', () => {

@@ -161,16 +161,20 @@
           return index >= 0 ? cells[index] || '' : '';
         };
         const numberIndex = headers.findIndex(isHorseNumberHeader);
+        const compactIndexIsRowOrdinal = current.status === 'finished' && numberIndex >= 0 && headers[numberIndex] === 'n';
+        const parenthesesAreResultPlaces = current.status === 'finished' && numberIndex < 0;
         const combinedNumberMatch = horseCellIndex === 0 && /^(?:n|no|at no|at numarasi|horse no|horse number|runner no|program no|program numarasi)\s+at (?:ismi|adi|name)\b/.test(headers[0])
           ? rowName.match(/^\s*(\d{1,2})\s+(.+)$/)
           : null;
-        horseNumber = (numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null) ?? (horseMatch ? Number(horseMatch[1]) : null) ?? (combinedNumberMatch ? Number(combinedNumberMatch[1]) : null) ?? (hashNumberMatch ? Number(hashNumberMatch[1]) : null);
-        if (numberIndex >= 0 && (!Number.isSafeInteger(horseNumber) || horseNumber < 1)) continue;
+        horseNumber = compactIndexIsRowOrdinal || parenthesesAreResultPlaces
+          ? null
+          : (numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null) ?? (horseMatch ? Number(horseMatch[1]) : null) ?? (combinedNumberMatch ? Number(combinedNumberMatch[1]) : null) ?? (hashNumberMatch ? Number(hashNumberMatch[1]) : null);
+        if (numberIndex >= 0 && !compactIndexIsRowOrdinal && (!Number.isSafeInteger(horseNumber) || horseNumber < 1)) continue;
         const explicitRankIndex = headers.findIndex((header) => header.includes('sira') || header.includes('sonuc') || header.includes('result') || header.includes('rank') || header.includes('placing') || header.includes('position'));
         const shortRankIndex = headers.indexOf('s');
         const hasResultTimeColumn = headers.some((header) => ['derece', 'time', 'zaman', 'finish time'].includes(header));
         const rankIndex = explicitRankIndex >= 0 ? explicitRankIndex : hasResultTimeColumn ? shortRankIndex : -1;
-        assumedRank = rankIndex >= 0 ? parseNumber(cells[rankIndex]) : null;
+        assumedRank = rankIndex >= 0 ? parseNumber(cells[rankIndex]) : current.status === 'finished' && horseMatch ? Number(horseMatch[1]) : null;
         const origin = column('orijin');
         const pedigree = parseOrigin(origin);
         const weightText = column('siklet');
@@ -227,7 +231,8 @@ rank: Number.isFinite(assumedRank) ? assumedRank : 0
       }
 
       const horseMatch = rowName.match(/\((\d{1,2})\)/);
-      horseNumber = horseMatch ? Number(horseMatch[1]) : legacyNo;
+      horseNumber = current.status === 'finished' ? null : horseMatch ? Number(horseMatch[1]) : legacyNo;
+      if (current.status === 'finished' && horseMatch && !Number.isFinite(assumedRank)) assumedRank = Number(horseMatch[1]);
       if (current.status !== 'finished') assumedRank = null;
       const name = rowName.replace(/\s*\(\d{1,2}\).*$/, '').replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
       if (!name) continue;
@@ -269,7 +274,7 @@ rank: Number.isFinite(assumedRank) ? assumedRank : 0
         && printedNumbers.every((number) => Number.isSafeInteger(number) && number > 0)
         && new Set(printedNumbers).size === activeHorses.length
         && printedNumbers.every((number) => number <= activeHorses.length);
-      if (rowNumbersAreSequential && printedNumbersAreComplete) {
+      if (race.status !== 'finished' && rowNumbersAreSequential && printedNumbersAreComplete) {
         for (const horse of activeHorses) {
           horse.horseNumber = horse.parentheticalHorseNumber;
           horse.no = horse.parentheticalHorseNumber;

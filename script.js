@@ -1262,8 +1262,9 @@ function renderAnalysis(races, targetId = "kosuSonucAlani") {
     const distanceLabel = Number.isFinite(Number(race.distance)) && Number(race.distance) > 0 ? `${escapeHtml(race.distance)} m` : "Mesafe belirtilmedi";
     const heading = `<h3>${race.no}. Koşu${race.time ? ` · ${escapeHtml(race.time)}` : ""} · ${distanceLabel} ${escapeHtml(race.surface)} <span class="muted">· ${escapeHtml(race.type)}${contextLabels ? ` · ${contextLabels}` : ""}</span></h3>`;
     if (race.finished) {
-      const hasPlacings = race.horses.some((horse) => Number(horse.rank) === 1);
-      return `<article class="race">${heading}<p class="alert">Sonuçlu koşu · ${hasPlacings ? "resmî bitiriş sırası bulundu" : "sonuç sırası okunamadı"}. Bu ayak için tahmin gösterilmiyor.</p></article>`;
+      const winner = race.horses.find((horse) => Number(horse.rank) === 1);
+      const resultSummary = winner ? `resmî sonuç: ${escapeHtml(winner.name)} birinci` : "sonuç sırası okunamadı";
+      return `<article class="race">${heading}<p class="alert">Sonuçlu koşu · ${resultSummary}. Bu ayak için tahmin gösterilmiyor.</p></article>`;
     }
     if (race.inProgress) return `<article class="race">${heading}<p class="alert">Yarış devam ediyor · sonuç bekleniyor. Bu ayak için tahmin gösterilmiyor.</p></article>`;
     const ranked = window.RaceEkuri.selectionUnits(scoreRace(race));
@@ -1376,8 +1377,10 @@ function formatCoupon(coupon, poolTitle) {
       const winner = race.finished ? race.horses.find((horse) => Number(horse.rank) === 1) : null;
       const winnerNumber = Number(winner?.horseNumber ?? winner?.no);
       const status = race.finished
-        ? winner && Number.isSafeInteger(winnerNumber) && winnerNumber > 0
-          ? `Sonuçlandı · kazanan #${winnerNumber} ${escapeHtml(winner.name)}`
+        ? winner
+          ? Number.isSafeInteger(winnerNumber) && winnerNumber > 0
+            ? `Sonuçlandı · kazanan #${winnerNumber} ${escapeHtml(winner.name)}`
+            : `Sonuçlandı · kazanan ${escapeHtml(winner.name)} (1. sıra)`
           : "Sonuçlandı · bitiriş sırası okunamadı"
         : race.inProgress
           ? "Devam ediyor · sonuç bekleniyor"
