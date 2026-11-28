@@ -180,6 +180,26 @@ test('does not mistake parenthesized program numbers for finishing positions', (
   ]);
 });
 
+test('uses dense printed runner numbers when TJK N is only the sequential row index and keeps the latest AGF snapshot', () => {
+  const bulletin = [
+    '4. Koşu 19.00 ŞARTLI 5/DHÖ 2100 Sentetik',
+    'N\tAt İsmi\tYaş\tOrijin\tSıklet\tJokey\tSt\tHP\tSon 6 Y.\tKGS\ts20\tEn İyi D.\tGny\tAGF',
+    '1\tERSANŞAH (2) KG DB SK\t5y k a\tTAMERİNOĞLU- GIRL / MONARCH AH\t58,5\tE.AKPINAR\t1\t96\t444332\t15\t17\t2.25.31\t7,00\t%14(4) %12(4)',
+    '2\tEFLAH (1) KG DB\t5y a a\tÖZGÜNHAN- SEPYA / SEZGİNBEY\t59,5\tH.KARATAŞ\t5\t94\t599721\t13\t20\t2.22.20\t1,95\t%34(1) %37(1)',
+    '3\tTUMBULKARAÜZÜM KG K (Koşmaz)\t5y k a\tKARAÜZÜM- TUMBUL FUNDA / DEHA\t59,5\tA.KURŞUN\t9\t86\t363248\t14\t15\t\t-\t%0(9)'
+  ].join('\n');
+
+  const [race] = parseRaces(bulletin);
+  const eflah = race.horses.find((horse) => horse.name === 'EFLAH');
+
+  assert.equal(eflah.horseNumber, 1);
+  assert.equal(eflah.bulletinRowNumber, 2);
+  assert.equal(eflah.programStartNumber, 5);
+  assert.equal(eflah.agf, 37);
+  assert.equal(eflah.agfPrevious, 34);
+  assert.deepEqual(eflah.agfValues, [34, 37]);
+});
+
 test('reads winner rank from result tables without a time column', () => {
   const results = [
     '3. Koşu 15:30 Maiden',

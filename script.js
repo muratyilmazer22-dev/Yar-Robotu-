@@ -1302,10 +1302,12 @@ function buildCoupon(races, budget, unit) {
   if (!Number.isSafeInteger(maxColumns)) return { error: "Bütçe, güvenli kolon hesabı sınırını aşıyor." };
   if (maxColumns < 1) return { error: "Bütçe, en az bir kolonun birim fiyatını karşılamıyor." };
 
-  const picks = openLegs.map(({ race, ranked, candidate, candidateIndex }) => {
+  const picks = openLegs.map(({ race, ranked, candidate, candidateIndex, marketFavorite, marketFavoriteIndex }) => {
     return {
       no: race.no,
       ranked,
+      marketFavorite,
+      marketFavoriteIndex,
       coverageCandidate: candidate,
       coverageCandidateIndex: candidateIndex,
       coverageBonus: candidate ? window.CouponOptimizer.SURPRISE_COVERAGE_UTILITY_BONUS : 0,
@@ -1400,6 +1402,12 @@ function formatCoupon(coupon, poolTitle) {
   const coverageNote = coverageNotes.length
     ? `<p class="coupon-intro">Bağımsız performans verisi piyasa sinyalinden ayrışan ek adaylar: ${coverageNotes.join(" · ")}. Bu etiket kazanma garantisi değildir.</p>`
     : "";
+  const marketFavoriteNotes = coupon.picks
+    .filter((pick) => pick.marketFavorite)
+    .map((pick) => `${pick.no}. koşu #${pick.marketFavorite.number ?? "?"} ${escapeHtml(pick.marketFavorite.name || "isimsiz at")} (AGF %${pick.marketFavorite.agf}, oran ${pick.marketFavorite.odds.toFixed(2)}, model sırası #${pick.marketFavorite.modelRank}) güçlü piyasa favorisi olduğu için kupon sıralamasında korundu`);
+  const marketFavoriteNote = marketFavoriteNotes.length
+    ? `<p class="coupon-intro">Favori kontrolü: ${marketFavoriteNotes.join(" · ")}. AGF ve oran kazanma garantisi değildir.</p>`
+    : "";
   const excludedPicks = coupon.picks.filter((pick) => pick.excludedHorses.length);
   const excludedNote = excludedPicks.length
     ? `<p class="coupon-intro">Bütçe nedeniyle alınmayan seçimler: ${excludedPicks.map((pick) => `${pick.no}. koşu: ${pick.excludedHorses.map((horse) => `${Number.isSafeInteger(horse.number) && horse.number > 0 ? `#${horse.number}` : "No belirtilmemiş"} ${escapeHtml(horse.name || "İsimsiz at")}`).join(", ")}`).join(" · ")}</p>`
@@ -1410,7 +1418,7 @@ function formatCoupon(coupon, poolTitle) {
     const labels = selectedUnits.map((unit) => `<span class="coupon-horse">${Number.isSafeInteger(unit.number) && unit.number > 0 ? `#${unit.number}` : "No belirtilmemiş"} ${escapeHtml(unit.name)}</span>${unit.isCoupled ? `<small class="coupon-coupling-note">Eküri ortağı: ${unit.members.slice(1).map((member) => `${Number.isSafeInteger(member.number) && member.number > 0 ? `#${member.number}` : "No belirtilmemiş"} ${escapeHtml(member.name)}`).join(", ")}. Tek seçim; eküri ortağı kazanırsa da bu seçim kazanır.</small>` : ""}`).join("");
     return `<li class="coupon-leg"><strong>${pick.no}. Koşu</strong><div class="coupon-horses">${labels}</div></li>`;
   }).join("");
-  return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Model önerisi · eküri grubu kuponda tek seçim sayılır; bütçeyle açılan ek haklar eküri dışındaki sıradaki atlara gider · bütçe sınırı aşılmaz · otomatik hafızaya kaydedilir</p></header>${warning}${lowConfidenceNote}${completed}${coverageNote}<ol class="coupon-legs">${legs}</ol>${excludedNote}<div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Üst bütçe ${coupon.budget.toFixed(2)} TL · Kullanılmayan ${unusedBudget.toFixed(2)} TL</span></div></article>`;
+  return `<article class="card coupon-detail"><header><h3>${escapeHtml(poolTitle)}</h3><p class="coupon-intro">Model önerisi · eküri grubu kuponda tek seçim sayılır; bütçeyle açılan ek haklar eküri dışındaki sıradaki atlara gider · bütçe sınırı aşılmaz · otomatik hafızaya kaydedilir</p></header>${warning}${lowConfidenceNote}${completed}${marketFavoriteNote}${coverageNote}<ol class="coupon-legs">${legs}</ol>${excludedNote}<div class="coupon-total"><strong>${coupon.columns} kolon · ${coupon.total.toFixed(2)} TL</strong><span>Üst bütçe ${coupon.budget.toFixed(2)} TL · Kullanılmayan ${unusedBudget.toFixed(2)} TL</span></div></article>`;
 }
 const POOL_KEYS = ["first", "second", "third", "fourth", "fifth", "sixth"];
 const POOL_ORDINALS = ["Birinci", "İkinci", "Üçüncü", "Dördüncü", "Beşinci", "Altıncı"];

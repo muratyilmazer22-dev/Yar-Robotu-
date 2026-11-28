@@ -12,6 +12,15 @@
     return match ? Number(match[0]) : null;
   }
 
+  function parseAgfValues(value) {
+    const matches = [...String(value || '').matchAll(/%\s*(\d+(?:[.,]\d+)?)/g)]
+      .map((match) => Number(match[1].replace(',', '.')))
+      .filter((number) => Number.isFinite(number) && number >= 0 && number <= 100);
+    if (matches.length) return matches;
+    const fallback = parseNumber(value);
+    return fallback !== null && fallback >= 0 && fallback <= 100 ? [fallback] : [];
+  }
+
   function isUsableHorseName(value) {
     const name = String(value || '').trim();
     return Boolean(name) && !/^(?:%?\s*\d+(?:[.,]\d+)?\s*%?|[-–—]+)$/.test(name);
@@ -153,8 +162,8 @@
         const pedigree = parseOrigin(origin);
         const weightText = column('siklet');
         const agfText = column('agf');
-        const agfValue = parseNumber(agfText);
-        const agf = agfValue !== null && agfValue >= 0 && agfValue <= 100 ? agfValue : null;
+        const agfValues = parseAgfValues(agfText);
+        const agf = agfValues.at(-1) ?? null;
         const form = column('form');
         const age = column('yas');
         const jockey = column('jokey');
@@ -169,6 +178,8 @@
         current.horses.push({
           no: horseNumber,
           horseNumber,
+          bulletinRowNumber: numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null,
+          parentheticalHorseNumber: horseMatch ? Number(horseMatch[1]) : null,
           name,
           sire: pedigree.sire,
           dam: pedigree.dam,
@@ -182,6 +193,8 @@
           jockey,
           form,
           agf,
+          agfPrevious: agfValues.length > 1 ? agfValues[0] : null,
+          agfValues,
           odds,
           couplingGroup: couplingGroup.trim(),
           scratched: /koşmaz|scratched/i.test(rowName),
@@ -238,6 +251,21 @@ rank: Number.isFinite(assumedRank) ? assumedRank : 0
     }
 
     if (current) races.push(current);
+    for (const race of races) {
+      const activeHorses = race.horses.filter((horse) => !horse.scratched);
+      const rowNumbersAreSequential = race.horses.every((horse, index) => horse.bulletinRowNumber === index + 1);
+      const printedNumbers = activeHorses.map((horse) => horse.parentheticalHorseNumber);
+      const printedNumbersAreComplete = printedNumbers.length > 0
+        && printedNumbers.every((number) => Number.isSafeInteger(number) && number > 0)
+        && new Set(printedNumbers).size === activeHorses.length
+        && printedNumbers.every((number) => number <= activeHorses.length);
+      if (rowNumbersAreSequential && printedNumbersAreComplete) {
+        for (const horse of activeHorses) {
+          horse.horseNumber = horse.parentheticalHorseNumber;
+          horse.no = horse.parentheticalHorseNumber;
+        }
+      }
+    }
     return races.filter((race) => race.horses.length > 0);
   }
 
