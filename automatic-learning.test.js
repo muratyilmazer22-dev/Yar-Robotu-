@@ -35,6 +35,17 @@ test('archive training refuses races with missing or invalid finishing positions
   assert.equal(raceToTrainingExample(row), null);
 });
 
+test('archive training retains zero finish codes so poor recent form stays poor', () => {
+  const example = raceToTrainingExample({
+    raceDate: '2026-11-20',
+    program: { runners: [{ no: 1, name: 'FORM ZERO', form: '000000' }, { no: 2, name: 'FORM ONE', form: '111111' }] },
+    results: { runners: [{ no: 1, finishPosition: 2 }, { no: 2, finishPosition: 1 }] }
+  });
+
+  assert.equal(example.horses.find((horse) => horse.number === 1).features.form, 0);
+  assert.equal(example.horses.find((horse) => horse.number === 2).features.form, 90);
+});
+
 test('archive training examples include prior venue, weather, and track performance only', () => {
   const previous = {
     race_date: '2026-11-01', city: 'Ankara',

@@ -1761,7 +1761,7 @@ function archiveRowToOutcome(row) {
     surface: String(program.surface || surface),
     type,
     horses: runners.map((runner) => {
-      const form = String(runner.form || "").replace(/[^1-9]/g, "").slice(0, 6);
+      const form = String(runner.form || "").replace(/[^0-9]/g, "").slice(0, 6);
       const hp = Number(runner.handicapPoints);
       const agf = Number(runner.agf);
       const odds = Number(runner.odds);

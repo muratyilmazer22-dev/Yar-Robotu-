@@ -128,6 +128,25 @@ test('unknown race distance does not fabricate pedigree fit from a speed/stamina
   assert.ok(ranked.every((horse) => horse.features.pedigree === null));
 });
 
+test('zero in the recent form history is retained as a worst-place result', () => {
+  const modelWeights = Object.fromEntries(Object.keys(require('./scoring').BASE_WEIGHTS).map((name) => [name, name === 'form' ? 1 : 0]));
+  const ranked = analyzeRace({
+    horses: [
+      { number: 1, last6: '000000' },
+      { number: 2, last6: '111111' }
+    ]
+  }, { modelWeights });
+
+  assert.equal(ranked[0].number, 2);
+  assert.equal(ranked.find((horse) => horse.number === 1).features.form, 0);
+  assert.equal(ranked.find((horse) => horse.number === 2).features.form, 90);
+});
+
+test('a zero inside otherwise numeric form is not discarded from the average', () => {
+  const ranked = analyzeRace({ horses: [{ number: 1, last6: '655008' }, { number: 2, last6: '555555' }] });
+  assert.ok(Math.abs(ranked.find((horse) => horse.number === 1).features.form - 26.6667) < 0.001);
+});
+
 test('historical race-time performance influences ranking when available', () => {
   const race = {
     distance: 1400,

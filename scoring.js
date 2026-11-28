@@ -149,7 +149,7 @@
     const favoriteOdds = Math.min(...validOdds);
     const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0) || 1;
     const ranked = active.map((horse) => {
-      const recent = horse.last6 ? [...horse.last6].slice(0, 6).map(Number).filter((value) => value >= 1 && value <= 9) : [];
+      const recent = horse.last6 ? String(horse.last6).replace(/[^0-9]/g, '').slice(0, 6).split('').map(Number).filter((value) => value >= 0 && value <= 9).map((place) => place === 0 ? 10 : place) : [];
       const getProfileScore = profileScoreFn || ((name, distance) => {
         const profile = DEFAULT_DNA[normalizeName(name)];
         if (!profile) return null;
