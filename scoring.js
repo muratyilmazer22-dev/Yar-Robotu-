@@ -36,7 +36,7 @@
   const BASE_WEIGHTS = { rating: 0.24, form: 0.22, market: 0.19, pedigree: 0.11, groupFit: 0.05, classHistory: 0.08, timeFit: 0.06, rivalFit: 0.025, venueFit: 0.05, weatherFit: 0.03, trackFit: 0.04, jockeyFit: 0.025, distanceFit: 0.02, restFit: 0.015, weightFit: 0.015 };
   const FEATURE_LABELS = {
     rating: "HP", form: "Son form", market: "AGF/oran", pedigree: "Pedigri", groupFit: "Grup gücü",
-    classHistory: "Sınıf geçmişi", timeFit: "Derece", rivalFit: "Rakip geçmişi", venueFit: "Hipodrom",
+    classHistory: "Sınıf kalitesi", timeFit: "Derece", rivalFit: "Rakip geçmişi", venueFit: "Hipodrom",
     weatherFit: "Hava", trackFit: "Pist", jockeyFit: "Jokey", distanceFit: "Mesafe",
     restFit: "Dinlenme aralığı", weightFit: "Kilo"
   };

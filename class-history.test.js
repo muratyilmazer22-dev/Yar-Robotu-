@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { classRank, createIndex, scoreForHorse, groupFitForHorse } = require('./class-history');
+const { classTypeLabel, classRank, createIndex, scoreForHorse, classMovementForHorse, groupFitForHorse } = require('./class-history');
 
 function archiveRow(date, raceType, place) {
   return {
@@ -15,6 +15,10 @@ test('class labels are converted into ordered approximate tiers', () => {
   assert.ok(classRank('KV-8') > classRank('Handikap 15'));
   assert.ok(classRank('Handikap 15') > classRank('Maiden'));
   assert.equal(classRank('tanımsız'), null);
+  assert.equal(classTypeLabel('KV-8'), 'Kısa Vade 8');
+  assert.equal(classTypeLabel('Şartlı 3'), 'Şartlı 3');
+  assert.equal(classTypeLabel('Satış 2'), 'Satış');
+  assert.ok(classRank('Kısa Vade 8') > classRank('Handikap 15'));
 });
 
 test('uses earlier class-transition results and normalizes Turkish horse names', () => {
@@ -25,6 +29,21 @@ test('uses earlier class-transition results and normalizes Turkish horse names',
 
   assert.ok(score > 50);
   assert.ok(score > poorRun);
+});
+
+test('reports the last completed class transition without same-day or future leakage', () => {
+  const history = createIndex([
+    archiveRow('2026-11-01', 'Handikap 15', 2),
+    archiveRow('2026-11-23', 'Grup 1', 1),
+    archiveRow('2026-11-24', 'Grup 1', 1)
+  ]);
+  const movement = classMovementForHorse(history, 'ŞAHİN KIZI', 'Kısa Vade 8', '2026-11-23');
+
+  assert.equal(movement.direction, 'yükseliş');
+  assert.equal(movement.fromType, 'Handikap 15');
+  assert.equal(movement.toType, 'Kısa Vade 8');
+  assert.equal(movement.date, '2026-11-01');
+  assert.equal(classMovementForHorse(history, 'ŞAHİN KIZI', 'Handikap 15', '2026-11-01'), null);
 });
 
 test('scores the prebuilt archive index used by automatic model refresh', () => {

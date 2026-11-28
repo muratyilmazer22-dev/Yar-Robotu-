@@ -7,21 +7,38 @@
     return String(value || "").toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "i").replace(/[^a-z0-9]+/g, " ").trim();
   }
 
+  function classText(value) {
+    return normalizeName(typeof value === "string" ? value : value?.program?.raceType || value?.program?.raceCategory || value?.program?.title || value?.raceType || value?.raceCategory || value?.title || "");
+  }
+
+  function classTypeLabel(value) {
+    const text = classText(value);
+    const numbered = text.match(/(?:handikap|handicap|kv|kisa vade|sartli|grup)\s*[- ]?(\d{1,2})/);
+    if (text.includes("satis") || text.includes("selling")) return "Satış";
+    if (text.includes("maiden")) return "Maiden";
+    if (text.includes("grup") || text.includes("group")) return numbered ? `Grup ${numbered[1]}` : "Grup";
+    if (text.includes("acik") || text.includes("open")) return "Açık";
+    if (text.includes("kv") || text.includes("kisa vade") || text.includes("short term")) return numbered ? `Kısa Vade ${numbered[1]}` : "Kısa Vade";
+    if (text.includes("handikap") || text.includes("handicap")) return numbered ? `Handikap ${numbered[1]}` : "Handikap";
+    if (text.includes("sartli") || text.includes("conditions")) return numbered ? `Şartlı ${numbered[1]}` : "Şartlı";
+    return "Diğer";
+  }
+
   function classRank(value) {
-    const text = normalizeName(typeof value === "string" ? value : value?.program?.raceType || value?.program?.raceCategory || value?.program?.title || value?.raceType || value?.raceCategory || value?.title || "");
-    const numbered = text.match(/(?:handikap|kv|sartli|grup)\s*[- ]?(\d{1,2})/);
+    const text = classText(value);
+    const numbered = text.match(/(?:handikap|handicap|kv|kisa vade|sartli|grup)\s*[- ]?(\d{1,2})/);
     if (numbered) {
       const level = Number(numbered[1]);
-      if (text.includes("kv")) return 25 + level;
+      if (text.includes("kv") || text.includes("kisa vade")) return 25 + level;
       if (text.includes("grup")) return 35 - level;
       if (text.includes("sartli")) return 15 + level;
       return 5 + level;
     }
-    if (text.includes("acik") || text.includes("grup")) return 30;
-    if (text.includes("kv")) return 25;
-    if (text.includes("handikap")) return 20;
-    if (text.includes("sartli")) return 15;
-    if (text.includes("satis")) return 10;
+    if (text.includes("acik") || text.includes("open") || text.includes("grup")) return 30;
+    if (text.includes("kv") || text.includes("kisa vade")) return 25;
+    if (text.includes("handikap") || text.includes("handicap")) return 20;
+    if (text.includes("sartli") || text.includes("conditions")) return 15;
+    if (text.includes("satis") || text.includes("selling")) return 10;
     if (text.includes("maiden")) return 5;
     return null;
   }
@@ -51,7 +68,7 @@
         const finishScore = fieldSize > 1 ? Math.max(0, Math.min(100, (fieldSize - place) / (fieldSize - 1) * 100)) : 50;
         const groupFit = groupStrength === null ? null : groupStrength * 0.55 + finishScore * 0.45;
         const starts = index.get(name) || [];
-        starts.push({ date, rank, place, groupStrength, groupFit });
+        starts.push({ date, rank, raceType: row.program?.raceType || row.program?.raceCategory || row.program?.title || "", place, groupStrength, groupFit });
         index.set(name, starts);
       }
     }
@@ -79,6 +96,25 @@
     return Math.round((50 + (average - 50) * confidence) * 10) / 10;
   }
 
+  function classMovementForHorse(archive, horseName, targetClass, beforeDate) {
+    const name = normalizeName(horseName);
+    const targetRank = classRank(targetClass);
+    if (!name || targetRank === null) return null;
+    const cutoff = String(beforeDate || "").slice(0, 10);
+    const index = archive instanceof Map ? archive : createIndex(archive);
+    const previous = (index.get(name) || []).find((start) => (!cutoff || start.date < cutoff) && start.rank !== null);
+    if (!previous) return null;
+    const difference = targetRank - previous.rank;
+    return {
+      direction: difference > 0 ? "yükseliş" : difference < 0 ? "düşüş" : "aynı seviye",
+      fromType: classTypeLabel(previous.raceType),
+      toType: classTypeLabel(targetClass),
+      date: previous.date,
+      fromRank: previous.rank,
+      toRank: targetRank
+    };
+  }
+
   function groupFitForHorse(archive, horseName, beforeDate) {
     const name = normalizeName(horseName);
     if (!name) return null;
@@ -93,5 +129,5 @@
     return Math.round((50 + (average - 50) * confidence) * 10) / 10;
   }
 
-  return { normalizeName, classRank, createIndex, scoreForHorse, groupFitForHorse };
+  return { normalizeName, classTypeLabel, classRank, createIndex, scoreForHorse, classMovementForHorse, groupFitForHorse };
 });
