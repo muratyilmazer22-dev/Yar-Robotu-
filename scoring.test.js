@@ -122,6 +122,13 @@ test('strong disagreement between AGF and odds reduces market influence and trus
   assert.ok(oddsLeader.marketAgreement < 50);
 });
 
+test('known names do not receive a static pedigree estimate without sourced evidence', () => {
+  const race = { distance: 1400, horses: [{ number: 1, sire: 'TOROK', hp: 80 }, { number: 2, sire: 'TOROK', hp: 40 }] };
+  const ranked = analyzeRace(race);
+  assert.ok(ranked.every((horse) => horse.features.pedigree === null));
+  assert.ok(ranked.every((horse) => horse.pedigreeSource === 'Veri yok'));
+});
+
 test('unknown race distance does not fabricate pedigree fit from a speed/stamina profile', () => {
   const race = { distance: null, horses: [{ number: 1, sire: 'TOROK', hp: 80 }, { number: 2, sire: 'TOROK', hp: 40 }] };
   const ranked = analyzeRace(race);

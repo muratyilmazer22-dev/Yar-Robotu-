@@ -10,6 +10,7 @@ const raceRelations = require('../lib/race-relations');
 const { getWinnerRank, getWinnerRankBucket, summarizeWinnerRankContexts } = require('../lib/backtest-metrics');
 const { createReturnMetrics, recordReturn, finalizeReturnMetrics } = require('../lib/backtest-economics');
 const { evaluateWalkForward } = require('../lib/advanced-model-evaluation');
+const { trustedTjkSource } = require('../lib/archive-quality');
 
 function validDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const parsed = new Date(`${value}T00:00:00Z`); return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
@@ -233,8 +234,39 @@ module.exports = async function handler(req, res) {
     }
 
     const walkForwardValidation = evaluateWalkForward(walkForwardRaces);
+    const archiveDates = [...new Set(rows.map((row) => String(row.raceDate || '').slice(0, 10)).filter((date) => validDate(date)))].sort();
+    const featureFields = {
+      jockeyFit: (runner) => Boolean(String(runner.jockey || '').trim()),
+      trackFit: (_, program) => Boolean(String(program.surface || '').trim()),
+      distanceFit: (_, program) => Number.isFinite(Number(program.distance)) && Number(program.distance) > 0,
+      weightFit: (runner) => Number.isFinite(Number(runner.weight)) && Number(runner.weight) > 0,
+      pedigree: (runner) => Boolean(String(runner.sire || runner.origin || '').trim())
+    };
+    const featureCoverage = Object.fromEntries(Object.entries(featureFields).map(([feature, hasValue]) => {
+      let total = 0;
+      let present = 0;
+      for (const row of rows) {
+        const program = row.program || {};
+        for (const runner of Array.isArray(program.runners) ? program.runners : []) {
+          if (runner.scratched) continue;
+          total += 1;
+          if (hasValue(runner, program)) present += 1;
+        }
+      }
+      return [feature, { present, total, rate: total ? Number((present / total * 100).toFixed(1)) : null }];
+    }));
+    const archiveDataQuality = {
+      races: rows.length,
+      from: archiveDates[0] || null,
+      to: archiveDates.at(-1) || null,
+      distinctDates: archiveDates.length,
+      trustedTjkRaces: rows.filter((row) => trustedTjkSource(row.sourceUrls)).length,
+      unverifiedSourceRaces: rows.filter((row) => !trustedTjkSource(row.sourceUrls)).length,
+      featureCoverage
+    };
     const rate = (value, total) => total ? Number((value / total * 100).toFixed(1)) : null;
     return res.status(200).json({
+      archiveDataQuality,
       model: 'deterministic-baseline-v1',
       from,
       to,

@@ -48,7 +48,7 @@ test('archive training retains zero finish codes so poor recent form stays poor'
 
 test('archive training examples include prior venue, weather, and track performance only', () => {
   const previous = {
-    race_date: '2026-11-01', city: 'Ankara',
+    race_date: '2026-11-01', city: 'Ankara', sourceUrls: { tjk: 'https://www.tjk.org/TR/test' },
     program: { raceType: 'Grup 1', distance: 1200, weather: 'Yağmurlu', surface: 'Kum', trackCondition: 'Islak', runners: [
       { no: 1, name: 'KIR AT', handicapPoints: 90, sire: 'TOROK', damSire: 'LUXOR' },
       { no: 2, name: 'RAKİP A', handicapPoints: 85 },

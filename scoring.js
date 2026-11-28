@@ -3,33 +3,7 @@
   if (typeof module === 'object' && module.exports) module.exports = engine;
   else root.RaceScoring = engine;
 })(typeof globalThis === 'undefined' ? this : globalThis, function () {
-  const DEFAULT_DNA = {
-    DIESIS: { B: 2, I: 4, C: 10, S: 4, P: 0 },
-    SINGSPIEL: { B: 0, I: 2, C: 8, S: 8, P: 2 },
-    VICTORYGALLOP: { B: 4, I: 6, C: 12, S: 4, P: 0 },
-    NATIVEKHAN: { B: 2, I: 4, C: 8, S: 2, P: 0 },
-    LUXOR: { B: 6, I: 6, C: 4, S: 0, P: 0 },
-    KANEKO: { B: 4, I: 8, C: 6, S: 0, P: 0 },
-    MENDIP: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    TOROK: { B: 6, I: 6, C: 4, S: 0, P: 0 },
-    LIONHEART: { B: 8, I: 4, C: 4, S: 0, P: 0 },
-    SRIPAD: { B: 4, I: 6, C: 6, S: 2, P: 0 },
-    KURTINIADIS: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    TURBO: { B: 6, I: 6, C: 4, S: 0, P: 0 },
-    KAIZBERT: { B: 8, I: 6, C: 2, S: 0, P: 0 },
-    OZGUNHAN: { B: 2, I: 4, C: 8, S: 4, P: 0 },
-    FLIGHTLINE: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    GUNRUNNER: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    TAPIT: { B: 2, I: 4, C: 10, S: 4, P: 0 },
-    MUNNINGS: { B: 8, I: 4, C: 2, S: 0, P: 0 },
-    PRACTICALJOKE: { B: 6, I: 6, C: 4, S: 0, P: 0 },
-    INVINCIBLESPIRIT: { B: 8, I: 4, C: 2, S: 0, P: 0 },
-    CAIROPRINCE: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    GOODMAGIC: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    SMILINGTIGER: { B: 8, I: 4, C: 2, S: 0, P: 0 },
-    MALIBUMOON: { B: 4, I: 6, C: 8, S: 2, P: 0 },
-    DISTORTEDHUMOR: { B: 6, I: 6, C: 4, S: 0, P: 0 }
-  };
+  const DEFAULT_DNA = {};
 
   function normalizeName(value) {
     return String(value || '').toLocaleUpperCase('tr-TR').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9 ]/g, '').trim();

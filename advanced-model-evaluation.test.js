@@ -115,6 +115,9 @@ test('walk-forward folds train only on earlier race dates and mark too few folds
   assert.equal(report.byModel.learned.races, 50);
   assert.equal(report.byModel.market.races, 50);
   assert.equal(report.byModel.marketBlend.races, 50);
+  assert.equal(report.signalEvaluation.rating.races, 50);
+  assert.equal(report.signalEvaluation.rating.excludedRaces, 0);
+  assert.equal(report.signalEvaluation.rating.validated, false);
   assert.ok(report.foldDetails.every((fold) => fold.trainingRaces >= 180 && fold.testRaces === 10 && fold.blendCalibrationRaces >= 20));
 });
 

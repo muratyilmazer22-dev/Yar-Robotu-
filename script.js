@@ -10,7 +10,7 @@
   const progress = document.getElementById('historyProgress');
   const summary = document.getElementById('historySummary');
   const backtestSummary = document.getElementById('backtestSummary');
-  if (!startInput || !endInput || !importButton) return;
+  if (!backtestButton || !backtestSummary) return;
 
   const today = new Date();
   const archiveWindowStart = new Date(today);
@@ -20,18 +20,22 @@
     return localDate.toISOString().slice(0, 10);
   };
   const earliestDate = toIsoDate(archiveWindowStart);
-  startInput.min = earliestDate;
-  endInput.min = earliestDate;
-  startInput.value = earliestDate;
-  endInput.value = toIsoDate(today);
-  startInput.max = endInput.value;
-  endInput.max = endInput.value;
-  backtestStartInput.min = earliestDate;
-  backtestEndInput.min = earliestDate;
-  backtestStartInput.value = earliestDate;
-  backtestEndInput.value = toIsoDate(today);
-  backtestStartInput.max = backtestEndInput.value;
-  backtestEndInput.max = backtestEndInput.value;
+  if (startInput && endInput) {
+    startInput.min = earliestDate;
+    endInput.min = earliestDate;
+    startInput.value = earliestDate;
+    endInput.value = toIsoDate(today);
+    startInput.max = endInput.value;
+    endInput.max = endInput.value;
+  }
+  if (backtestStartInput && backtestEndInput) {
+    backtestStartInput.min = earliestDate;
+    backtestEndInput.min = earliestDate;
+    backtestStartInput.value = earliestDate;
+    backtestEndInput.value = toIsoDate(today);
+    backtestStartInput.max = backtestEndInput.value;
+    backtestEndInput.max = backtestEndInput.value;
+  }
 
   let stopRequested = false;
   let importing = false;
@@ -84,7 +88,7 @@
     return dates;
   }
 
-  importButton.addEventListener('click', async () => {
+  if (importButton && startInput && endInput && stopButton) importButton.addEventListener('click', async () => {
     if (importing) return;
     const dates = eachDate(startInput.value, endInput.value);
     if (!dates.length || dates.length > 366) {
@@ -152,7 +156,7 @@
     setStatus(`${finalStatus}${summaryLoaded ? '' : ' Neon arşiv özeti yenilenemedi.'}`, !summaryLoaded);
   });
 
-  stopButton.addEventListener('click', () => {
+  if (stopButton) stopButton.addEventListener('click', () => {
     stopRequested = true;
     setStatus('Devam eden gün tamamlanınca içe aktarma duracak.');
   });
@@ -245,7 +249,37 @@
         row.textContent = `${modelName === 'fixed' ? 'Sabit model' : modelName === 'learned' ? 'Otomatik model' : modelName === 'marketBlend' ? 'Otomatik + AGF' : 'AGF piyasası'} kalibrasyonu: ${bins || 'yetersiz veri'}`;
         calibrationList.append(row);
       }
-      walkForwardBlock.append(walkForwardTitle, walkForwardNote, plRankingNote, calibrationList);
+      const signalTitle = document.createElement('h3');
+      signalTitle.textContent = 'Tekil sinyaller — ileri tarih ölçümü';
+      const signalNote = document.createElement('p');
+      signalNote.className = 'sub';
+      signalNote.textContent = 'Her sinyal aynı walk-forward test tarihleri üzerinde, diğer sinyallerden bağımsız ölçülür. Sonuçlar keşif/kalibrasyon raporudur; tek başına model ağırlıklarını değiştirmez.';
+      const signalList = document.createElement('ul');
+      const featureLabels = { rating: 'HP', form: 'Son form', market: 'AGF/oran', pedigree: 'Pedigri', groupFit: 'Grup', classHistory: 'Sınıf geçmişi', timeFit: 'Derece', rivalFit: 'Rakip geçmişi', venueFit: 'Hipodrom', weatherFit: 'Hava', trackFit: 'Pist', jockeyFit: 'Jokey', distanceFit: 'Mesafe', restFit: 'Dinlenme', weightFit: 'Kilo' };
+      for (const [feature, metric] of Object.entries(walkForward.signalEvaluation || {})) {
+        const row = document.createElement('li');
+        row.append(document.createTextNode(`${featureLabels[feature] || feature}: ${metric.races ? `${metric.races} yarış · lider %${(metric.topOneHitRate * 100).toFixed(1)} · Brier ${metric.brier.toFixed(3)} · log-loss ${metric.logLoss.toFixed(3)} · kalibrasyon hatası ${metric.calibrationError.toFixed(3)}` : 'ölçüm için veri yok'} · dışlanan ${metric.excludedRaces || 0}${metric.validated ? ' · yeterli walk-forward kanıtı' : ' · keşif / örnek yetersiz'}`));
+        if (metric.calibration?.length) {
+          const calibrationDetails = document.createElement('details');
+          const calibrationSummary = document.createElement('summary');
+          calibrationSummary.textContent = 'Kalibrasyon dilimleri';
+          const calibrationBins = document.createElement('ul');
+          for (const bin of metric.calibration) {
+            const calibrationRow = document.createElement('li');
+            calibrationRow.textContent = `${Math.round(bin.lower * 100)}–${Math.round(bin.upper * 100)}% olasılık dilimi: tahmin ${(bin.meanPredicted * 100).toFixed(1)}%, gerçekleşen ${(bin.observedRate * 100).toFixed(1)}% (${bin.count} at)`;
+            calibrationBins.append(calibrationRow);
+          }
+          calibrationDetails.append(calibrationSummary, calibrationBins);
+          row.append(calibrationDetails);
+        }
+        signalList.append(row);
+      }
+      walkForwardBlock.append(walkForwardTitle, walkForwardNote, plRankingNote, calibrationList, signalTitle, signalNote, signalList);
+      const archiveQuality = data.archiveDataQuality || {};
+      const provenance = document.createElement('p');
+      provenance.className = 'sub';
+      const featureCoverage = Object.entries(archiveQuality.featureCoverage || {}).map(([key, value]) => `${featureLabels[key] || key} ${value.present}/${value.total}`).join(' · ');
+      provenance.textContent = `Arşiv kaynağı: ${archiveQuality.trustedTjkRaces || 0}/${archiveQuality.races || 0} TJK bağlantısı doğrulandı; ${archiveQuality.unverifiedSourceRaces || 0} kaydın kaynağı doğrulanamadı. Arşiv tarih aralığı ${archiveQuality.from || '—'} – ${archiveQuality.to || '—'} (${archiveQuality.distinctDates || 0} gün). Alan kapsamı: ${featureCoverage || 'ölçülemedi'}. Jokey/pist/mesafe/kilo/pedigri bağlamı doğrulanmış TJK arşivinden veya eşleşmiş kişisel bülten-sonuç kaydından türetilir.`;
       const note = document.createElement('p');
       note.className = 'sub';
       note.textContent = `Tek günlük veya küçük örnek sonuçları genellemez. Kaydedilmiş ${Number(data.storedRaces || 0).toLocaleString('tr-TR')} koşudan ${Number(data.omittedRaces || 0).toLocaleString('tr-TR')} tanesi gerekli program/sonuç eşleşmesi olmadığı için test dışı kaldı. Ana metrikler sabit başlangıç modeline aittir; doğrulanmış otomatik model, ağırlıkların eğitiminde kullanılmamış ayrı tarih diliminde yukarıda ayrıca karşılaştırılır. ${data.method} ${data.returnMetrics?.basis || ''}`;
@@ -332,7 +366,7 @@
         breakdownList.append(item);
       }
       breakdown.append(breakdownTitle, breakdownList);
-      backtestSummary.replaceChildren(metrics, validationBlock, automaticValidationBlock, walkForwardBlock, note, rankBreakdown, contextRankBreakdown, forwardContextBreakdown, breakdown);
+      backtestSummary.replaceChildren(metrics, provenance, validationBlock, automaticValidationBlock, walkForwardBlock, note, rankBreakdown, contextRankBreakdown, forwardContextBreakdown, breakdown);
     } catch (error) {
       backtestSummary.textContent = error.message || 'Geriye dönük test çalıştırılamadı.';
     } finally {
@@ -372,16 +406,7 @@ let raceRelationArchive = new Map();
 const MEMORY_NOTE_CATEGORIES = Object.freeze({ analysis: "At analizi / NotebookLM", gallop: "Galop / sprint", pedigree: "Soy kütüğü / orijin", race: "Koşu / hipodrom notu", general: "Genel not" });
 const MAX_MEMORY_NOTE_CHARACTERS = 50000;
 const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], shadowComparisons: [], bulletins: [], memoryNotes: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
-const DEFAULT_PROFILES = {
-  DIESIS: [2, 4, 10, 4, 0], SINGSPIEL: [0, 2, 8, 8, 2], VICTORYGALLOP: [4, 6, 12, 4, 0],
-  NATIVEKHAN: [2, 4, 8, 2, 0], LUXOR: [6, 6, 4, 0, 0], KANEKO: [4, 8, 6, 0, 0],
-  MENDIP: [4, 6, 8, 2, 0], TOROK: [6, 6, 4, 0, 0], LIONHEART: [8, 4, 4, 0, 0],
-  SRIPAD: [4, 6, 6, 2, 0], KURTINIADIS: [4, 6, 8, 2, 0], TURBO: [6, 6, 4, 0, 0],
-  KAIZBERT: [8, 6, 2, 0, 0], OZGUNHAN: [2, 4, 8, 4, 0], FLIGHTLINE: [4, 6, 8, 2, 0],
-  GUNRUNNER: [4, 6, 8, 2, 0], TAPIT: [2, 4, 10, 4, 0], MUNNINGS: [8, 4, 2, 0, 0],
-  PRACTICALJOKE: [6, 6, 4, 0, 0], INVINCIBLESPIRIT: [8, 4, 2, 0, 0], CAIROPRINCE: [4, 6, 8, 2, 0],
-  GOODMAGIC: [4, 6, 8, 2, 0], SMILINGTIGER: [8, 4, 2, 0, 0], MALIBUMOON: [4, 6, 8, 2, 0], DISTORTEDHUMOR: [6, 6, 4, 0, 0]
-};
+const DEFAULT_PROFILES = {};
 
 function normalizeState(saved) {
   const hasPersonalLearningState = saved?.learningSource === PERSONAL_LEARNING_SOURCE;
