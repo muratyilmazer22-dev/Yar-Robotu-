@@ -374,6 +374,32 @@ test('parses TJK plain-text race rows and keeps program numbers separate from eq
   ]).ok, true);
 });
 
+test('ignores tabular continuation fragments without horse numbers in TJK bulletins', () => {
+  const bulletin = [
+    '2. Koşu 15.00 Maiden 1300 Kum',
+    'N\tAt İsmi\tYaş\tOrijin\tSıklet\tJokey\tSahip\tAntrenör\tSt\tHP\tSon 6 Y.\tKGS\ts20\tEn İyi D.\tGny\tAGF\tİdm',
+    '1\tSUFERING KG DB SK\t2y a d\tGÜNGÖR BABA- GÖLCÜK FIRTINASI / YOUNG PRINCE\t59\tM.AKYAVUZ',
+    'N\tM.ÖZYİĞİT\t10DS \t\t6\t7\t19\t\t98.65\t%1(10)\t',
+    '2\tCAN BALAM SK\t2y d d\tHAKEEM (USA)- GLIVANA / UNACCOUNTED FOR (USA)\t57\tE.ÇİZİK',
+    '3. Koşu 15.30 ŞARTLI 3 2000 Sentetik',
+    'N\tAt İsmi\tYaş\tOrijin\tSıklet\tJokey\tSahip\tAntrenör\tSt\tHP\tSon 6 Y.\tKGS\ts20\tEn İyi D.\tGny\tAGF\tİdm',
+    '1\tİSKİT ALP KG K\t5y a a\tSEMEND- KÜÇÜK SELİN / SIH TAHA\t57,5\tM.T.COŞKUN AP',
+    'GİZEM ÇAKMAKOĞLU\tY.TUNCAY\t1\t84\t060573\t14\t10\t2.20.07\t3.35\t%19(3)',
+    '2\tBÜYÜK YÜREKLİ KG\t5y a a\tKAYAYÜREKLİ- NESİBE KIZ / İBOCAN\t56,5\tM.KIYAK AP'
+  ].join('\n');
+
+  const races = parseRaces(bulletin);
+
+  assert.deepEqual(races.map((race) => race.horses.map((horse) => [horse.horseNumber, horse.name])), [
+    [[1, 'SUFERING'], [2, 'CAN BALAM']],
+    [[1, 'İSKİT ALP'], [2, 'BÜYÜK YÜREKLİ']]
+  ]);
+  assert.equal(auditCouponPool([
+    ...races,
+    ...[4, 5, 6, 7].map((no) => ({ no, horses: [{ horseNumber: 1 }] }))
+  ]).ok, true);
+});
+
 test('keeps the first and second race legs separate at their numbered headings', () => {
   const bulletin = [
     '1. Koşu 14:00 Maiden 1400 Kum',

@@ -143,6 +143,7 @@
           ? rowName.match(/^\s*(\d{1,2})\s+(.+)$/)
           : null;
         horseNumber = (numberIndex >= 0 ? parseNumber(cells[numberIndex]) : null) ?? (horseMatch ? Number(horseMatch[1]) : null) ?? (combinedNumberMatch ? Number(combinedNumberMatch[1]) : null) ?? (hashNumberMatch ? Number(hashNumberMatch[1]) : null);
+        if (numberIndex >= 0 && (!Number.isSafeInteger(horseNumber) || horseNumber < 1)) continue;
         const explicitRankIndex = headers.findIndex((header) => header.includes('sira') || header.includes('sonuc') || header.includes('result') || header.includes('rank') || header.includes('placing') || header.includes('position'));
         const shortRankIndex = headers.indexOf('s');
         const hasResultTimeColumn = headers.some((header) => ['derece', 'time', 'zaman', 'finish time'].includes(header));
