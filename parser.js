@@ -86,10 +86,10 @@
 
       const cells = splitCells(raw);
       if (!cells) {
-        const plainHorseMatch = line.match(/^(\d{1,2})\s+(.+?)\s+(\d{1,2}y\s+[a-z]\s+[a-z])(?:\s|$)/i);
+        const plainHorseMatch = line.match(/^(\d{1,2})[.)]?\s+(.+?)\s+(\d{1,2}y\s+[a-z]\s+[a-z])(?:\s|$)/i);
         if (plainHorseMatch) {
           const horseNumber = Number(plainHorseMatch[1]);
-          const name = plainHorseMatch[2].trim();
+          const name = plainHorseMatch[2].replace(/\s+(?:KG|K|DB|SKG|SK)\b.*$/i, '').trim();
           if (isUsableHorseName(name)) {
             current.horses.push({
               no: horseNumber,
