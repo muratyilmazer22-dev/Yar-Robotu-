@@ -353,8 +353,22 @@ const MIN_SINGLE_COVERAGE = 50;
 let scoreCache = new WeakMap();
 let classHistoryArchive = new Map();
 let raceRelationArchive = new Map();
-let raceContextArchive = new Map();
-let pedigreeHistoryArchive = new Map();
+  let raceContextArchive = new Map();
+  let pedigreeHistoryArchive = new Map();
+  let syncedRaceHistoryRows = [];
+  let personalArchiveRaceCount = 0;
+  function rebuildHistoricalIndexes() {
+    const personalRows = window.PersonalRaceArchive.buildArchive(state.bulletins, (text) => window.RaceParser.parseRaces(text));
+    const officialKeys = new Set(syncedRaceHistoryRows.map((row) => `${String(row.race_date || row.raceDate || "").slice(0, 10)}|${normalize(row.city || "")}|${Number(row.race_no ?? row.raceNo)}`));
+    const archive = [...syncedRaceHistoryRows, ...personalRows.filter((row) => !officialKeys.has(`${String(row.race_date || "").slice(0, 10)}|${normalize(row.city || "")}|${Number(row.race_no)}`))];
+    classHistoryArchive = window.RaceClassHistory.createIndex(archive);
+    raceRelationArchive = window.RaceRelations.createIndex(archive);
+    raceContextArchive = window.RaceContextPerformance.createIndex(archive);
+    pedigreeHistoryArchive = window.RacePedigreeHistory.createIndex(archive);
+    personalArchiveRaceCount = personalRows.length;
+    scoreCache = new WeakMap();
+    return personalRows;
+  }
 const MEMORY_NOTE_CATEGORIES = Object.freeze({ analysis: "At analizi / NotebookLM", gallop: "Galop / sprint", pedigree: "Soy kütüğü / orijin", race: "Koşu / hipodrom notu", general: "Genel not" });
 const MAX_MEMORY_NOTE_CHARACTERS = 50000;
 const DEFAULT_STATE = { version: 3, profiles: {}, predictions: [], outcomes: [], coupons: [], shadowComparisons: [], bulletins: [], memoryNotes: [], modelWeights: { ...BASE_WEIGHTS }, lastGoodModelWeights: { ...BASE_WEIGHTS }, modelWeightVersions: [], contextWeights: {} };
@@ -755,9 +769,19 @@ function renderResultsContextOptions(selectedDate = $("resultsDateInput")?.value
   for (const prediction of state.predictions) {
     if (!prediction.date || !prediction.city) continue;
     const key = resultsContextKey(prediction.date, prediction.city);
-    const context = contexts.get(key) || { date: prediction.date, city: prediction.city, races: new Set(), latestAt: "" };
+    const context = contexts.get(key) || { date: prediction.date, city: prediction.city, races: new Set(), latestAt: "", hasPrediction: false, hasProgram: false };
     if (prediction.no !== undefined) context.races.add(Number(prediction.no));
+    context.hasPrediction = true;
     if (String(prediction.predictionCreatedAt || "") > context.latestAt) context.latestAt = String(prediction.predictionCreatedAt || "");
+    contexts.set(key, context);
+  }
+  for (const bulletin of state.bulletins) {
+    if (bulletin.kind !== "program" || bulletin.status !== "saved" || bulletin.analysisStatus !== "complete" || !bulletin.date || !bulletin.city) continue;
+    const key = resultsContextKey(bulletin.date, bulletin.city);
+    const context = contexts.get(key) || { date: bulletin.date, city: bulletin.city, races: new Set(), latestAt: "", hasPrediction: false, hasProgram: false };
+    for (const race of window.RaceParser.parseRaces(bulletin.text)) context.races.add(Number(race.no));
+    context.hasProgram = true;
+    if (String(bulletin.savedAt || "") > context.latestAt) context.latestAt = String(bulletin.savedAt || "");
     contexts.set(key, context);
   }
   const sortedContexts = [...contexts.entries()].sort((a, b) => b[1].date.localeCompare(a[1].date) || b[1].latestAt.localeCompare(a[1].latestAt));
@@ -773,15 +797,16 @@ function renderResultsContextOptions(selectedDate = $("resultsDateInput")?.value
   };
   if (selectedKey && !contexts.has(selectedKey)) {
     const dateLabel = new Date(`${selectedDate}T00:00:00`).toLocaleDateString("tr-TR");
-    select.append(option(selectedKey, `${selectedCity} · ${dateLabel} · tahmin kaydı yok`, selectedDate, selectedCity));
+    select.append(option(selectedKey, `${selectedCity} · ${dateLabel} · eşleşen arşiv kaydı yok`, selectedDate, selectedCity));
   }
   if (!sortedContexts.length && !selectedKey) {
-    select.append(option("", "Henüz kayıtlı analiz yok"));
+    select.append(option("", "Henüz kayıtlı bülten veya analiz yok"));
   }
   for (const [key, context] of sortedContexts) {
     const dateLabel = new Date(`${context.date}T00:00:00`).toLocaleDateString("tr-TR");
     const raceCount = context.races.size;
-    select.append(option(key, `${context.city} · ${dateLabel}${raceCount ? ` · ${raceCount} koşu` : ""}`, context.date, context.city));
+    const sourceLabel = context.hasPrediction && context.hasProgram ? " · tahmin + bülten" : context.hasProgram ? " · bülten arşivi" : " · tahmin arşivi";
+    select.append(option(key, `${context.city} · ${dateLabel}${raceCount ? ` · ${raceCount} koşu` : ""}${sourceLabel}`, context.date, context.city));
   }
   if (selectedKey) select.value = selectedKey;
   else if (sortedContexts.length) {
@@ -795,8 +820,8 @@ function renderResultsContextOptions(selectedDate = $("resultsDateInput")?.value
   const contextHelp = $("resultsContextHelp");
   if (archiveButton) archiveButton.disabled = !selected?.dataset.date || !selected?.dataset.city;
   if (contextHelp) contextHelp.textContent = sortedContexts.length
-    ? "Tarih ve hipodrom seçili analizden alınır; yanlış gün/şehir eşleşmesini önler."
-    : "Bu cihazda tahmin kaydı yok. Başka cihazdaki kayıtlar için aynı hesapla giriş yapın veya yedek yükleyin.";
+    ? "Tarih ve hipodromu tahmin arşivinden veya kaydedilmiş normal bültenden seçin; sonuç yanlış gün ya da şehirle eşleştirilmez."
+    : "Bu cihazda tahmin veya analiz edilmiş normal bülten kaydı yok. Başka cihazdaki hafıza için aynı hesapla giriş yapın veya yedeği yükleyin.";
 }
 function formatArchivedResults(races) {
   return races.map((race) => {
@@ -1460,7 +1485,7 @@ async function runAnalysis() {
   const couponDate = $("couponDateInput")?.value || new Date().toISOString().slice(0, 10);
   const externalSignals = window.TipSignals.parseAnalystSignals($("analystSignalInput")?.value || "");
   parsed.races.forEach((race) => { race.externalSignals = externalSignals[race.no] || null; });
-  scoreCache = new WeakMap();
+  rebuildHistoricalIndexes();
   const openRaces = parsed.races.filter((race) => !race.finished);
   const results = openRaces.length ? await analyzeRaces(openRaces) : [];
   const predictionCreatedAt = new Date().toISOString();
@@ -1504,7 +1529,10 @@ async function runAnalysis() {
     ? `${openRaces.length} açık koşu analiz edildi; ${completedCount} koşulmuş ayak tahmin dışında bırakıldı. ${memoryStatus}`
     : `${completedCount} koşunun tamamı koşulmuş; tahmin üretilmedi. ${memoryStatus}`;
   const persistenceFailed = !locallySaved;
-  const dataHandlingMessage = "Eksik bilgiler tahmin edilmedi; seyrek veya birbiriyle uyuşmayan sinyallerin etkisi otomatik azaltıldı.";
+  const personalArchiveNote = personalArchiveRaceCount
+    ? `Kişisel bülten-sonuç arşivinizde ${personalArchiveRaceCount.toLocaleString("tr-TR")} doğrulanmış koşu var; yalnızca analiz tarihinden önceki eşleşmeler at, jokey, hipodrom, mesafe ve pist sinyallerine katılır.`
+    : "Eşleşmiş kişisel bülten-sonuç kaydı bulunmuyor; bu arşivden geçmiş sinyali eklenmedi.";
+  const dataHandlingMessage = `Eksik bilgiler tahmin edilmedi; seyrek veya birbiriyle uyuşmayan sinyallerin etkisi otomatik azaltıldı. ${personalArchiveNote}`;
   showMessage(warning, `${statusMessage} ${dataHandlingMessage}${shadowStatus ? ` ${shadowStatus}` : ""}`, persistenceFailed ? "error" : "success");
   const budget = parseNumber($("butceInput").value);
   const unit = parseNumber($("birimInput").value);
@@ -1836,11 +1864,8 @@ async function syncHistoricalArchive() {
       archive.push(...page);
       if (page.length < pageSize) break;
     }
-    classHistoryArchive = window.RaceClassHistory.createIndex(archive);
-    raceRelationArchive = window.RaceRelations.createIndex(archive);
-    raceContextArchive = window.RaceContextPerformance.createIndex(archive);
-    pedigreeHistoryArchive = window.RacePedigreeHistory.createIndex(archive);
-    scoreCache = new WeakMap();
+    syncedRaceHistoryRows = archive;
+    rebuildHistoricalIndexes();
     const converted = archive.map(archiveRowToOutcome).filter(Boolean);
     let freshCount = 0;
     let correctedCount = 0;
@@ -2070,8 +2095,11 @@ async function saveResultForCorrection(submission, message, matchingStatus = "aw
   const preserved = { ...submission, matchingStatus, matchingNote: message };
   state.bulletins = [...state.bulletins.filter((item) => item.id !== submission.id), preserved];
   const persistence = await persistResultAndClearDraft();
+  if (persistence.saved) rebuildHistoricalIndexes();
   const statusMessage = persistence.saved
-    ? `✅ Sonuç hafızaya kaydedildi. Ancak karşılaştırma ve öğrenme yapılmadı: ${message} Sonuç arşivde saklandı; ekran temizlendi. ${resultPersistenceNote(persistence)}`
+    ? matchingStatus === "program_matched_no_prediction"
+      ? `Sonuç hafızaya kaydedildi ve normal bülten arşiviyle eşleşti. ${message} Sonuç arşivde saklandı; ekran temizlendi. ${resultPersistenceNote(persistence)}`
+      : `✅ Sonuç hafızaya kaydedildi. Ancak tahmin karşılaştırması yapılmadı: ${message} Sonuç arşivde saklandı; ekran temizlendi. ${resultPersistenceNote(persistence)}`
     : `❌ Sonuç hafızaya kaydedilemedi: ${message} Metin kaybolmaması için kutuda bırakıldı. ${resultPersistenceNote(persistence)}`;
   showMessage($("ogrenmeLogAlani"), statusMessage, persistence.saved ? "success" : "error");
   updateMemory();
@@ -2137,24 +2165,47 @@ async function compareResults() {
   const inferredContext = inferResultPredictionContext(parsed.races);
   const selectedContext = $("resultsContextInput")?.selectedOptions[0];
   const manuallySelected = Boolean(selectedContext?.dataset.date && $("resultsContextInput").closest("details")?.open);
-  const resultDate = manuallySelected ? selectedContext.dataset.date : inferredContext?.date || "";
-  const resultCity = manuallySelected ? normalize(selectedContext.dataset.city) : normalize(inferredContext?.city || "");
+  const requestedDate = manuallySelected ? selectedContext.dataset.date : inferredContext?.date || $("resultsDateInput").value || archivedSubmission.date || "";
+  const requestedCity = manuallySelected ? selectedContext.dataset.city : inferredContext?.city || $("resultsCityInput").value.trim() || archivedSubmission.city || "";
+  const parseSavedRaces = (text) => window.RaceParser.parseRaces(text);
+  let programContext = window.PersonalRaceArchive.findProgramContext(parsed.races, state.bulletins, parseSavedRaces, {
+    date: requestedDate,
+    city: requestedCity,
+    resultBulletin: archivedSubmission
+  });
+  if (!programContext && !manuallySelected) {
+    programContext = window.PersonalRaceArchive.findProgramContext(parsed.races, state.bulletins, parseSavedRaces, { resultBulletin: archivedSubmission });
+  }
+  const resultDate = manuallySelected ? selectedContext.dataset.date : programContext?.date || inferredContext?.date || requestedDate;
+  const resolvedCity = manuallySelected ? selectedContext.dataset.city : programContext?.city || inferredContext?.city || requestedCity;
+  const resultCity = normalize(resolvedCity);
   if (!resultDate) {
     const resultsHelp = state.predictions.length
-      ? "Sonuç hafızaya işlendi; tahminlerle eşleşen tarih bulunamadı. Eşleşme belirsizse doğru analizi elle seçin."
-      : "Sonuç hafızaya işlendi; kayıtlı tahmin bulunamadı. Tahminlerin olduğu hesapla giriş yapın veya yedeği yükleyin.";
+      ? "Sonuç hafızaya işlendi; tahmin veya normal bülten arşiviyle kesin tarih/hipodrom eşleşmesi bulunamadı. Eşleşme belirsizse arşiv bağlamını elle seçin."
+      : "Sonuç hafızaya işlendi; tahmin veya eşleşen normal bülten arşivi bulunamadı. Aynı hesapta bülten arşivini kontrol edin ya da doğru tarih ve hipodromu seçin.";
     await saveResultForCorrection(archivedSubmission, resultsHelp, "awaiting_match");
     return;
   }
   $("resultsDateInput").value = resultDate;
-  $("resultsCityInput").value = inferredContext?.city || selectedContext?.dataset.city || "";
-  renderResultsContextOptions(resultDate, $("resultsCityInput").value);
-  archivedSubmission = { ...archivedSubmission, date: resultDate, city: $("resultsCityInput").value.trim(), matchingStatus: "awaiting_prediction_match" };
+  $("resultsCityInput").value = resolvedCity;
+  renderResultsContextOptions(resultDate, resolvedCity);
+  archivedSubmission = {
+    ...archivedSubmission,
+    date: resultDate,
+    city: resolvedCity.trim(),
+    matchingStatus: "awaiting_prediction_match",
+    ...(programContext ? { matchedProgramBulletinId: programContext.bulletinId, matchedProgramRaceCount: programContext.matchedRaceCount } : {})
+  };
   state.bulletins = state.bulletins.map((item) => item.id === archivedSubmission.id ? archivedSubmission : item);
   await saveState();
   const matchingPredictions = state.predictions.filter((item) => item.date === resultDate && normalize(item.city || "") === resultCity);
   if (!matchingPredictions.length) {
-    await saveResultForCorrection(archivedSubmission, "Sonuç arşivlendi ancak seçilen analiz için kayıtlı tahmin bulunamadı. Öğrenme güncellenmedi; doğru analizi seçip yeniden deneyin.", "awaiting_prediction_match");
+    if (programContext?.rows.length) {
+      const matchedMessage = `${programContext.matchedRaceCount}/${parsed.races.length} koşu normal bültenle tarih, hipodrom, koşu numarası ve at no+isim üzerinden doğrulandı. Bu koşuların at, jokey, hipodrom, mesafe, pist ve yarış sonuçları sonraki kurgularda kullanılacak; kayıtlı tahmin olmadığı için tahmin isabeti veya model ağırlığı güncellenmedi.`;
+      await saveResultForCorrection(archivedSubmission, matchedMessage, "program_matched_no_prediction");
+    } else {
+      await saveResultForCorrection(archivedSubmission, "Sonuç arşivlendi ancak kayıtlı tahmin ya da atları doğrulanabilen normal bülten bulunamadı. Sonuç korunuyor; yanlış bültenle otomatik eşleşme yapılmadı ve tahmin öğrenmesi güncellenmedi.", "awaiting_prediction_match");
+    }
     return;
   }
   for (const coupon of state.coupons) {
