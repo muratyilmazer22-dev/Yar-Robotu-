@@ -16,27 +16,32 @@ function createModelMemoryHandler({ database } = {}) {
       const [archive] = await activeDatabase.select({
         raceCount: sql`count(*)::int`,
         completedRaceCount: sql`count(*) FILTER (WHERE CASE WHEN jsonb_typeof(${raceHistory.results}->'runners') = 'array' THEN jsonb_array_length(${raceHistory.results}->'runners') > 0 ELSE false END)::int`,
+        distinctRaceDays: sql`count(DISTINCT ${raceHistory.raceDate})::int`,
         firstDate: sql`min(${raceHistory.raceDate})`,
         lastDate: sql`max(${raceHistory.raceDate})`
       }).from(raceHistory);
       const [automaticModel] = await activeDatabase.select({ memoryValue: robotMemory.memoryValue }).from(robotMemory).where(eq(robotMemory.memoryKey, MODEL_KEY)).limit(1);
-      const recentTrainingRuns = await activeDatabase.select({
+      const trainingRunFields = {
         id: modelTrainingRuns.id,
         modelVersion: modelTrainingRuns.modelVersion,
         trainedAt: modelTrainingRuns.trainedAt,
         sampleCounts: modelTrainingRuns.sampleCounts,
         metrics: modelTrainingRuns.metrics,
         accepted: modelTrainingRuns.accepted
-      }).from(modelTrainingRuns).where(eq(modelTrainingRuns.modelVersion, MODEL_VERSION)).orderBy(desc(modelTrainingRuns.trainedAt)).limit(5);
+      };
+      const [latestTrainingRun] = await activeDatabase.select(trainingRunFields).from(modelTrainingRuns).orderBy(desc(modelTrainingRuns.trainedAt)).limit(1);
+      const recentTrainingRuns = await activeDatabase.select(trainingRunFields).from(modelTrainingRuns).where(eq(modelTrainingRuns.modelVersion, MODEL_VERSION)).orderBy(desc(modelTrainingRuns.trainedAt)).limit(5);
       const value = {
-        version: 2,
-        source: 'official-tjk-archive+verified-shadow-signals',
+        version: 3,
+        source: 'official-tjk-archive',
         model: automaticModel?.memoryValue?.model || MODEL_VERSION,
         raceCount: Number(archive.raceCount || 0),
         completedRaceCount: Number(archive.completedRaceCount || 0),
+        distinctRaceDays: Number(archive.distinctRaceDays || 0),
         firstDate: archive.firstDate || null,
         lastDate: archive.lastDate || null,
         automaticModel: automaticModel?.memoryValue || null,
+        latestTrainingRun: latestTrainingRun || null,
         recentTrainingRuns,
         refreshedAt: new Date().toISOString()
       };

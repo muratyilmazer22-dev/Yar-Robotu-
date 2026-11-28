@@ -443,10 +443,17 @@ let latestModelTrainingRun = null;
 function modelRefreshRunText(run = latestModelTrainingRun) {
   if (!run) return "zamanlanmış yenileme kaydı yok";
   const status = run.metrics?.status;
-  const label = status === "completed" ? "tamamlandı" : status === "failed" ? "başarısız" : status === "running" ? "çalışıyor" : "eski kayıt";
+  const accepted = run.accepted === true || run.metrics?.accepted === true;
+  const label = status === "completed"
+    ? accepted ? "tamamlandı ve doğrulamayla kabul edildi" : "tamamlandı; yeni ağırlık kabul edilmedi"
+    : status === "failed" ? "başarısız" : status === "running" ? "çalışıyor" : "eski kayıt";
   const date = new Date(run.trainedAt);
-  const timestamp = Number.isNaN(date.getTime()) ? "zaman bilinmiyor" : date.toLocaleString("tr-TR");
-  return `${label} · ${timestamp}${run.metrics?.failureCode ? ` · ${run.metrics.failureCode}` : ""}`;
+  const timestamp = Number.isNaN(date.getTime()) ? "zaman bilinmiyor" : date.toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" });
+  const version = run.modelVersion === MODEL_VERSION ? "mevcut sürüm" : "önceki sürüm";
+  const eligible = Number(run.sampleCounts?.eligible);
+  const eligibleText = Number.isFinite(eligible) ? ` · ${eligible} arşiv koşusu tarandı` : "";
+  const reason = run.metrics?.reason ? ` · ${run.metrics.reason}` : "";
+  return `${label} · ${timestamp} · ${version}${eligibleText}${reason}${run.metrics?.failureCode ? ` · ${run.metrics.failureCode}` : ""}`;
 }
 function sharedModelReportText() {
   const model = sharedAutomaticModel;
@@ -989,6 +996,20 @@ function showMessage(target, text, type = "") {
   target.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
   target.innerHTML = `<div class="alert ${type}">${escapeHtml(text)}</div>`;
   target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+function renderDeterministicModelInventory() {
+  const summary = $("deterministicInventorySummary");
+  const list = $("modelFeatureList");
+  if (!summary || !list || !window.RaceScoring?.BASE_WEIGHTS) return;
+  const weights = window.RaceScoring.BASE_WEIGHTS;
+  const labels = window.RaceScoring.FEATURE_LABELS || {};
+  const features = Object.keys(weights);
+  summary.textContent = `1 deterministik sıralama motoru · ${features.length} ağırlıklı analiz ölçütü · 1 günlük arşiv öğrenme görevi · 1 altılı bütçe optimizasyonu. Ayrı veya üretken yapay zekâ ajanı kullanılmaz.`;
+  list.replaceChildren(...features.map((feature) => {
+    const item = document.createElement("li");
+    item.textContent = labels[feature] || feature;
+    return item;
+  }));
 }
 function setTab(name, { focus = false, scroll = true } = {}) {
   const target = document.getElementById(`panel-${name}`);
@@ -1712,8 +1733,16 @@ async function refreshRemoteMemory() {
     const memory = await response.json();
     if (!response.ok) throw new Error(memory.error || "Neon hafızası alınamadı.");
   sharedAutomaticModel = memory.automaticModel && typeof memory.automaticModel === "object" ? memory.automaticModel : null;
-  latestModelTrainingRun = Array.isArray(memory.recentTrainingRuns) ? memory.recentTrainingRuns[0] || null : null;
+  latestModelTrainingRun = memory.latestTrainingRun || (Array.isArray(memory.recentTrainingRuns) ? memory.recentTrainingRuns[0] || null : null);
   renderTrainingReport();
+  const modelLearningStatus = $("modelLearningStatus");
+  if (modelLearningStatus) {
+    const completed = Number(memory.completedRaceCount || 0).toLocaleString("tr-TR");
+    const days = Number(memory.distinctRaceDays || 0);
+    const freshness = latestModelTrainingRun?.modelVersion === MODEL_VERSION ? "Bu uygulama sürümünde" : "Önceki model sürümünde";
+    const waiting = days < 18 ? ` Arşivde ${days}/18 ayrı yarış günü var; ileri-tarih eğitim ve doğrulama dilimleri henüz oluşmadığı için model ağırlıkları korunuyor.` : " Arşiv, ileri-tarih dilimleri için gereken ayrı gün eşiğini karşılıyor.";
+    modelLearningStatus.textContent = `${completed} sonuçlu arşiv koşusu · ${memory.firstDate || "—"}–${memory.lastDate || "—"}. Son zamanlanmış iş: ${modelRefreshRunText()} (${freshness}).${waiting}`;
+  }
     const automated = sharedAutomaticModel;
   const automatedStatus = automated?.report?.updated
     ? " · geçmiş arşive dayalı ortak model ileri tarih doğrulamasını geçti (kişisel tahminlerde kullanılmıyor)"
@@ -2743,6 +2772,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     state = loadLegacyState();
     restoreFailed = true;
   }
+  renderDeterministicModelInventory();
   initializeMemoryNotes();
   void initializeFirebaseMemory();
   window.addEventListener("beforeinstallprompt", (event) => {

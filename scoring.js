@@ -297,5 +297,5 @@
     }).sort((a, b) => b.modelShare - a.modelShare);
   }
 
-  return { DEFAULT_DNA, BASE_WEIGHTS, normalizeName, distanceBand, raceContextKeys, weightedFeatureScore, weightedFeatureScoreGradient, softmaxScores, analyzeRace };
+  return { DEFAULT_DNA, BASE_WEIGHTS, FEATURE_LABELS, normalizeName, distanceBand, raceContextKeys, weightedFeatureScore, weightedFeatureScoreGradient, softmaxScores, analyzeRace };
 });
